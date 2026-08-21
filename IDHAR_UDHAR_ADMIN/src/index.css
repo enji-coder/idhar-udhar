@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  max-width: 100%;
+}
+
+body {
+  margin: 0;
+  @apply bg-canvas text-ink;
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+.glass-card {
+  border-radius: 20px;
+  border: 1px solid rgba(220, 239, 242, 0.95);
+  background: #ffffff;
+  box-shadow: 0 12px 35px rgba(24, 207, 232, 0.12), 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.glass-panel {
+  border-radius: 20px;
+  border: 1px solid rgba(220, 239, 242, 0.9);
+  background: #ffffff;
+  box-shadow: 0 12px 35px rgba(24, 207, 232, 0.12), 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.page-shell {
+  background: linear-gradient(180deg, #f1fcfd 0%, #ffffff 58%, #f5fcfd 100%);
+}
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.rise-in {
+  animation: riseIn 0.5s ease both;
+}
+
+.admin-app {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.admin-workspace {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-header {
+  z-index: 20;
+  isolation: isolate;
+  background: #f5fcfd;
+  border-bottom: 1px solid rgba(220, 239, 242, 0.9);
+}
+
+.admin-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@media (max-width: 767px) {
+  .admin-app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.invoice-sheet {
+  background: #ffffff;
+  color: #0f1f3d;
+  box-shadow: 0 18px 50px rgba(15, 31, 61, 0.12);
+}

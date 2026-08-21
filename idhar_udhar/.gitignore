@@ -1,0 +1,101 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code (uncomment to ignore local settings)
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+.packages
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Generated installers (source repo only — do not commit APKs)
+*.apk
+*.aab
+*.apks
+
+# Generated code
+*.g.dart
+*.freezed.dart
+*.config.dart
+
+# Coverage
+coverage/
+*.lcov
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+key.properties
+**/google-services.json
+**/GoogleService-Info.plist
+lib/firebase_options.dart
+
+# Local secrets directory — never commit real credentials.
+# README and *.example templates may be tracked so another machine
+# can recreate the folder layout.
+/secrets/**
+!/secrets/README.md
+!/secrets/**/
+!/secrets/**/*.example
+
+# Firebase local
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Platform build artifacts
+**/android/.gradle/
+**/android/local.properties
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/windows/flutter/ephemeral/
+
+# FVM
+.fvm/flutter_sdk
+
+# Exceptions — keep empty asset dirs tracked
+!assets/**/.gitkeep
+!lib/**/.gitkeep
+!docs/**/.gitkeep

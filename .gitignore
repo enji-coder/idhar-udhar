@@ -1,0 +1,49 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# Dependencies, build output, caches
+node_modules/
+dist/
+dist-ssr/
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+**/build/
+coverage/
+.netlify/
+.firebase/
+*.log
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android / iOS generated
+**/android/.gradle/
+**/android/local.properties
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+*.apk
+*.aab
+*.apks
+
+# Genuine secrets — keep locally, never upload
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.jks
+*.keystore
+key.properties
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart
+
+# Local account/password dump (not project documentation)
+Project_Documentation/000_info.txt

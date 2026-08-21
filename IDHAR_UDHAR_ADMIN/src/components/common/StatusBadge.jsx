@@ -1,0 +1,91 @@
+const styles = {
+  Delivered: 'bg-emerald-50 text-emerald-700',
+  'In Transit': 'bg-sky-50 text-sky-700',
+  'In Progress': 'bg-sky-50 text-sky-700',
+  Pending: 'bg-amber-50 text-amber-700',
+  Assigned: 'bg-indigo-50 text-indigo-700',
+  'Rider Arriving': 'bg-cyan-50 text-cyan-700',
+  'Picked Up': 'bg-blue-50 text-blue-700',
+  Cancelled: 'bg-red-50 text-danger',
+  Active: 'bg-emerald-50 text-emerald-700',
+  Busy: 'bg-amber-50 text-amber-700',
+  Offline: 'bg-slate-100 text-slate-600',
+  Approved: 'bg-emerald-50 text-emerald-700',
+  Rejected: 'bg-red-50 text-danger',
+  Correction: 'bg-amber-50 text-amber-700',
+  Success: 'bg-emerald-50 text-emerald-700',
+  Failed: 'bg-red-50 text-danger',
+  Refunded: 'bg-violet-50 text-violet-700',
+  Paid: 'bg-emerald-50 text-emerald-700',
+  Processing: 'bg-sky-50 text-sky-700',
+  Open: 'bg-rose-50 text-rose-700',
+  Waiting: 'bg-amber-50 text-amber-700',
+  Resolved: 'bg-emerald-50 text-emerald-700',
+  Closed: 'bg-slate-100 text-slate-600',
+  Live: 'bg-emerald-50 text-emerald-700',
+  Scheduled: 'bg-sky-50 text-sky-700',
+  Expired: 'bg-slate-100 text-slate-600',
+  Expiring: 'bg-amber-50 text-amber-700',
+  Submitted: 'bg-sky-50 text-sky-700',
+  Missing: 'bg-rose-50 text-rose-700',
+  Blurry: 'bg-amber-50 text-amber-700',
+  Mismatch: 'bg-rose-50 text-rose-700',
+  Repeat: 'bg-brand-50 text-brand-700',
+  New: 'bg-cyan-50 text-cyan-700',
+  High: 'bg-rose-50 text-rose-700',
+  Medium: 'bg-amber-50 text-amber-700',
+  Low: 'bg-slate-100 text-slate-600',
+  Admin: 'bg-brand-50 text-brand-700',
+  Manager: 'bg-indigo-50 text-indigo-700',
+  Operations: 'bg-sky-50 text-sky-700',
+  Finance: 'bg-cyan-50 text-cyan-800',
+  Support: 'bg-violet-50 text-violet-700',
+  'Super Admin': 'bg-brand-50 text-brand-700',
+  Inactive: 'bg-slate-100 text-slate-600',
+  Suspended: 'bg-rose-50 text-rose-700',
+  Searching: 'bg-amber-50 text-amber-700',
+  Available: 'bg-emerald-50 text-emerald-700',
+  Unassigned: 'bg-slate-100 text-slate-600',
+  Accepted: 'bg-indigo-50 text-indigo-700',
+  Created: 'bg-slate-100 text-slate-600',
+  Verified: 'bg-emerald-50 text-emerald-700',
+  'Pending Verification': 'bg-amber-50 text-amber-700',
+  Maintenance: 'bg-amber-50 text-amber-700',
+  Draft: 'bg-slate-100 text-slate-600',
+  Published: 'bg-emerald-50 text-emerald-700',
+  Sent: 'bg-emerald-50 text-emerald-700',
+  Issued: 'bg-sky-50 text-sky-700',
+  Overdue: 'bg-rose-50 text-rose-700',
+  Credit: 'bg-emerald-50 text-emerald-700',
+  Debit: 'bg-amber-50 text-amber-700',
+  Refund: 'bg-violet-50 text-violet-700',
+  Adjustment: 'bg-cyan-50 text-cyan-800',
+  Valid: 'bg-emerald-50 text-emerald-700',
+  'Out for Delivery': 'bg-cyan-50 text-cyan-700',
+  'Delivery Pending': 'bg-amber-50 text-amber-700',
+  'In-Transit': 'bg-sky-50 text-sky-700',
+  'Failed / Returned': 'bg-red-50 text-danger',
+  'Expiring Soon': 'bg-amber-50 text-amber-700',
+  Customer: 'bg-cyan-50 text-cyan-700',
+  Rider: 'bg-indigo-50 text-indigo-700',
+  Returning: 'bg-brand-50 text-brand-700',
+  'Sub Admin': 'bg-slate-100 text-slate-700',
+  Payout: 'bg-indigo-50 text-indigo-700',
+  'Delivery Earning': 'bg-emerald-50 text-emerald-700',
+  Delayed: 'bg-rose-50 text-rose-700',
+};
+
+export default function StatusBadge({ status }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        styles[status] || 'bg-slate-100 text-slate-600'
+      }`}
+    >
+      {['In Transit', 'In-Transit', 'Out for Delivery', 'Rider Arriving', 'Picked Up', 'Busy', 'Live'].includes(status) ? (
+        <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulseDot" />
+      ) : null}
+      {status}
+    </span>
+  );
+}

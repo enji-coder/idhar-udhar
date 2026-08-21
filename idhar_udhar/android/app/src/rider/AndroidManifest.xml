@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Rider-only: Android 13+ notifications for order alerts. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Rider-only: special overlay permission (opened via system settings). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Rider launcher: both icon and roundIcon must be the NEW Rider artwork.
+         Many Android launchers display roundIcon on the home screen, while the
+         package installer displays android:icon. -->
+    <application
+        android:icon="@mipmap/ic_launcher_rider"
+        android:roundIcon="@mipmap/ic_launcher_rider"
+        tools:replace="android:icon,android:roundIcon" />
+</manifest>

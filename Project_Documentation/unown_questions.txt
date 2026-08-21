@@ -1,0 +1,34 @@
+17. Unknowns / Questions
+Questions We Need To Decide Later
+These cannot be determined from the Customer App code:
+
+Source of truth for vehicles: Admin VehicleCategory vs customer MockVehicle (pricing lives only on mock vehicles).
+Is Scooty a real sellable type or only a mock extra? Admin fallback has no Scooty.
+Are Car / Pickup / Tempo / Large Tempo customer-bookable? Legacy/admin lists disagree with home’s 3 families.
+COD: collect cash at pickup or drop? Does it change fare? Why is it not on the order?
+Who pays when not COD? Wallet, UPI at confirm, post-paid? Confirm has no payment step.
+Tax 5% + platform ₹10: real GST rules, SAC codes, invoice legal fields?
+distanceCharge from weight: is production distance-based? Maps/routing provider?
+Fragile ₹30: official surcharge or demo only?
+Two-wheeler “36 CM” limit: enforce vs size IDs (Small is 30 cm, Medium 60 cm)?
+Scheduled booking: keep scheduledAt or remove? No UI.
+OTP length/provider/expiry/attempt limits (UI is 4 digits dummy).
+Can phone number ever be changed? Edit Profile forbids it.
+Email: optional in profile vs mandatory before tracking — which is product law?
+Cancel after assigned vs after accepted: who is charged?
+No-rider-found / failed delivery / return-to-sender — no statuses.
+Live tracking: GPS interval, privacy, who publishes location?
+Call rider: in-app mask vs raw number (MockRider.phone exists).
+Chat: implied by Message button; no model.
+Notifications: types, channels (push vs in-app), retention.
+Rating: 1–5, optional comment, rider vs order? Stars are decorative.
+Invoice: PDF storage, GSTIN, legal entity, send vs download.
+Wallet: KYC, min/max top-up, whether deliveries debit wallet.
+Promo vs referral ₹200 vs “Promotional credit ₹50”.
+Address uniqueness: multiple Homes? SharedAddresses not per-user today.
+Pickup contact / receiver phone — not collected; needed for logistics?
+Multi-stop / round trip — not in app.
+City launch / serviceability — dummy cities mixed (Ahmedabad + Surat).
+Order ID format beyond IU-….
+Firebase vs PostgreSQL vs both — customer code does not choose (Firebase placeholder only).
+Whether booking draft should persist across app kill. Currently no.

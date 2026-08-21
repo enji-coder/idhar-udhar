@@ -1,0 +1,9 @@
+# Rider flavor only. Do not run the default pubspec flutter_launcher_icons
+# config — that one is the Customer icon.
+flutter_launcher_icons:
+  android: "ic_launcher_rider"
+  ios: false
+  image_path: "assets/rider/logos/rider_app_icon.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/rider/logos/rider_app_icon.png"
+  min_sdk_android: 21
