@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
 
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -21,6 +24,14 @@ class OrdersScreen extends ConsumerStatefulWidget {
 
 class _OrdersScreenState extends ConsumerState<OrdersScreen> {
   String _filter = 'All';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(sessionProvider.notifier).refreshOrders());
+    });
+  }
 
   bool _matches(MockOrder order) {
     switch (_filter) {
@@ -119,7 +130,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          Text(order.id,
+                                          Text(order.displayLabel,
                                               style: AppTextStyles.bodyMedium),
                                           Text(
                                             '${order.routeLabel}',

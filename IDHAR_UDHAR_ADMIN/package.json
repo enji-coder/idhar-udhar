@@ -8,6 +8,7 @@
     "dev:netlify": "npx netlify-cli dev",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "node --test src/api/mappers.spec.js src/api/errors.spec.js src/config/permissions.spec.js",
     "preview": "vite preview"
   },
   "dependencies": {

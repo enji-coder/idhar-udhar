@@ -22,9 +22,9 @@ class OrderDetailsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    MockOrder? order;
+    MockOrder? order = ref.read(sessionProvider.notifier).orderById(orderId);
     for (final o in ref.watch(sessionProvider).orders) {
-      if (o.id == orderId) {
+      if (o.id == orderId || o.backendOrderId == orderId || o.displayId == orderId) {
         order = o;
         break;
       }

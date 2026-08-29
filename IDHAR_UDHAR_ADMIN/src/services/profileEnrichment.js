@@ -18,6 +18,29 @@ function pad(value, length) {
 }
 
 export function enrichRiderProfile(rider = {}) {
+  if (rider.source === 'api') {
+    return {
+      ...rider,
+      email: rider.email || NA,
+      address: rider.address || rider.zone || NA,
+      pincode: rider.pincode || NA,
+      emergencyContact: rider.emergencyContact || rider.phone || NA,
+      onboardingDate: rider.joined || rider.onboardingDate || NA,
+      joined: rider.joined || NA,
+      drivingLicenseNumber: rider.drivingLicenseNumber || NA,
+      licenseExpiry: rider.licenseExpiry || NA,
+      aadhaarNumber: rider.aadhaarNumber || NA,
+      aadhaarMasked: rider.aadhaarNumber ? maskAadhaar(rider.aadhaarNumber) : NA,
+      panNumber: rider.panNumber || NA,
+      panMasked: rider.panNumber ? maskPan(rider.panNumber) : NA,
+      bankAccountNumber: rider.bankAccountNumber || NA,
+      bankMasked: rider.bankAccountNumber ? maskBankAccount(rider.bankAccountNumber) : NA,
+      ifscCode: rider.ifscCode || NA,
+      ifscMasked: rider.ifscCode ? maskIfsc(rider.ifscCode) : NA,
+      rcNumber: rider.rcNumber || rider.vehicleNumber || NA,
+      documents: rider.documents || {},
+    };
+  }
   const n = seedFrom(rider.id || rider.name);
   const aadhaar = rider.aadhaarNumber || `9999${pad(n % 100000000, 8)}`;
   const pan = rider.panNumber || `BK${String.fromCharCode(65 + (n % 26))}${String.fromCharCode(65 + ((n >> 4) % 26))}P${pad(1000 + (n % 9000), 4)}F`;
@@ -76,6 +99,17 @@ function defaultDocumentStatus(rider, key) {
 }
 
 export function riderDocumentsFor(rider = {}) {
+  if (rider.source === 'api') {
+    const status = rider.approval === 'APPROVED' || rider.kyc === 'APPROVED' ? 'Verified' : 'Pending';
+    return [
+      { key: 'drivingLicense', label: 'Driving License', number: NA, status },
+      { key: 'rc', label: 'RC', number: NA, status },
+      { key: 'aadhaar', label: 'Aadhaar', number: NA, status, redacted: true },
+      { key: 'pan', label: 'PAN', number: NA, status },
+      { key: 'bank', label: 'Bank document', number: NA, status },
+      { key: 'photo', label: 'Profile photo', number: NA, status },
+    ];
+  }
   const profile = enrichRiderProfile(rider);
   return [
     { key: 'drivingLicense', label: 'Driving License', number: profile.drivingLicenseNumber, status: defaultDocumentStatus(profile, 'drivingLicense') },
@@ -100,6 +134,17 @@ export function enrichCustomerProfile(customer = {}) {
 }
 
 export function enrichVehicleRecord(vehicle = {}, rider) {
+  if (rider?.source === 'api' && !vehicle.number && !vehicle.rcNumber && !rider.vehicleNumber) {
+    return {
+      ...vehicle,
+      number: '',
+      rcNumber: NA,
+      category: rider.vehicle || NA,
+      type: rider.vehicle || NA,
+      brand: '',
+      model: NA,
+    };
+  }
   const type = vehicle.category || vehicle.type || rider?.vehicle || 'Bike';
   const twoWheeler = type === 'Bike' || type === 'Scooter';
   const number = vehicle.rcNumber || vehicle.number || rider?.vehicleNumber || '';

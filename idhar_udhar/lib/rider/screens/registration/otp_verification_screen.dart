@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+
 import '../../data/dummy/dummy_rider_data.dart';
-import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/local/rider_permissions.dart';
 import '../../routing/rider_otp_args.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -69,45 +71,79 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   }
 
   Future<void> _verify() async {
-    final repo = ref.read(dummyRiderRepositoryProvider);
     setState(() {
       _verifying = true;
       _error = null;
     });
-    await repo.simulateLatency();
-    if (!mounted) return;
-    if (!repo.validateOtp(_otp)) {
+    try {
+      final String phone =
+          (widget.mobile ?? '').replaceAll(RegExp(r'\D'), '');
+      if (phone.length == 10) {
+        ref.read(riderSessionProvider.notifier).bindPhone(phone);
+      }
+      await ref.read(riderSessionProvider.notifier).verifyOtp(_otp);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _verifying = false);
+      if (widget.flow == RiderAuthFlow.login) {
+        await riderEnterAfterAuth(context);
+      } else {
+        unawaited(context.push(RiderRoutes.profileSetup));
+      }
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _verifying = false;
-        _error = 'Invalid OTP. Demo OTP is ${DummyRiderData.otp}';
+        _error = error.message;
       });
-      return;
-    }
-    setState(() => _verifying = false);
-
-    if (widget.flow == RiderAuthFlow.login) {
-      await riderEnterAfterAuth(context);
-    } else {
-      // New rider registration continues onboarding.
-      unawaited(context.push(RiderRoutes.profileSetup));
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _verifying = false;
+        _error = 'Invalid OTP. Please try again.';
+      });
     }
   }
 
-  void _resend() {
-    if (_seconds > 0) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: RiderColors.secondary,
-        content: Text(
-          'OTP resent (demo): ${DummyRiderData.otp}',
-          style: RiderTextStyles.bodyMedium.copyWith(
-            color: RiderColors.textOnPrimary,
+  Future<void> _resend() async {
+    if (_seconds > 0) {
+      return;
+    }
+    try {
+      final String phone =
+          (widget.mobile ?? '').replaceAll(RegExp(r'\D'), '');
+      await ref.read(riderSessionProvider.notifier).requestOtp(
+            phone.length == 10 ? phone : ref.read(riderSessionProvider).phone,
+          );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: RiderColors.secondary,
+          content: Text(
+            'A new code was sent.',
+            style: RiderTextStyles.bodyMedium.copyWith(
+              color: RiderColors.textOnPrimary,
+            ),
           ),
         ),
-      ),
-    );
-    _startTimer();
+      );
+      _startTimer();
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
   }
 
   @override

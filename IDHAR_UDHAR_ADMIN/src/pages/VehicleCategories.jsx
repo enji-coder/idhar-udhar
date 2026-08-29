@@ -1,5 +1,5 @@
 import { Eye, Pencil, Plus, Power, Trash2 } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import Button from '../components/common/Button';
@@ -8,6 +8,7 @@ import DataTable from '../components/common/DataTable';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import Drawer from '../components/common/Drawer';
 import EmptyState from '../components/common/EmptyState';
+import ErrorState from '../components/common/ErrorState';
 import Field, { inputClass } from '../components/common/Field';
 import GlassCard from '../components/common/GlassCard';
 import Modal from '../components/common/Modal';
@@ -16,7 +17,6 @@ import { TableSkeleton } from '../components/common/Skeleton';
 import StatusBadge from '../components/common/StatusBadge';
 import Toast from '../components/common/Toast';
 import PageContainer from '../components/layout/PageContainer';
-import useMockLoader from '../hooks/useMockLoader';
 import usePanelState from '../hooks/usePanelState';
 import useQueryAction from '../hooks/useQueryAction';
 import useStore from '../hooks/useStore';
@@ -49,13 +49,28 @@ const emptyCategory = {
 
 export default function VehicleCategories() {
   const { searchQuery } = useOutletContext() || {};
-  const loading = useMockLoader();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const rows = useStore(vehicleCategoryStore);
   const panel = usePanelState(emptyCategory);
   useQueryAction('add', panel.openCreate);
 
   useEffect(() => {
-    syncVehicleCategories();
+    let cancelled = false;
+    setLoading(true);
+    syncVehicleCategories()
+      .then(() => {
+        if (!cancelled) setLoadError(null);
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const data = useMemo(() => {
@@ -63,26 +78,50 @@ export default function VehicleCategories() {
     return rows.filter((row) => `${row.id} ${row.name} ${row.status}`.toLowerCase().includes(query));
   }, [rows, searchQuery]);
 
-  function save() {
-    const result = saveVehicleCategory(panel.form);
-    panel.setErrors(result.issues || {});
-    if (!result.ok) return;
-    panel.setToast(panel.mode === 'edit' ? 'Vehicle category updated.' : 'Vehicle category added.');
-    panel.closeForm();
+  async function save() {
+    try {
+      const result = await saveVehicleCategory(panel.form);
+      panel.setErrors(result.issues || {});
+      if (!result.ok) return;
+      panel.setToast(panel.mode === 'edit' ? 'Vehicle category updated.' : 'Vehicle category added.');
+      panel.closeForm();
+    } catch (error) {
+      panel.setToast(error.message || 'Could not save vehicle category.');
+    }
   }
 
-  function confirmDelete() {
-    const result = deleteVehicleCategory(panel.confirm.id);
-    if (!result.ok) {
-      panel.setToast(result.message);
+  async function confirmDelete() {
+    try {
+      const result = await deleteVehicleCategory(panel.confirm.id);
+      if (!result.ok) {
+        panel.setToast(result.message);
+        panel.setConfirm(null);
+        return;
+      }
       panel.setConfirm(null);
-      return;
+      panel.setToast('Vehicle category deleted.');
+    } catch (error) {
+      panel.setToast(error.message || 'Could not delete vehicle category.');
+      panel.setConfirm(null);
     }
-    panel.setConfirm(null);
-    panel.setToast('Vehicle category deleted.');
   }
 
   if (loading) return <TableSkeleton />;
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Couldn't load vehicle categories"
+        description={loadError.message || 'The Admin Panel could not load vehicle categories from NestJS. Dummy records are not shown.'}
+        onRetry={() => {
+          setLoading(true);
+          syncVehicleCategories()
+            .then(() => setLoadError(null))
+            .catch((error) => setLoadError(error))
+            .finally(() => setLoading(false));
+        }}
+      />
+    );
+  }
 
   const columns = [
     { key: 'id', label: 'Category ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
@@ -100,10 +139,14 @@ export default function VehicleCategories() {
           <ActionButton
             icon={Power}
             tone={row.status === 'Active' ? 'danger' : 'approve'}
-            onClick={() => {
-              if (row.status === 'Active') deactivateVehicleCategory(row.id);
-              else activateVehicleCategory(row.id);
-              panel.setToast(row.status === 'Active' ? 'Vehicle category deactivated.' : 'Vehicle category activated.');
+            onClick={async () => {
+              try {
+                if (row.status === 'Active') await deactivateVehicleCategory(row.id);
+                else await activateVehicleCategory(row.id);
+                panel.setToast(row.status === 'Active' ? 'Vehicle category deactivated.' : 'Vehicle category activated.');
+              } catch (error) {
+                panel.setToast(error.message || 'Could not update vehicle category.');
+              }
             }}
           >
             {row.status === 'Active' ? 'Deactivate' : 'Activate'}
@@ -114,15 +157,14 @@ export default function VehicleCategories() {
     },
   ];
 
-  const usage = panel.view ? categoryUsage(panel.view.name) : null;
-  const confirmUsage = panel.confirm ? categoryUsage(panel.confirm.name) : null;
+  const confirmUsage = panel.confirm ? categoryUsage(panel.confirm) : null;
 
   return (
     <PageContainer className="space-y-4">
-      <PageHeader action={<Button icon={Plus} onClick={panel.openCreate}>+ Add Vehicle Category</Button>} />
+      <PageHeader action={<Button icon={Plus} onClick={panel.openCreate}>Add Vehicle Category</Button>} />
       <GlassCard className="overflow-hidden">
         {data.length === 0 ? (
-          <EmptyState title="No vehicle categories found" description="Add a vehicle category for riders and customers to select." action={<Button variant="secondary" onClick={panel.openCreate}>+ Add Vehicle Category</Button>} />
+          <EmptyState title="No records found" description="Add a vehicle category for riders and customers to select." action={<Button icon={Plus} variant="secondary" onClick={panel.openCreate}>Add Vehicle Category</Button>} />
         ) : (
           <DataTable columns={columns} data={data} pageSize={8} compact itemLabel="categories" mobileTitleKey="name" />
         )}
@@ -183,16 +225,20 @@ export default function VehicleCategories() {
         title={confirmUsage?.total ? 'Cannot delete this vehicle category' : 'Delete vehicle category?'}
         description={
           confirmUsage?.total
-            ? 'Cannot delete this vehicle category because it is currently being used. Please deactivate it instead.'
+            ? 'Cannot delete this vehicle category because it is already used by published fare data or other protected records. Please deactivate it instead.'
             : `${panel.confirm?.name} will be removed from selectable vehicle types.`
         }
         confirmLabel={confirmUsage?.total ? 'Deactivate instead' : 'Delete'}
         onClose={() => panel.setConfirm(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (confirmUsage?.total) {
-            deactivateVehicleCategory(panel.confirm.id);
-            panel.setConfirm(null);
-            panel.setToast('Vehicle category deactivated.');
+            try {
+              await deactivateVehicleCategory(panel.confirm.id);
+              panel.setConfirm(null);
+              panel.setToast('Vehicle category deactivated.');
+            } catch (error) {
+              panel.setToast(error.message || 'Could not deactivate vehicle category.');
+            }
             return;
           }
           confirmDelete();

@@ -1,64 +1,46 @@
-import { authenticateSubAdmin, sessionFromEmail } from './adminUsers';
+import { adminLogin, adminLogout, adminProfile, adminSession } from '../api/adminApi';
+import { clearTokens, hasRefreshToken } from '../api/client';
+import { mapAdminSession } from '../api/mappers';
+import { ApiError } from '../api/errors';
 
-const FUNCTION_BASE = '/.netlify/functions';
+const AUTH_FAILURE_CODES = new Set([
+  'UNAUTHENTICATED',
+  'INVALID_REFRESH_TOKEN',
+  'SESSION_REVOKED',
+  'SESSION_EXPIRED',
+  'INVALID_CREDENTIALS',
+]);
 
-async function readJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return {};
-  }
+function isAuthFailure(error) {
+  return error instanceof ApiError && (error.status === 401 || AUTH_FAILURE_CODES.has(error.code));
 }
 
 export async function fetchSession() {
-  const response = await fetch(`${FUNCTION_BASE}/admin-session`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  const data = await readJson(response);
-  if (response.ok && data.success) {
-    return sessionFromEmail(data.email);
-  }
+  if (!hasRefreshToken()) return null;
   try {
-    const raw = sessionStorage.getItem('iu_admin_local_session');
-    if (raw) return JSON.parse(raw);
-  } catch {
-    /* ignore */
+    await adminSession();
+    const profile = await adminProfile();
+    return mapAdminSession(profile);
+  } catch (error) {
+    if (isAuthFailure(error)) {
+      clearTokens();
+      return null;
+    }
+    throw error;
   }
-  return null;
 }
 
 export async function loginRequest({ email, password }) {
-  const local = authenticateSubAdmin(email, password);
-  if (local) {
-    sessionStorage.setItem('iu_admin_local_session', JSON.stringify(local));
-    return local;
-  }
-
-  const response = await fetch(`${FUNCTION_BASE}/admin-login`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await readJson(response);
-  if (!response.ok || !data.success) {
-    const error = new Error(data.message || 'Invalid email or password.');
-    error.code = 'INVALID_CREDENTIALS';
-    throw error;
-  }
-  sessionStorage.removeItem('iu_admin_local_session');
-  const session = await fetchSession();
-  if (!session) {
-    return sessionFromEmail(email);
-  }
-  return session;
+  await adminLogin(email, password);
+  await adminSession();
+  const profile = await adminProfile();
+  return mapAdminSession(profile);
 }
 
 export async function logoutRequest() {
-  sessionStorage.removeItem('iu_admin_local_session');
-  await fetch(`${FUNCTION_BASE}/admin-logout`, {
-    method: 'POST',
-    credentials: 'include',
-  });
+  try {
+    await adminLogout();
+  } catch (error) {
+    if (!(error instanceof ApiError)) clearTokens();
+  }
 }

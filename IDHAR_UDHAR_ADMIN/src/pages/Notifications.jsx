@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Eye, Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
@@ -17,13 +17,12 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import Toast from '../components/common/Toast';
 import PageHeader from '../components/common/PageHeader';
 import { PageSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
+import ErrorState from '../components/common/ErrorState';
 import useStore from '../hooks/useStore';
 import usePanelState from '../hooks/usePanelState';
 import useQueryAction from '../hooks/useQueryAction';
 import { campaignStore } from '../services/stores';
-import { notifications as inboxSeed } from '../data/mockData';
-import { nextId } from '../utils/ids';
+import { fetchAdminNotices, markAllNoticesRead, markNoticeRead } from '../api/adminApi';
 import { compactErrors, required } from '../utils/validation';
 
 const tabs = [
@@ -43,11 +42,35 @@ const emptyCampaign = {
 
 export default function Notifications() {
   const { searchQuery } = useOutletContext() || {};
-  const loading = useMockLoader();
   const campaigns = useStore(campaignStore);
-  const [tab, setTab] = useState('campaigns');
-  const [inbox, setInbox] = useState(inboxSeed);
+  const [tab, setTab] = useState('inbox');
+  const [inbox, setInbox] = useState([]);
+  const [inboxError, setInboxError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const panel = usePanelState(emptyCampaign);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchAdminNotices()
+      .then((rows) => {
+        if (!cancelled) {
+          setInbox(rows);
+          setInboxError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setInbox([]);
+          setInboxError(error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useQueryAction('add', panel.openCreate);
 
   const campaignRows = useMemo(() => {
@@ -60,19 +83,14 @@ export default function Notifications() {
     return inbox.filter((row) => row.title.toLowerCase().includes(query));
   }, [inbox, searchQuery]);
 
-  function save(send = false) {
+  function save(_send = false) {
     const issues = compactErrors({
       title: required(panel.form.title, 'Title is required.'),
       message: required(panel.form.message, 'Message is required.'),
     });
     panel.setErrors(issues);
     if (Object.keys(issues).length) return;
-    campaignStore.upsert({
-      ...panel.form,
-      id: panel.form.id || nextId('NTF', campaigns),
-      status: send ? 'Sent' : panel.form.status || 'Draft',
-    });
-    panel.setToast(send ? 'Notification sent.' : 'Notification saved.');
+    panel.setToast('Sending notification campaigns is not available on the server yet.');
     panel.closeForm();
   }
 
@@ -92,7 +110,7 @@ export default function Notifications() {
         <ActionGroup>
           <ActionButton icon={Eye} tone="view" onClick={() => panel.setView(row)}>View</ActionButton>
           <ActionButton icon={Pencil} tone="edit" onClick={() => panel.openEdit(row)}>Edit</ActionButton>
-          {row.status !== 'Sent' ? <ActionButton icon={Send} tone="approve" onClick={() => { campaignStore.patch(row.id, { status: 'Sent' }); panel.setToast('Notification sent.'); }}>Send</ActionButton> : null}
+          {row.status !== 'Sent' ? <ActionButton icon={Send} tone="approve" onClick={() => { panel.setToast('Sending notification campaigns is not available on the server yet.'); }}>Send</ActionButton> : null}
           <ActionButton icon={Trash2} tone="danger" onClick={() => panel.setConfirm(row)}>Delete</ActionButton>
         </ActionGroup>
       ),
@@ -101,13 +119,25 @@ export default function Notifications() {
 
   return (
     <PageContainer className="space-y-4">
-      <PageHeader action={tab === 'campaigns' ? <Button icon={Plus} onClick={panel.openCreate}>Create Notification</Button> : <Button variant="secondary" onClick={() => setInbox((items) => items.map((item) => ({ ...item, unread: false })))}>Mark all read</Button>} />
+      <PageHeader action={tab === 'campaigns' ? <Button icon={Plus} onClick={panel.openCreate}>Create Notification</Button> : <Button variant="secondary" onClick={async () => {
+        try {
+          await markAllNoticesRead();
+          setInbox((items) => items.map((item) => ({ ...item, unread: false })));
+        } catch {
+          /* keep unread until the API confirms */
+        }
+      }}>Mark all read</Button>} />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
 
       {tab === 'campaigns' ? (
         <GlassCard className="overflow-hidden">
           {campaignRows.length === 0 ? <EmptyState title="No notifications found" description="Compose a message for riders or customers." /> : <DataTable columns={columns} data={campaignRows} pageSize={8} compact itemLabel="notifications" mobileTitleKey="title" />}
         </GlassCard>
+      ) : inboxError ? (
+        <ErrorState
+          title="Couldn't load notifications"
+          description={inboxError.message || 'The notifications API did not respond. Dummy inbox items are not shown.'}
+        />
       ) : (
         <GlassCard>
           {inboxRows.length === 0 ? (
@@ -118,7 +148,16 @@ export default function Notifications() {
                 <li key={item.id}>
                   <button
                     type="button"
-                    onClick={() => setInbox((current) => current.map((row) => (row.id === item.id ? { ...row, unread: false } : row)))}
+                    onClick={async () => {
+                      if (item.unread) {
+                        try {
+                          await markNoticeRead(item.id);
+                          setInbox((current) => current.map((row) => (row.id === item.id ? { ...row, unread: false } : row)));
+                        } catch {
+                          /* keep unread until the API confirms */
+                        }
+                      }
+                    }}
                     className={`flex w-full items-start justify-between gap-3 rounded-2xl px-4 py-3 text-left ${item.unread ? 'bg-brand-50' : 'bg-white/60'}`}
                   >
                     <div>
@@ -172,7 +211,7 @@ export default function Notifications() {
           </DetailSection>
         ) : null}
       </Drawer>
-      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.title} will be deleted.`} onClose={() => panel.setConfirm(null)} onConfirm={() => { campaignStore.remove(panel.confirm.id); panel.setConfirm(null); panel.setToast('Notification deleted.'); }} />
+      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.title} cannot be deleted from the server inbox.`} onClose={() => panel.setConfirm(null)} onConfirm={() => { panel.setConfirm(null); panel.setToast('Campaign delete is not available on the server yet.'); }} />
       <Toast open={Boolean(panel.toast)} message={panel.toast} onClose={() => panel.setToast('')} />
     </PageContainer>
   );

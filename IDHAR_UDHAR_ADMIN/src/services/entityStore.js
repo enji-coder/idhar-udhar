@@ -1,7 +1,16 @@
-export function createEntityStore(key, seed) {
+export function createEntityStore(key, seed, { persist: persistToStorage = true } = {}) {
   const storageKey = `iu_admin_${key}`;
 
+  if (!persistToStorage) {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function read() {
+    if (!persistToStorage) return structuredClone(seed);
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) return JSON.parse(raw);
@@ -15,7 +24,9 @@ export function createEntityStore(key, seed) {
   const listeners = new Set();
 
   function persist() {
-    localStorage.setItem(storageKey, JSON.stringify(data));
+    if (persistToStorage) {
+      localStorage.setItem(storageKey, JSON.stringify(data));
+    }
     listeners.forEach((listener) => listener());
   }
 

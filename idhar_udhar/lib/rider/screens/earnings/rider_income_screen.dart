@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../state/rider_session.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -96,7 +97,8 @@ class _DailyIncome extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final earnings = ref.watch(dummyRiderRepositoryProvider).getEarnings();
+    final earnings = ref.watch(riderApiEarningsProvider).value ??
+        ref.watch(dummyRiderRepositoryProvider).getEarnings();
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -141,7 +143,8 @@ class _PeriodIncome extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final earnings = ref.watch(dummyRiderRepositoryProvider).getEarnings();
+    final earnings = ref.watch(riderApiEarningsProvider).value ??
+        ref.watch(dummyRiderRepositoryProvider).getEarnings();
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     final deliveries =

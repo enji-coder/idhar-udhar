@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
 
 import '../../data/dummy/dummy_rider_data.dart';
 import '../../routing/rider_otp_args.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -15,17 +18,18 @@ import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_text_field.dart';
 
-class MobileVerificationScreen extends StatefulWidget {
+class MobileVerificationScreen extends ConsumerStatefulWidget {
   const MobileVerificationScreen({super.key, this.initialMobile});
 
   final String? initialMobile;
 
   @override
-  State<MobileVerificationScreen> createState() =>
+  ConsumerState<MobileVerificationScreen> createState() =>
       _MobileVerificationScreenState();
 }
 
-class _MobileVerificationScreenState extends State<MobileVerificationScreen> {
+class _MobileVerificationScreenState
+    extends ConsumerState<MobileVerificationScreen> {
   late final TextEditingController _phone;
   bool _editing = false;
   bool _sending = false;
@@ -66,18 +70,30 @@ class _MobileVerificationScreenState extends State<MobileVerificationScreen> {
       _error = null;
       _sending = true;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-    setState(() => _sending = false);
-    unawaited(
-      context.push(
-        RiderRoutes.otpVerification,
-        extra: RiderOtpArgs(
-          mobile: _displayMobile,
-          flow: RiderAuthFlow.registration,
+    try {
+      await ref.read(riderSessionProvider.notifier).requestOtp(digits);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _sending = false);
+      unawaited(
+        context.push(
+          RiderRoutes.otpVerification,
+          extra: RiderOtpArgs(
+            mobile: _displayMobile,
+            flow: RiderAuthFlow.registration,
+          ),
         ),
-      ),
-    );
+      );
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sending = false;
+        _error = error.message;
+      });
+    }
   }
 
   @override

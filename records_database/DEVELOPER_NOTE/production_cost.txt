@@ -1,0 +1,23 @@
+| No. | Requirement          | Recommended Service                   | Purpose                        |               Initial Estimate |
+| --- | -------------------- | ------------------------------------- | ------------------------------ | -----------------------------: |
+| 1   | Cloud Infrastructure | **AWS**                               | Main production infrastructure |                       Variable |
+| 2   | Production Database  | **Amazon RDS PostgreSQL**             | Main application database      |              ₹5,000–₹15,000/mo |
+| 3   | Backend Hosting      | **AWS ECS + Fargate**                 | NestJS API + workers           |              ₹5,000–₹15,000/mo |
+| 4   | Database Backup      | **RDS automated backups + snapshots** | Disaster recovery              |               ₹1,000–₹3,000/mo |
+| 5   | Document Storage     | **Amazon S3**                         | Rider documents/POD/images     |                ₹500–₹5,000+/mo |
+| 6   | CDN                  | **CloudFront**                        | Fast file/content delivery     |                  ₹0–₹5,000+/mo |
+| 7   | Load Balancing       | **Application Load Balancer**         | Backend traffic distribution   |               ₹2,000–₹4,000/mo |
+| 8   | Container Registry   | **Amazon ECR**                        | Store backend Docker images    |                     ₹0–₹500/mo |
+| 9   | DNS                  | **Route 53**                          | Production domain/DNS          |          ~₹50–₹500/mo + domain |
+| 10  | SSL                  | **AWS Certificate Manager**           | HTTPS certificates             |                     Usually ₹0 |
+| 11  | Web/API Security     | **AWS WAF**                           | API/web protection             |              ₹1,000–₹3,000+/mo |
+| 12  | Secrets              | **AWS Secrets Manager**               | DB/API/JWT secrets             |                   ₹200–₹500/mo |
+| 13  | Monitoring           | **CloudWatch**                        | Logs, metrics, alerts          |                ₹500–₹3,000+/mo |
+| 14  | Audit                | **CloudTrail**                        | AWS activity/security audit    |                    ₹0–variable |
+| 15  | Admin Website        | **Vercel Pro**                        | Next.js Admin Panel            |                         $20/mo |
+| 16  | OTP/SMS              | **MSG91**                             | Customer/Rider OTP             |                    Usage based |
+| 17  | Push Notifications   | **Firebase FCM**                      | Rider/customer notifications   | Usually low/free at this scale |
+| 18  | Payment Gateway      | **Razorpay/Cashfree/etc.**            | Online payments                |              Transaction-based |
+| 19  | Redis/Cache          | **AWS ElastiCache**                   | Cache/queues/rate limits       |              ₹2,000–₹8,000+/mo |
+| 20  | Error Monitoring     | **Sentry**                            | Application error tracking     |                       Optional |
+| 21  | Domain               | `.com` domain                         | Production branding            |            ~₹1,000–₹2,000/year |

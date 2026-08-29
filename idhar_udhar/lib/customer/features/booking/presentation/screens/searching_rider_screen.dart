@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
 
+import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/animations/animations.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -31,17 +35,56 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
   @override
   void initState() {
     super.initState();
+    final order = ref.read(bookingDraftProvider).activeOrder;
+    if (order?.backendOrderId != null) {
+      _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+        unawaited(_poll());
+      });
+      unawaited(_poll());
+      return;
+    }
     _timer = Timer(const Duration(seconds: 3), () {
       if (!mounted || _cancelled) {
         return;
       }
       ref.read(bookingDraftProvider.notifier).assignRider();
-      final order = ref.read(bookingDraftProvider).activeOrder;
-      if (order != null) {
-        ref.read(sessionProvider.notifier).updateOrder(order);
+      final MockOrder? assigned = ref.read(bookingDraftProvider).activeOrder;
+      if (assigned != null) {
+        ref.read(sessionProvider.notifier).updateOrder(assigned);
       }
       context.go(AppRoutes.bookRiderAssigned);
     });
+  }
+
+  Future<void> _poll() async {
+    if (!mounted || _cancelled) {
+      return;
+    }
+    final order = ref.read(bookingDraftProvider).activeOrder;
+    final String? id = order?.backendOrderId;
+    if (id == null) {
+      return;
+    }
+    try {
+      final latest = await ref.read(ordersApiProvider).getById(id);
+      if (!mounted || _cancelled) {
+        return;
+      }
+      final mapped = OrderMapper.toMockOrder(
+        latest,
+        vehicle: order?.vehicle,
+      );
+      ref.read(bookingDraftProvider.notifier).attachActive(mapped);
+      ref.read(sessionProvider.notifier).updateOrder(mapped);
+      if (mapped.status == OrderStatus.assigned ||
+          mapped.status == OrderStatus.accepted ||
+          mapped.status == OrderStatus.arriving) {
+        _timer?.cancel();
+        context.go(AppRoutes.bookRiderAssigned);
+      }
+    } catch (_) {
+      // Keep searching UI; next poll retries.
+    }
   }
 
   @override
@@ -61,6 +104,23 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
     }
     _cancelled = true;
     _timer?.cancel();
+    final String? apiId = order?.backendOrderId ?? order?.id;
+    if (order?.backendOrderId != null && apiId != null) {
+      try {
+        final latest = await ref.read(ordersApiProvider).cancel(apiId);
+        if (mounted) {
+          ref.read(sessionProvider.notifier).updateOrder(
+                OrderMapper.toMockOrder(latest, vehicle: order?.vehicle),
+              );
+        }
+      } on ApiException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message)),
+          );
+        }
+      }
+    }
     final cancelled =
         ref.read(bookingDraftProvider.notifier).cancelBooking();
     if (cancelled != null) {

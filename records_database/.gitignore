@@ -1,0 +1,10 @@
+# Local backups only. Never commit dumps.
+backups/
+*.dump
+*.backup
+.env
+.env.*
+!.env.example
+
+# Local Docker/pgAdmin credentials — never commit
+DEVELOPER_NOTE/database_note.txt

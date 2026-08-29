@@ -1,0 +1,531 @@
+# IDHAR UDHAR – Production Deployment & Infrastructure Cost Estimate
+
+## 1. Project Scope
+
+The production deployment will include the complete IDHAR UDHAR platform:
+
+* Customer Mobile Application
+* Rider Mobile Application
+* Admin Web Panel
+* Production Backend / REST API
+* Production PostgreSQL Database
+* Rider Document & Proof-of-Delivery Storage
+* Google Maps & Location Services
+* OTP / SMS Services
+* Push Notifications
+* Online Payment Gateway
+* Background Workers & Queues
+* Security & Access Management
+* Monitoring & Error Logging
+* Database Backups & Disaster Recovery
+* Domain, SSL & DNS
+* Google Play Store Deployment
+* Apple App Store Deployment
+
+The infrastructure will be designed initially for approximately **5,000–10,000 customers** and will be scalable progressively toward **100,000+ customers** without requiring a complete change of the underlying architecture.
+
+---
+
+# 2. Recommended Production Architecture
+
+The recommended production architecture will use **Amazon Web Services (AWS)** as the primary cloud infrastructure.
+
+### Core Architecture
+
+```text
+Customer App
+       │
+Rider App
+       │
+Admin Web Panel
+       │
+       ▼
+   HTTPS / SSL
+       │
+       ▼
+Application Load Balancer
+       │
+       ▼
+AWS ECS + Fargate
+(NestJS Backend + Workers)
+       │
+       ├──────────────► Redis / Cache
+       │
+       ├──────────────► SQS / Background Jobs
+       │
+       ▼
+Amazon RDS PostgreSQL
+       │
+       ▼
+Amazon S3
+(Rider Documents / POD / Images)
+```
+
+### External Services
+
+```text
+Google Maps Platform
+MSG91 / SMS Provider
+Firebase Cloud Messaging
+Payment Gateway
+Google Play Store
+Apple App Store
+```
+
+---
+
+# 3. Core AWS Infrastructure – Estimated Cost
+
+| No. | Requirement          | Recommended Service               | Purpose                                | Estimated Initial Cost |
+| --: | -------------------- | --------------------------------- | -------------------------------------- | ---------------------: |
+|   1 | Cloud Infrastructure | AWS                               | Complete production infrastructure     |               Variable |
+|   2 | Production Database  | Amazon RDS PostgreSQL             | Main application database              |   ₹5,000–₹12,000/month |
+|   3 | Backend/API Hosting  | AWS ECS + Fargate                 | NestJS API                             |   ₹5,000–₹12,000/month |
+|   4 | Background Workers   | ECS/Fargate + SQS                 | Notifications, async jobs, processing  |    ₹1,000–₹3,000/month |
+|   5 | Database Backup      | RDS Automated Backups + Snapshots | Disaster recovery                      |      ₹500–₹2,000/month |
+|   6 | Document Storage     | Amazon S3                         | Rider documents, POD images, files     |     ₹500–₹3,000+/month |
+|   7 | CDN                  | Amazon CloudFront                 | Fast web/file delivery                 |       ₹0–₹3,000+/month |
+|   8 | Load Balancing       | Application Load Balancer         | Traffic distribution                   |    ₹2,000–₹4,000/month |
+|   9 | Container Registry   | Amazon ECR                        | Backend Docker images                  |          ₹0–₹500/month |
+|  10 | DNS                  | Amazon Route 53                   | Production DNS management              |         ₹50–₹300/month |
+|  11 | SSL                  | AWS Certificate Manager           | HTTPS/SSL certificates                 |             Usually ₹0 |
+|  12 | Web/API Security     | AWS WAF                           | Application and API protection         |     ₹500–₹2,500+/month |
+|  13 | Secrets Management   | AWS Secrets Manager               | Database/API/JWT credentials           |        ₹200–₹500/month |
+|  14 | Monitoring           | Amazon CloudWatch                 | Logs, metrics and alerts               |     ₹500–₹3,000+/month |
+|  15 | AWS Audit            | AWS CloudTrail                    | Security and activity auditing         |       ₹0–₹1,000+/month |
+|  16 | Redis / Cache        | AWS ElastiCache                   | Caching, rate limiting, temporary data |   ₹2,000–₹6,000+/month |
+
+### Estimated Core AWS Infrastructure
+
+**Approximately ₹25,000–₹35,000/month initially**
+
+The actual AWS bill will depend on the selected resources and their actual monthly usage.
+
+AWS follows a **Pay-As-You-Go** model for these services, so there is generally no requirement to purchase a fixed monthly infrastructure package upfront.
+
+---
+
+# 4. Admin Website Hosting
+
+The Admin Web Panel can be deployed using:
+
+**React Admin Panel → Amazon S3 → CloudFront**
+
+This avoids the need for a dedicated web server and provides scalable, secure and fast delivery.
+
+### Estimated Cost
+
+**₹0–₹3,000/month initially**, depending on traffic and bandwidth.
+
+A separate Vercel Pro subscription is therefore not mandatory for the Admin Panel.
+
+---
+
+# 5. Google Maps Platform
+
+Google Maps Platform will be required for features such as:
+
+* Maps
+* Address Search
+* Places / Autocomplete
+* Geocoding
+* Distance Calculation
+* Route Calculation
+* ETA
+* Rider Location
+* Multiple Delivery Stops
+* Future Route Optimization
+
+Google Maps pricing is **usage-based**, and the actual cost depends on the number and type of API/SKU requests.
+
+### Budgetary Estimate
+
+| Usage Level         | Estimated Monthly Budget |
+| ------------------- | -----------------------: |
+| Initial / Low Usage |                ₹0–₹3,000 |
+| Growing Usage       |           ₹3,000–₹15,000 |
+| Heavy Usage         |         ₹15,000–₹50,000+ |
+
+Google provides applicable monthly free usage allowances depending on the pricing category and eligible India billing account.
+
+**Final Google Maps cost will be based on actual API consumption.**
+
+---
+
+# 6. OTP / SMS Service
+
+An SMS/OTP provider such as **MSG91** will be used for:
+
+* Customer OTP
+* Rider OTP
+* Login verification
+* OTP resend
+* Other transactional SMS where required
+
+OTP/SMS is **usage-based**, not a fixed infrastructure cost.
+
+### Budgetary Estimate
+
+| Monthly OTP/SMS Volume | Approximate Budget |
+| ---------------------: | -----------------: |
+|             5,000 OTPs |        ₹500–₹1,000 |
+|            10,000 OTPs |      ₹1,000–₹2,000 |
+|            25,000 OTPs |      ₹2,000–₹4,000 |
+|            50,000 OTPs |      ₹4,000–₹8,000 |
+|           100,000 OTPs |    ₹8,000–₹15,000+ |
+
+Actual pricing will depend on the selected SMS provider, route, template, applicable taxes and negotiated commercial plan.
+
+---
+
+# 7. Push Notifications
+
+Firebase Cloud Messaging (FCM) can be used for:
+
+* Order updates
+* Rider assignment
+* Pickup notifications
+* Delivery notifications
+* Payment notifications
+* Cancellation notifications
+* Promotional notifications
+* Rider alerts
+
+### Estimated Cost
+
+**Generally ₹0–₹1,000/month initially**
+
+The backend infrastructure required to process and send notifications is included within the overall cloud infrastructure.
+
+---
+
+# 8. Payment Gateway
+
+A payment gateway such as Razorpay, Cashfree, PhonePe Payment Gateway or another suitable provider can be integrated.
+
+It will support:
+
+* Online customer payments
+* Payment verification
+* Payment status updates
+* Webhooks
+* Refund-related workflows where required
+* Transaction reconciliation
+
+### Cost
+
+**Transaction-based**
+
+The payment gateway cost depends on:
+
+* Number of transactions
+* Total transaction value
+* Payment method
+* Provider's commercial agreement
+
+Therefore, payment gateway charges are not included as a fixed monthly infrastructure cost.
+
+---
+
+# 9. Rider Documents & Proof-of-Delivery Storage
+
+Amazon S3 will be used for secure storage of:
+
+* Aadhaar documents
+* PAN documents
+* Driving Licence
+* RC
+* Bank-related documents
+* Proof-of-Delivery images
+* Delivery images
+* Other approved documents
+
+Documents will not be stored directly inside PostgreSQL as large binary files.
+
+The database will store the relevant document metadata and secure object references.
+
+### Initial Estimate
+
+**₹500–₹3,000+/month**
+
+The cost will increase according to total storage, number of files, requests, downloads and retention period.
+
+---
+
+# 10. Domain, DNS & SSL
+
+### Domain
+
+Estimated:
+
+**₹1,000–₹2,000/year**
+
+### DNS
+
+Amazon Route 53:
+
+**Approximately ₹50–₹300+/month initially**
+
+### SSL
+
+AWS Certificate Manager:
+
+**Usually ₹0 for standard public SSL certificates**
+
+---
+
+# 11. Security & Monitoring
+
+The production system will include:
+
+* HTTPS/SSL
+* AWS WAF
+* IAM access control
+* Private database access
+* Secrets management
+* Encryption
+* API security
+* Rate limiting
+* CloudWatch monitoring
+* CloudTrail auditing
+* Application logs
+* Error monitoring
+* Database backups
+* Secure S3 access
+* Signed URLs for sensitive documents
+
+### Estimated Budget
+
+**₹1,500–₹5,000/month initially**
+
+This may increase as system traffic and logging requirements grow.
+
+---
+
+# 12. Google Play Store
+
+### Google Play Console
+
+Developer registration fee:
+
+**US$25 one-time**
+
+Approximate INR budget:
+
+**₹2,000–₹2,500 one-time**
+
+There is no mandatory monthly Play Store subscription fee for the developer account.
+
+---
+
+# 13. Apple App Store
+
+### Apple Developer Program
+
+Developer membership:
+
+**US$99/year**
+
+Approximate INR budget:
+
+**₹8,500–₹10,000/year**
+
+For an organization/company account, Apple may require company verification and related business information such as a D-U-N-S Number.
+
+---
+
+# 14. AWS Account & Payment Model
+
+AWS uses a **Pay-As-You-Go** billing model for the recommended infrastructure.
+
+There is no requirement to purchase a fixed ₹20,000, ₹50,000 or ₹1,00,000 monthly plan.
+
+The monthly bill is generated according to actual resource usage.
+
+Examples:
+
+```text
+RDS
+→ Database instance/resources used
+
+ECS/Fargate
+→ CPU + Memory + running time
+
+S3
+→ Storage + requests + data transfer
+
+CloudFront
+→ Data transfer + requests
+
+WAF
+→ Requests + rules
+
+Redis
+→ Selected capacity/usage
+
+CloudWatch
+→ Logs + metrics
+```
+
+### AWS India Payment Methods
+
+Depending on the AWS India billing setup, supported payment methods include:
+
+* Credit Card
+* Debit Card
+* Visa
+* Mastercard
+* American Express
+* RuPay
+* Net Banking
+* UPI
+
+For production deployment, it is recommended that the **client/company own the AWS account and billing account** rather than keeping production infrastructure under a developer's personal AWS account.
+
+---
+
+# 15. Initial Monthly Cost Summary
+
+| Category                | Estimated Initial Monthly Cost |
+| ----------------------- | -----------------------------: |
+| AWS Core Infrastructure |                ₹25,000–₹35,000 |
+| Google Maps             |                    ₹0–₹15,000+ |
+| OTP/SMS                 |                ₹1,000–₹10,000+ |
+| Additional Storage      |                   ₹500–₹3,000+ |
+| Push Notifications      |                     ~₹0–₹1,000 |
+| Payment Gateway         |              Transaction-based |
+| Domain                  |            ~₹1,000–₹2,000/year |
+| Google Play Console     |        ~₹2,000–₹2,500 one-time |
+| Apple Developer Program |           ~₹8,500–₹10,000/year |
+
+## Recommended Initial Operating Budget
+
+### **₹30,000–₹50,000/month**
+
+This is a recommended budgeting range for the initial production stage of approximately **5,000–10,000 customers**.
+
+Google Maps and OTP/SMS costs may vary according to actual usage, while payment gateway charges are transaction-based.
+
+---
+
+# 16. Expected Scaling Budget
+
+The infrastructure will be scaled according to actual traffic and business usage.
+
+| Approx. Customer Scale   |               Recommended Infrastructure Budget |
+| ------------------------ | ----------------------------------------------: |
+| 5,000–10,000 customers   |                           ₹30,000–₹50,000/month |
+| 10,000–25,000 customers  |                           ₹40,000–₹65,000/month |
+| 25,000–50,000 customers  |                           ₹55,000–₹90,000/month |
+| 50,000–100,000 customers |                        ₹75,000–₹1,50,000+/month |
+| 100,000+ customers       | ₹1,25,000–₹2,00,000+/month depending on traffic |
+
+These are **budgetary estimates**, not fixed monthly quotations.
+
+Actual costs depend on:
+
+* Number of active customers
+* Number of riders
+* Orders per day
+* API requests
+* Concurrent users
+* Google Maps API usage
+* OTP/SMS volume
+* Payment transaction volume
+* Database workload
+* Document storage
+* Data transfer
+* Notification volume
+* Logging and monitoring requirements
+
+---
+
+# 17. One-Time / Annual Cost Summary
+
+| Item                    |    Estimated Cost | Billing                      |
+| ----------------------- | ----------------: | ---------------------------- |
+| Domain                  |     ₹1,000–₹2,000 | Annual                       |
+| Google Play Console     |    ~₹2,000–₹2,500 | One-time                     |
+| Apple Developer Program |   ~₹8,500–₹10,000 | Annual                       |
+| SSL                     |        Usually ₹0 | No separate certificate cost |
+| AWS Account             |    ₹0 account fee | Pay-as-you-go                |
+| Google Maps             |       Usage-based | Monthly                      |
+| OTP/SMS                 |       Usage-based | Monthly                      |
+| Payment Gateway         | Transaction-based | Per transaction              |
+
+---
+
+# 18. Important Cost Consideration
+
+The platform will **not be provisioned for 100,000 customers from day one**.
+
+Instead, the system will be architected for future scalability and infrastructure resources will be increased progressively.
+
+For example:
+
+```text
+5,000 Customers
+      ↓
+Initial Production Infrastructure
+      ↓
+10,000 Customers
+      ↓
+Increase Backend / DB / Cache Capacity
+      ↓
+25,000 Customers
+      ↓
+Horizontal Scaling + Additional Resources
+      ↓
+50,000 Customers
+      ↓
+Database / Worker / Cache Scaling
+      ↓
+100,000+ Customers
+      ↓
+Advanced High-Availability & Scaling
+```
+
+This approach avoids unnecessary infrastructure expenditure during the initial launch while ensuring that the architecture is capable of supporting future growth.
+
+---
+
+# 19. Recommended Initial Budget for IDHAR UDHAR
+
+### Monthly
+
+**₹30,000–₹50,000/month**
+
+### Annual Core Operating Budget
+
+Approximately:
+
+**₹3.6 lakh – ₹6 lakh/year**
+
+excluding:
+
+* Payment gateway transaction charges
+* Higher-than-expected Google Maps usage
+* Higher-than-expected OTP/SMS usage
+* Exceptional storage/bandwidth requirements
+* Future infrastructure upgrades
+
+### App Publishing
+
+* Google Play Console: **US$25 one-time**
+* Apple Developer Program: **US$99/year**
+
+---
+
+## Final Recommendation
+
+For the initial production launch, the recommended approach is:
+
+**AWS + Amazon RDS PostgreSQL + ECS/Fargate + Redis + S3 + CloudFront + ALB + WAF + CloudWatch + Route 53 + AWS Secrets Manager + SQS/Workers**
+
+combined with:
+
+**Google Maps + MSG91/SMS + Firebase FCM + Payment Gateway**
+
+The system should start with a **₹30,000–₹50,000/month operating budget** and scale infrastructure progressively as customer count, rider count, order volume and API usage increase.
+
+> **Note:** All amounts above are approximate planning estimates. Actual charges are subject to the respective service provider's current pricing, taxes, exchange rates, actual consumption and commercial plans.

@@ -16,6 +16,7 @@ import '../../features/booking/presentation/screens/tracking_screen.dart';
 import '../../features/booking/presentation/screens/vehicle_selection_screen.dart';
 import '../../features/home/presentation/screens/dashboard_screen.dart';
 import '../../features/home/presentation/screens/home_shell_screen.dart';
+import '../../features/home/presentation/screens/notifications_screen.dart';
 import '../../features/home/presentation/screens/orders_screen.dart';
 import '../../features/home/presentation/screens/profile_screen.dart';
 import '../../features/home/presentation/screens/wallet_screen.dart';
@@ -259,6 +260,14 @@ abstract final class AppRouter {
         pageBuilder: (context, state) => RouteTransitions.fadeThrough(
           key: state.pageKey,
           child: const HelpScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.notifications,
+        name: 'notifications',
+        pageBuilder: (context, state) => RouteTransitions.fadeThrough(
+          key: state.pageKey,
+          child: const NotificationsScreen(),
         ),
       ),
     ],

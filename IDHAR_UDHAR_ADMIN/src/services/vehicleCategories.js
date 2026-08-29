@@ -1,19 +1,38 @@
-import { defaultVehicleCategories } from '../data/vehicleCategories';
-import { nextId } from '../utils/ids';
-import { DEFAULT_FARE_BY_CATEGORY, emptyFareFields, publishFareVersion } from './fareEngine';
 import { createEntityStore } from './entityStore';
 import { orderStore, riderStore, vehicleStore } from './stores';
+import {
+  createAdminVehicleCategory,
+  deleteAdminVehicleCategory,
+  fetchAdminVehicleCategories,
+  updateAdminVehicleCategory,
+} from '../api/adminApi';
+import { ApiError } from '../api/errors';
 
-export const vehicleCategoryStore = createEntityStore('vehicle_categories_v1', defaultVehicleCategories);
-
-const CATEGORY_API = '/.netlify/functions/vehicle-categories';
+export const vehicleCategoryStore = createEntityStore('vehicle_categories_v2', [], { persist: false });
 
 function normalizeName(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function nowIso() {
-  return new Date().toISOString();
+function toRates(form) {
+  const number = (value) => {
+    if (value === '' || value == null) return undefined;
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : undefined;
+  };
+  return {
+    base_fare: number(form.baseFare),
+    per_km: number(form.perKmCharge),
+    initial_minimum: number(form.initialMinimum ?? form.baseFare),
+    waiting: number(form.waitingCharge),
+    surge: number(form.surgeCharge),
+    toll: number(form.tollCharge),
+    parking: number(form.parkingCharge),
+  };
+}
+
+function ratesHaveAmount(rates) {
+  return Object.values(rates).some((value) => value != null && Number(value) > 0);
 }
 
 export function listVehicleCategories() {
@@ -32,7 +51,7 @@ export function vehicleCategoryNames({ includeInactive = false, current } = {}) 
 }
 
 export function defaultVehicleCategoryName() {
-  return activeVehicleCategories()[0]?.name || 'Bike';
+  return activeVehicleCategories()[0]?.name || '';
 }
 
 export function isTwoWheelerCategory(name) {
@@ -45,11 +64,16 @@ export function findVehicleCategoryByName(name, excludeId) {
   return listVehicleCategories().find((row) => row.id !== excludeId && normalizeName(row.name).toLowerCase() === target);
 }
 
-export function categoryUsage(name) {
-  const target = normalizeName(name).toLowerCase();
-  const vehicles = vehicleStore.getAll().filter((row) => normalizeName(row.category || row.type).toLowerCase() === target);
-  const riders = riderStore.getAll().filter((row) => normalizeName(row.vehicle).toLowerCase() === target);
-  const orders = orderStore.getAll().filter((row) => normalizeName(row.vehicle).toLowerCase() === target);
+export function categoryUsage(nameOrRow) {
+  if (nameOrRow && typeof nameOrRow === 'object' && nameOrRow.usage) {
+    return nameOrRow.usage;
+  }
+  const target = normalizeName(nameOrRow).toLowerCase();
+  const row = listVehicleCategories().find((item) => normalizeName(item.name).toLowerCase() === target);
+  if (row?.usage) return row.usage;
+  const vehicles = vehicleStore.getAll().filter((item) => normalizeName(item.category || item.type).toLowerCase() === target);
+  const riders = riderStore.getAll().filter((item) => normalizeName(item.vehicle).toLowerCase() === target);
+  const orders = orderStore.getAll().filter((item) => normalizeName(item.vehicle).toLowerCase() === target);
   return {
     vehicles: vehicles.length,
     riders: riders.length,
@@ -58,119 +82,83 @@ export function categoryUsage(name) {
   };
 }
 
-export function renameCategoryUsage(fromName, toName) {
-  const from = normalizeName(fromName);
-  const to = normalizeName(toName);
-  if (!from || !to || from.toLowerCase() === to.toLowerCase()) return;
-  vehicleStore.getAll().forEach((row) => {
-    if (normalizeName(row.category || row.type).toLowerCase() === from.toLowerCase()) {
-      vehicleStore.patch(row.id, { category: to, type: to });
-    }
-  });
-  riderStore.getAll().forEach((row) => {
-    if (normalizeName(row.vehicle).toLowerCase() === from.toLowerCase()) {
-      riderStore.patch(row.id, { vehicle: to });
-    }
-  });
-  orderStore.getAll().forEach((row) => {
-    if (normalizeName(row.vehicle).toLowerCase() === from.toLowerCase()) {
-      orderStore.patch(row.id, { vehicle: to });
-    }
-  });
-}
-
 export function validateVehicleCategory(form, rows = listVehicleCategories()) {
   const name = normalizeName(form.name);
   const issues = {};
   if (!name) issues.name = 'Vehicle category name is required.';
-  else if (findVehicleCategoryByName(name, form.id)) issues.name = 'This vehicle category already exists.';
+  else if (rows.find((row) => row.id !== form.id && normalizeName(row.name).toLowerCase() === name.toLowerCase())) {
+    issues.name = 'This vehicle category already exists.';
+  }
   return { name, issues };
 }
 
-export function saveVehicleCategory(form) {
+export async function syncVehicleCategories() {
+  const rows = await fetchAdminVehicleCategories();
+  vehicleCategoryStore.replace(rows);
+  return rows;
+}
+
+export async function saveVehicleCategory(form) {
   const rows = listVehicleCategories();
   const { name, issues } = validateVehicleCategory(form, rows);
   if (Object.keys(issues).length) return { ok: false, issues };
-  const existing = form.id ? rows.find((row) => row.id === form.id) : null;
-  const previousName = existing?.name;
-  const stamp = nowIso();
-  const record = {
-    id: existing?.id || nextId('VC', rows),
+  const rates = toRates(form);
+  const payload = {
     name,
-    status: form.status === 'Inactive' ? 'Inactive' : 'Active',
-    createdAt: existing?.createdAt || stamp,
-    updatedAt: stamp,
-    ...emptyFareFields(),
-    ...(DEFAULT_FARE_BY_CATEGORY[name] || {}),
-    baseFare: Number(form.baseFare ?? existing?.baseFare ?? DEFAULT_FARE_BY_CATEGORY[name]?.baseFare ?? 0),
-    perKmCharge: Number(form.perKmCharge ?? existing?.perKmCharge ?? 0),
-    initialMinimum: Number(form.initialMinimum ?? existing?.initialMinimum ?? form.baseFare ?? 0),
-    waitingCharge: Number(form.waitingCharge ?? existing?.waitingCharge ?? 0),
-    surgeCharge: Number(form.surgeCharge ?? existing?.surgeCharge ?? 0),
-    tollCharge: Number(form.tollCharge ?? existing?.tollCharge ?? 0),
-    parkingCharge: Number(form.parkingCharge ?? existing?.parkingCharge ?? 0),
-    weightCapacityKg: form.weightCapacityKg ?? existing?.weightCapacityKg ?? DEFAULT_FARE_BY_CATEGORY[name]?.weightCapacityKg ?? '',
-    size: form.size ?? existing?.size ?? DEFAULT_FARE_BY_CATEGORY[name]?.size ?? '',
-    fareVersionId: `fare_${existing?.id || 'new'}_${Date.now()}`,
+    active: form.status !== 'Inactive',
+    weight_capacity: form.weightCapacityKg ? String(form.weightCapacityKg) : '',
+    size: form.size ? String(form.size) : '',
+    ...(ratesHaveAmount(rates) ? { rates } : {}),
   };
-  if (existing) {
-    publishFareVersion(record.id, record);
+  try {
+    const record = form.id
+      ? await updateAdminVehicleCategory(form.id, payload)
+      : await createAdminVehicleCategory(payload);
+    await syncVehicleCategories();
+    return { ok: true, record };
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'VEHICLE_CATEGORY_NAME_TAKEN') {
+      return { ok: false, issues: { name: error.message } };
+    }
+    throw error;
   }
-  vehicleCategoryStore.upsert(record);
-  if (existing && previousName && previousName !== name) renameCategoryUsage(previousName, name);
-  syncVehicleCategories();
-  return { ok: true, record };
 }
 
-export function deactivateVehicleCategory(id) {
-  vehicleCategoryStore.patch(id, { status: 'Inactive', updatedAt: nowIso() });
-  syncVehicleCategories();
+export async function deactivateVehicleCategory(id) {
+  await updateAdminVehicleCategory(id, { active: false });
+  await syncVehicleCategories();
 }
 
-export function activateVehicleCategory(id) {
-  vehicleCategoryStore.patch(id, { status: 'Active', updatedAt: nowIso() });
-  syncVehicleCategories();
+export async function activateVehicleCategory(id) {
+  await updateAdminVehicleCategory(id, { active: true });
+  await syncVehicleCategories();
 }
 
-export function deleteVehicleCategory(id) {
+export async function deleteVehicleCategory(id) {
   const row = listVehicleCategories().find((item) => item.id === id);
   if (!row) return { ok: false, message: 'Vehicle category not found.' };
-  const usage = categoryUsage(row.name);
+  const usage = categoryUsage(row);
   if (usage.total > 0) {
     return {
       ok: false,
       inUse: true,
       usage,
-      message: 'Cannot delete this vehicle category because it is currently being used. Please deactivate it instead.',
+      message: 'Cannot delete this vehicle category because it is already used by published fare data or other protected records. Please deactivate it instead.',
     };
   }
-  vehicleCategoryStore.remove(id);
-  syncVehicleCategories();
-  return { ok: true };
-}
-
-function withAvailability(rows) {
-  const vehicles = vehicleStore.getAll();
-  return rows.map((row) => {
-    const usage = categoryUsage(row.name);
-    const available = vehicles.some((item) => {
-      const type = normalizeName(item.category || item.type).toLowerCase();
-      const live = item.status === 'Active' || item.status === 'Available' || item.status === 'Busy';
-      return type === normalizeName(row.name).toLowerCase() && live;
-    });
-    return { ...row, available, usageCount: usage.total };
-  });
-}
-
-export async function syncVehicleCategories() {
   try {
-    await fetch(CATEGORY_API, {
-      method: 'PUT',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: withAvailability(listVehicleCategories()) }),
-    });
-  } catch {
-    /* local store remains source of truth */
+    await deleteAdminVehicleCategory(id);
+    await syncVehicleCategories();
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'VEHICLE_CATEGORY_IN_USE') {
+      return {
+        ok: false,
+        inUse: true,
+        usage,
+        message: error.message,
+      };
+    }
+    throw error;
   }
 }

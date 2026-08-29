@@ -17,16 +17,12 @@ import Toast from '../components/common/Toast';
 import PageHeader from '../components/common/PageHeader';
 import Drawer from '../components/common/Drawer';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
-import { TableSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import useQueryAction from '../hooks/useQueryAction';
 import { riderStore, vehicleStore } from '../services/stores';
 import { defaultVehicleCategoryName, vehicleCategoryNames, vehicleCategoryStore } from '../services/vehicleCategories';
-import { riderMetrics, earnings } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
 import { formatINR, initials } from '../utils/format';
-import { nextId } from '../utils/ids';
 import { compactErrors, required } from '../utils/validation';
 
 const icons = { total: Bike, active: Radio, offline: WifiOff, busy: ShieldAlert, pending: CircleCheck };
@@ -36,7 +32,6 @@ export default function Riders() {
   const { searchQuery } = useOutletContext() || {};
   const { can } = useAuth();
   const [params, setParams] = useSearchParams();
-  const loading = useMockLoader();
   const riders = useStore(riderStore);
   const vehicles = useStore(vehicleStore);
   useStore(vehicleCategoryStore);
@@ -64,7 +59,13 @@ export default function Riders() {
     });
   }, [riders, searchQuery, status]);
 
-  if (loading) return <TableSkeleton />;
+  const riderKpis = [
+    { id: 'total', title: 'Total Riders', value: String(riders.length), trend: 0, note: 'Directory', spark: [riders.length] },
+    { id: 'active', title: 'Active', value: String(riders.filter((row) => row.status === 'Active').length), trend: 0, note: 'On duty', spark: [riders.filter((row) => row.status === 'Active').length] },
+    { id: 'offline', title: 'Offline', value: String(riders.filter((row) => row.status === 'Offline').length), trend: 0, note: 'Not online', spark: [riders.filter((row) => row.status === 'Offline').length] },
+    { id: 'busy', title: 'Busy', value: String(riders.filter((row) => row.status === 'Busy').length), trend: 0, note: 'On a delivery', spark: [riders.filter((row) => row.status === 'Busy').length] },
+    { id: 'pending', title: 'Pending Verification', value: String(riders.filter((row) => row.status === 'Pending').length), trend: 0, note: 'KYC queue', spark: [riders.filter((row) => row.status === 'Pending').length] },
+  ];
 
   function setStatusFilter(value) {
     setStatus(value);
@@ -95,7 +96,7 @@ export default function Riders() {
     { key: 'deliveries', label: 'Total Deliveries', sortable: true, hideBelow: 'lg' },
     { key: 'rating', label: 'Rating', sortable: true },
     { key: 'earnings', label: 'Earnings', sortable: true, render: (row) => formatINR(row.earnings), hideBelow: 'lg' },
-    { key: 'joined', label: 'Joined Date', hideBelow: 'lg', render: (row) => row.joined || '12 Jan 2026' },
+    { key: 'joined', label: 'Joined Date', hideBelow: 'lg', render: (row) => row.joined || 'N/A' },
     {
       key: 'actions',
       label: 'Actions',
@@ -106,9 +107,9 @@ export default function Riders() {
           {can('riders', 'edit') ? <ActionButton icon={Pencil} tone="edit" onClick={() => setEdit(row)}>Edit</ActionButton> : null}
           {can('riders', 'edit') ? <ActionButton icon={Bike} tone="reassign" onClick={() => setEdit({ ...row, _assign: true })}>Assign Vehicle</ActionButton> : null}
           <ActionButton icon={Wallet} tone="invoice" onClick={() => setEarningsRow(row)}>View Earnings</ActionButton>
-          {can('riders', 'approve') && row.verification !== 'Approved' ? <ActionButton icon={CircleCheck} tone="approve" onClick={() => riderStore.patch(row.id, { verification: 'Approved', status: 'Active' })}>Approve</ActionButton> : null}
+          {can('riders', 'approve') && row.verification !== 'Approved' ? <ActionButton icon={CircleCheck} tone="approve" onClick={() => setToast('Rider approval is not available on the server yet.')}>Approve</ActionButton> : null}
           {can('riders', 'suspend') && row.status !== 'Suspended' && row.status !== 'Pending' ? <ActionButton icon={Pause} tone="danger" onClick={() => setConfirm({ type: 'suspend', row })}>Deactivate</ActionButton> : null}
-          {can('riders', 'activate') && (row.status === 'Suspended' || row.status === 'Offline') ? <ActionButton icon={CircleCheck} tone="approve" onClick={() => riderStore.patch(row.id, { status: 'Active' })}>Activate</ActionButton> : null}
+          {can('riders', 'activate') && (row.status === 'Suspended' || row.status === 'Offline') ? <ActionButton icon={CircleCheck} tone="approve" onClick={() => setToast('Rider activation is not available on the server yet.')}>Activate</ActionButton> : null}
           <ActionButton icon={Trash2} tone="danger" onClick={() => setConfirm({ type: 'delete', row })}>Delete</ActionButton>
         </ActionGroup>
       ),
@@ -119,7 +120,7 @@ export default function Riders() {
     <PageContainer className="space-y-4">
       <PageHeader action={<Button icon={Plus} onClick={() => { setDraft({ name: '', phone: '', vehicle: defaultVehicleCategoryName(), zone: 'Navrangpura', status: 'Pending' }); setErrors({}); setCreate(true); }}>Add Rider</Button>} />
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        {riderMetrics.map((kpi) => (
+        {riderKpis.map((kpi) => (
           <KpiCard key={kpi.id} icon={icons[kpi.id]} {...kpi} onClick={kpi.id === 'active' ? () => setStatusFilter('Active') : undefined} />
         ))}
       </section>
@@ -130,7 +131,7 @@ export default function Riders() {
         {data.length === 0 ? <EmptyState title="No riders found" description="Try changing your filters or search criteria." action={<Button variant="secondary" onClick={() => setStatusFilter('All')}>Clear Filters</Button>} /> : <DataTable columns={columns} data={data} mobileTitleKey="name" pageSize={8} itemLabel="riders" compact />}
       </GlassCard>
 
-      <Modal open={Boolean(edit)} title={edit?._assign ? 'Assign vehicle' : 'Edit rider'} onClose={() => setEdit(null)} footer={<><Button variant="ghost" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={() => { if (!edit.phone?.trim()) return; riderStore.upsert(edit); setEdit(null); setToast('Rider updated.'); }}>Save</Button></>}>
+      <Modal open={Boolean(edit)} title={edit?._assign ? 'Assign vehicle' : 'Edit rider'} onClose={() => setEdit(null)} footer={<><Button variant="ghost" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={() => { setEdit(null); setToast('Editing riders from Admin is not available on the server yet.'); }}>Save</Button></>}>
         {edit ? (
           <div className="space-y-3">
             <Field label="Name"><input className={inputClass} value={edit.name} onChange={(event) => setEdit({ ...edit, name: event.target.value })} /></Field>
@@ -151,9 +152,8 @@ export default function Riders() {
         const issues = compactErrors({ name: required(draft.name, 'Name is required.'), phone: required(draft.phone, 'Phone number cannot be empty.') });
         setErrors(issues);
         if (Object.keys(issues).length) return;
-        riderStore.upsert({ id: nextId('R', riders), ...draft, rating: 0, deliveries: 0, earnings: 0, verification: 'Pending', onTime: 0, cancelRate: 0, score: 0, monthDeliveries: 0, joined: '17 Aug 2026' });
         setCreate(false);
-        setToast('Rider added.');
+        setToast('Adding riders from Admin is not available on the server yet.');
       }}>Save</Button></>}>
         <div className="space-y-3">
           <Field label="Name" error={errors.name}><input className={inputClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
@@ -168,7 +168,7 @@ export default function Riders() {
           <DetailSection title="Rider earnings">
             <DetailRow label="Lifetime" value={formatINR(earningsRow.earnings)} />
             <DetailRow label="Deliveries" value={earningsRow.deliveries} />
-            <DetailRow label="Today" value={formatINR(earnings.find((item) => item.rider === earningsRow.name)?.total || 0)} />
+            <DetailRow label="Today" value={formatINR(0)} />
           </DetailSection>
         ) : null}
       </Drawer>
@@ -181,21 +181,19 @@ export default function Riders() {
           <>
             <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
             <Button variant="reject" onClick={() => {
-              if (confirm.type === 'suspend') riderStore.patch(confirm.row.id, { status: 'Suspended' });
-              else riderStore.patch(confirm.row.id, { verification: 'Rejected', status: 'Offline' });
               setConfirm(null);
-              setToast('Rider updated.');
+              setToast('Changing rider access from Admin is not available on the server yet.');
             }}>{confirm?.type === 'suspend' ? 'Deactivate' : 'Reject'}</Button>
           </>
         }
       >
-        <p className="text-sm text-ink-muted">This will immediately change {confirm?.row?.name}'s access in the mock fleet.</p>
+        <p className="text-sm text-ink-muted">This would change {confirm?.row?.name}'s access. Rider status is owned by the server.</p>
       </Modal>
       <ConfirmDialog
         open={confirm?.type === 'delete'}
         description={`${confirm?.row?.name} will be removed from the rider list.`}
         onClose={() => setConfirm(null)}
-        onConfirm={() => { riderStore.remove(confirm.row.id); setConfirm(null); setToast('Rider deleted.'); }}
+        onConfirm={() => { setConfirm(null); setToast('Deleting riders from Admin is not available on the server yet.'); }}
       />
       <Toast open={Boolean(toast)} message={toast} onClose={() => setToast('')} />
     </PageContainer>

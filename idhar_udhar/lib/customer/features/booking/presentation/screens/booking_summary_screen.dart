@@ -1,9 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/business/business.dart';
 
 import '../../../../core/constants/app_copy.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
@@ -12,38 +18,86 @@ import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
-import 'package:idhar_udhar/shared/business/business.dart';
 
-class BookingSummaryScreen extends ConsumerWidget {
+class BookingSummaryScreen extends ConsumerStatefulWidget {
   const BookingSummaryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BookingSummaryScreen> createState() =>
+      _BookingSummaryScreenState();
+}
+
+class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_prefetchQuote());
+    });
+  }
+
+  Future<void> _prefetchQuote() async {
+    try {
+      await ensureCustomerQuote(ref);
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {
+      // Confirm path shows the mapped error; keep the existing layout.
+    }
+  }
+
+  Future<void> _confirm() async {
+    if (_busy) {
+      return;
+    }
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    final String? blocked =
+        draft.incompleteStopMessage ?? draft.paymentValidationError;
+    if (blocked != null) {
+      CustomSnackBar.error(context, blocked);
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final order = await confirmCustomerBooking(ref);
+      if (!mounted) {
+        return;
+      }
+      ref.read(sessionProvider.notifier).upsertOrder(order);
+      ref.read(backendQuoteHoldProvider.notifier).state = null;
+      context.go(AppRoutes.bookSearching);
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      CustomSnackBar.error(context, error.message);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      CustomSnackBar.error(context, 'Could not confirm this booking.');
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
+    final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
+    final ApiQuote? quote = hold?.quote;
+    final double displayedFare = quote?.tripFare ?? draft.estimatedFare;
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Confirm Booking',
-        onPressed: () {
-          final BookingDraft draft = ref.read(bookingDraftProvider);
-          final String? blocked = draft.incompleteStopMessage ??
-              draft.paymentValidationError;
-          if (blocked != null) {
-            CustomSnackBar.error(context, blocked);
-            return;
-          }
-          final order =
-              ref.read(bookingDraftProvider.notifier).confirmBooking();
-          if (order == null) {
-            CustomSnackBar.error(
-              context,
-              draft.incompleteStopMessage ?? 'Complete pickup and drop locations',
-            );
-            return;
-          }
-          ref.read(sessionProvider.notifier).upsertOrder(order);
-          context.go(AppRoutes.bookSearching);
-        },
+        isLoading: _busy,
+        onPressed: _busy ? null : _confirm,
       ),
       child: ListView(
         children: [
@@ -116,7 +170,7 @@ class BookingSummaryScreen extends ConsumerWidget {
                     ),
                   ),
                   Text(
-                    '₹${draft.estimatedFare.toStringAsFixed(0)}',
+                    '₹${displayedFare.toStringAsFixed(0)}',
                     style: AppTextStyles.headingM.copyWith(
                       color: AppColors.orange,
                     ),
@@ -131,13 +185,22 @@ class BookingSummaryScreen extends ConsumerWidget {
               children: [
                 Text('Fare breakdown', style: AppTextStyles.headingS),
                 const SizedBox(height: AppSpacing.md),
-                _fareLine('Trip Fare', draft.fareQuote.tripFare),
-                if (draft.fareBreakdown.distanceCharge > 0)
-                  _fareLine('Distance', draft.fareBreakdown.distanceCharge),
-                if (draft.fareBreakdown.waitingCharge > 0)
-                  _fareLine('Waiting', draft.fareBreakdown.waitingCharge),
-                if (draft.fareBreakdown.discount > 0)
-                  _fareLine('Discount', draft.fareBreakdown.discount),
+                _fareLine('Trip Fare', quote?.tripFare ?? draft.fareQuote.tripFare),
+                if ((quote?.distanceCharge ?? draft.fareBreakdown.distanceCharge) > 0)
+                  _fareLine(
+                    'Distance',
+                    quote?.distanceCharge ?? draft.fareBreakdown.distanceCharge,
+                  ),
+                if ((quote?.waiting ?? draft.fareBreakdown.waitingCharge) > 0)
+                  _fareLine(
+                    'Waiting',
+                    quote?.waiting ?? draft.fareBreakdown.waitingCharge,
+                  ),
+                if ((quote?.discount ?? draft.fareBreakdown.discount) > 0)
+                  _fareLine(
+                    'Discount',
+                    quote?.discount ?? draft.fareBreakdown.discount,
+                  ),
                 const Divider(height: 24),
                 Row(
                   children: [
@@ -287,7 +350,7 @@ class BookingSummaryScreen extends ConsumerWidget {
                 const Divider(height: 28),
                 _row(
                   'Trip / Fare',
-                  '₹${draft.fareQuote.tripFare.toStringAsFixed(0)}',
+                  '₹${displayedFare.toStringAsFixed(0)}',
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(

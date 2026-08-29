@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Eye, Pencil, Plus, Power, Trash2 } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
@@ -9,6 +9,7 @@ import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
 import Drawer from '../components/common/Drawer';
 import EmptyState from '../components/common/EmptyState';
+import ErrorState from '../components/common/ErrorState';
 import Field, { inputClass } from '../components/common/Field';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
@@ -16,42 +17,94 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import Toast from '../components/common/Toast';
 import PageHeader from '../components/common/PageHeader';
 import { TableSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import usePanelState from '../hooks/usePanelState';
 import useQueryAction from '../hooks/useQueryAction';
 import { zoneStore } from '../services/stores';
-import { nextId } from '../utils/ids';
 import { compactErrors, required } from '../utils/validation';
+import { createAdminZone, deleteAdminZone, fetchAdminZones, updateAdminZone } from '../api/adminApi';
+import { ApiError } from '../api/errors';
 
 const emptyZone = { id: '', name: '', area: '', activeRiders: 0, orders: 0, status: 'Active' };
 
 export default function Zones() {
   const { searchQuery } = useOutletContext() || {};
-  const loading = useMockLoader();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const rows = useStore(zoneStore);
   const panel = usePanelState(emptyZone);
   useQueryAction('add', panel.openCreate);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchAdminZones()
+      .then((next) => {
+        if (!cancelled) {
+          zoneStore.replace(next);
+          setLoadError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
     return rows.filter((row) => `${row.id} ${row.name} ${row.area}`.toLowerCase().includes(query));
   }, [rows, searchQuery]);
 
-  function save() {
+  async function save() {
     const issues = compactErrors({
       name: required(panel.form.name, 'Zone name is required.'),
-      area: required(panel.form.area, 'Area is required.'),
     });
     panel.setErrors(issues);
     if (Object.keys(issues).length) return;
-    const id = panel.form.id || nextId('ZN', rows);
-    zoneStore.upsert({ ...panel.form, id, activeRiders: Number(panel.form.activeRiders) || 0, orders: Number(panel.form.orders) || 0 });
-    panel.setToast(panel.mode === 'edit' ? 'Zone updated.' : 'Zone created.');
-    panel.closeForm();
+    try {
+      const payload = { name: panel.form.name, active: panel.form.status !== 'Inactive' };
+      if (panel.form.id) {
+        zoneStore.upsert(await updateAdminZone(panel.form.id, payload));
+        panel.setToast('Zone updated.');
+      } else {
+        zoneStore.upsert(await createAdminZone(payload));
+        panel.setToast('Zone created.');
+      }
+      panel.closeForm();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'ZONE_NAME_TAKEN') {
+        panel.setErrors({ name: error.message });
+        return;
+      }
+      panel.setToast(error.message || 'Could not save zone.');
+    }
   }
 
   if (loading) return <TableSkeleton />;
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Couldn't load zones"
+        description={loadError.message || 'The Admin Panel could not load zones from NestJS. Dummy records are not shown.'}
+        onRetry={() => {
+          setLoading(true);
+          fetchAdminZones()
+            .then((next) => {
+              zoneStore.replace(next);
+              setLoadError(null);
+            })
+            .catch((error) => setLoadError(error))
+            .finally(() => setLoading(false));
+        }}
+      />
+    );
+  }
 
   const columns = [
     { key: 'id', label: 'Zone ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
@@ -68,7 +121,14 @@ export default function Zones() {
         <ActionGroup>
           <ActionButton icon={Eye} tone="view" onClick={() => panel.setView(row)}>View</ActionButton>
           <ActionButton icon={Pencil} tone="edit" onClick={() => panel.openEdit(row)}>Edit</ActionButton>
-          <ActionButton icon={Power} tone={row.status === 'Active' ? 'danger' : 'approve'} onClick={() => { zoneStore.patch(row.id, { status: row.status === 'Active' ? 'Inactive' : 'Active' }); panel.setToast(row.status === 'Active' ? 'Zone deactivated.' : 'Zone activated.'); }}>{row.status === 'Active' ? 'Deactivate' : 'Activate'}</ActionButton>
+          <ActionButton icon={Power} tone={row.status === 'Active' ? 'danger' : 'approve'} onClick={async () => {
+            try {
+              zoneStore.upsert(await updateAdminZone(row.id, { active: row.status === 'Active' ? false : true }));
+              panel.setToast(row.status === 'Active' ? 'Zone deactivated.' : 'Zone activated.');
+            } catch (error) {
+              panel.setToast(error.message || 'Could not update zone.');
+            }
+          }}>{row.status === 'Active' ? 'Deactivate' : 'Activate'}</ActionButton>
           <ActionButton icon={Trash2} tone="danger" onClick={() => panel.setConfirm(row)}>Delete</ActionButton>
         </ActionGroup>
       ),
@@ -105,7 +165,17 @@ export default function Zones() {
           </DetailSection>
         ) : null}
       </Drawer>
-      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.name} will be removed from operations.`} onClose={() => panel.setConfirm(null)} onConfirm={() => { zoneStore.remove(panel.confirm.id); panel.setConfirm(null); panel.setToast('Zone deleted.'); }} />
+      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.name} will be removed from operations.`} onClose={() => panel.setConfirm(null)} onConfirm={async () => {
+        try {
+          await deleteAdminZone(panel.confirm.id);
+          zoneStore.remove(panel.confirm.id);
+          panel.setConfirm(null);
+          panel.setToast('Zone deleted.');
+        } catch (error) {
+          panel.setToast(error.message || 'Could not delete zone.');
+          panel.setConfirm(null);
+        }
+      }} />
       <Toast open={Boolean(panel.toast)} message={panel.toast} onClose={() => panel.setToast('')} />
     </PageContainer>
   );

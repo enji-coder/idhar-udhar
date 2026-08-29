@@ -7,18 +7,17 @@ import DataTable from '../components/common/DataTable';
 import GlassCard from '../components/common/GlassCard';
 import KpiCard from '../components/common/KpiCard';
 import QuickActionCard from '../components/common/QuickActionCard';
-import { PageSkeleton } from '../components/common/Skeleton';
 import StatusBadge from '../components/common/StatusBadge';
 import Tabs from '../components/common/Tabs';
 import { ASSETS } from '../config/assets';
 import { useAuth } from '../context/AuthContext';
 import { publishDashboardLive } from '../hooks/dashboardLive';
-import useMockLoader from '../hooks/useMockLoader';
 import usePaymentSettings from '../hooks/usePaymentSettings';
 import useStore from '../hooks/useStore';
 import PageContainer from '../components/layout/PageContainer';
-import { buildDashboardMetrics, REVENUE_PERIODS } from '../services/dashboardMetrics';
+import { hydrateAdminDirectory } from '../api/hydrate';
 import { customerStore, orderStore, riderStore } from '../services/stores';
+import { buildDashboardMetrics, REVENUE_PERIODS } from '../services/dashboardMetrics';
 import { formatINR } from '../utils/format';
 
 const kpiIcons = {
@@ -49,7 +48,6 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { searchQuery } = useOutletContext() || {};
   const { user } = useAuth();
-  const loading = useMockLoader();
   const orders = useStore(orderStore);
   const riders = useStore(riderStore);
   const customers = useStore(customerStore);
@@ -61,19 +59,21 @@ export default function Dashboard() {
   const inFlightRef = useRef(false);
 
   useEffect(() => {
-    function refresh() {
+    async function refresh() {
       if (document.hidden || inFlightRef.current) return;
       inFlightRef.current = true;
       publishDashboardLive({ phase: 'updating' });
-      orderStore.getAll();
-      riderStore.getAll();
-      customerStore.getAll();
-      setTick((value) => value + 1);
-      window.clearTimeout(settleRef.current);
-      settleRef.current = window.setTimeout(() => {
-        publishDashboardLive({ phase: 'live', updatedAt: Date.now() });
+      try {
+        await hydrateAdminDirectory({ silent: true });
+        setTick((value) => value + 1);
+        window.clearTimeout(settleRef.current);
+        settleRef.current = window.setTimeout(() => {
+          publishDashboardLive({ phase: 'live', updatedAt: Date.now() });
+          inFlightRef.current = false;
+        }, 280);
+      } catch {
         inFlightRef.current = false;
-      }, 280);
+      }
     }
 
     function onVisibility() {
@@ -113,8 +113,6 @@ export default function Dashboard() {
       delayed: orders.filter((row) => row.status === 'In Transit' && Number.parseInt(row.eta, 10) > 20).length,
     };
   }, [orders, riders, tick]);
-
-  if (loading) return <PageSkeleton />;
 
   const highlightKpis = metrics.kpis;
 
@@ -220,7 +218,6 @@ export default function Dashboard() {
         <h2 className="mb-3 text-lg font-semibold text-ink">Quick Actions</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
           <QuickActionCard icon={Plus} label="+ Add Rider" onClick={() => navigate('/riders?action=add')} />
-          <QuickActionCard icon={Users} label="+ Add Customer" onClick={() => navigate('/customers?action=add')} />
           <QuickActionCard icon={Truck} label="+ Add Vehicle" onClick={() => navigate('/vehicles?action=add')} />
           <QuickActionCard icon={Package} label="+ Create Order" onClick={() => navigate('/orders?action=add')} />
           <QuickActionCard icon={MapPinned} label="+ Create Zone" onClick={() => navigate('/zones?action=add')} />

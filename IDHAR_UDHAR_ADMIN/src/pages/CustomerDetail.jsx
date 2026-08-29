@@ -1,21 +1,16 @@
 import { Link, useParams } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import PageContainer from '../components/layout/PageContainer';
 import GlassCard from '../components/common/GlassCard';
 import StatusBadge from '../components/common/StatusBadge';
 import DataTable from '../components/common/DataTable';
 import ErrorState from '../components/common/ErrorState';
-import Button from '../components/common/Button';
-import Modal from '../components/common/Modal';
-import Field, { inputClass } from '../components/common/Field';
 import { PageSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import { customerStore, orderStore, paymentStore } from '../services/stores';
-import { activityTimeline, customerAddresses } from '../data/mockData';
-import { useAuth } from '../context/AuthContext';
 import { formatINR } from '../utils/format';
 import { formatAppDate, formatAppTime, parseAppDate, sortByDateTime } from '../utils/dates';
+import { fetchAdminCustomer } from '../api/adminApi';
 
 function orderHistoryColumns() {
   return [
@@ -32,14 +27,13 @@ function orderHistoryColumns() {
 
 export default function CustomerDetail() {
   const { id } = useParams();
-  const { can } = useAuth();
-  const loading = useMockLoader();
   const customers = useStore(customerStore);
   const orders = useStore(orderStore);
   const payments = useStore(paymentStore);
-  const customer = customers.find((item) => item.id === id);
-  const [edit, setEdit] = useState(false);
-  const [draft, setDraft] = useState(null);
+  const stored = customers.find((item) => item.id === id);
+  const [customer, setCustomer] = useState(stored || null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const history = useMemo(
     () => sortByDateTime(orders.filter((order) => order.customerId === id || order.customer === customer?.name)),
     [orders, id, customer?.name],
@@ -47,19 +41,44 @@ export default function CustomerDetail() {
   const pay = useMemo(
     () => sortByDateTime(
       payments
-        .filter((item) => item.customer === customer?.name)
+        .filter((item) => item.customer === customer?.name || orders.some((order) => order.customerId === id && (order.backendOrderId === item.backendOrderId || order.id === item.orderId)))
         .map((item) => {
-          const order = orders.find((row) => row.id === item.orderId);
+          const order = orders.find((row) => row.backendOrderId === item.backendOrderId || row.id === item.orderId);
           return { ...item, time: item.time || order?.time };
         }),
     ),
-    [payments, orders, customer?.name],
+    [payments, orders, customer?.name, id],
   );
-  const addresses = customerAddresses[id] || [];
+  const addresses = [];
+
+  useEffect(() => {
+    if (!id) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    fetchAdminCustomer(id)
+      .then((row) => {
+        if (!cancelled) {
+          setCustomer(row);
+          setLoadError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   if (loading) return <PageSkeleton />;
+  if (loadError && !customer) {
+    return <PageContainer><ErrorState title="Couldn't load customer" description={loadError.message || 'The customer API did not respond. Dummy records are not shown.'} /></PageContainer>;
+  }
   if (!customer) {
-    return <PageContainer><ErrorState title="Customer not found" description="This customer ID is not in the mock directory." /></PageContainer>;
+    return <PageContainer><ErrorState title="Customer not found" description="This customer is not in the current directory." /></PageContainer>;
   }
 
   return (
@@ -75,18 +94,17 @@ export default function CustomerDetail() {
             <div className="flex justify-between"><dt className="text-ink-muted">Spent</dt><dd>{formatINR(customer.spent)}</dd></div>
             <StatusBadge status={customer.account || 'Active'} />
           </dl>
-          {can('customers', 'edit') ? <Button className="mt-4" size="sm" variant="edit" onClick={() => { setDraft(customer); setEdit(true); }}>Edit</Button> : null}
         </GlassCard>
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Addresses</h3>
           <ul className="space-y-2 text-sm">
-            {addresses.map((address) => <li key={address} className="rounded-2xl bg-white/70 px-3 py-3">{address}</li>)}
+            {addresses.length ? addresses.map((address) => <li key={address} className="rounded-2xl bg-white/70 px-3 py-3">{address}</li>) : <li className="text-ink-muted">No saved addresses on the server.</li>}
           </ul>
         </GlassCard>
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Activity</h3>
           <ul className="space-y-3 text-sm">
-            {activityTimeline.map((item) => <li key={item.time}><span className="font-semibold text-brand-600">{item.time}</span> {item.text}</li>)}
+            {history.length ? history.slice(0, 8).map((item) => <li key={item.id}><span className="font-semibold text-brand-600">{item.status}</span> {item.id}</li>) : <li className="text-ink-muted">No recent order activity.</li>}
           </ul>
         </GlassCard>
       </section>
@@ -111,15 +129,6 @@ export default function CustomerDetail() {
           itemLabel="payments"
         />
       </GlassCard>
-      <Modal open={edit} title="Edit customer" onClose={() => setEdit(false)} footer={<><Button variant="ghost" onClick={() => setEdit(false)}>Cancel</Button><Button onClick={() => { customerStore.upsert(draft); setEdit(false); }}>Save</Button></>}>
-        {draft ? (
-          <div className="space-y-3">
-            <Field label="Name"><input className={inputClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
-            <Field label="Phone"><input className={inputClass} value={draft.phone} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} /></Field>
-            <Field label="Area"><input className={inputClass} value={draft.area} onChange={(event) => setDraft({ ...draft, area: event.target.value })} /></Field>
-          </div>
-        ) : null}
-      </Modal>
     </PageContainer>
   );
 }

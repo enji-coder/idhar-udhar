@@ -6,17 +6,17 @@ export const MODULES = [
   { key: 'vehicles', label: 'Vehicles', paths: ['/vehicles', '/vehicle-categories'] },
   { key: 'deliveries', label: 'Deliveries', paths: ['/live', '/tracking'] },
   { key: 'payments', label: 'Payments', paths: ['/payments'] },
-  { key: 'revenue', label: 'Revenue', paths: ['/reports'] },
-  { key: 'finance', label: 'Finance', paths: ['/payments', '/wallet', '/invoices', '/purchase-invoices', '/earnings', '/payouts'] },
+  { key: 'revenue', label: 'Revenue', paths: ['/reports', '/gst-reports'] },
+  { key: 'finance', label: 'Finance', paths: ['/payments', '/wallet', '/invoices', '/purchase-invoices', '/earnings', '/payouts', '/gst-reports'] },
   { key: 'invoices', label: 'Invoices', paths: ['/invoices', '/purchase-invoices'] },
-  { key: 'reports', label: 'Reports', paths: ['/reports'] },
+  { key: 'reports', label: 'Reports', paths: ['/reports', '/gst-reports'] },
   { key: 'masterReport', label: 'Master Report', paths: ['/reports'] },
   { key: 'settings', label: 'Settings', paths: ['/settings'] },
 ];
 
 export const MODULE_KEYS = MODULES.map((item) => item.key);
 
-export const FINANCE_PATHS = ['/payments', '/wallet', '/invoices', '/purchase-invoices', '/earnings', '/payouts'];
+export const FINANCE_PATHS = ['/payments', '/wallet', '/invoices', '/purchase-invoices', '/earnings', '/payouts', '/gst-reports'];
 
 export const ROLES = {
   SUPER_ADMIN: 'Super Admin',
@@ -55,6 +55,7 @@ const pathRoles = {
   '/invoices': [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.MANAGER, ROLES.SUPPORT, ROLES.SUB_ADMIN],
   '/purchase-invoices': [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.MANAGER, ROLES.SUB_ADMIN],
   '/announcements': [ROLES.SUPER_ADMIN, ROLES.MANAGER, ROLES.OPERATIONS, ROLES.SUB_ADMIN],
+  '/gst-reports': [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.SUB_ADMIN],
 };
 
 const actions = {
@@ -110,6 +111,12 @@ const actions = {
     view: [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.MANAGER, ROLES.SUB_ADMIN],
     export: [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.MANAGER, ROLES.SUB_ADMIN],
   },
+  gstReports: {
+    view: [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.SUB_ADMIN],
+    export: [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.SUB_ADMIN],
+    // The backend restricts publishing a GST version to these two roles.
+    configure: [ROLES.SUPER_ADMIN, ROLES.FINANCE],
+  },
   payouts: {
     view: [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.SUB_ADMIN],
     approve: [ROLES.SUPER_ADMIN, ROLES.FINANCE],
@@ -142,12 +149,15 @@ export function can(userOrRole, module, action) {
     }
     if (module === 'payments' && action === 'refund') return false;
     if (module === 'settings') return false;
+    // Only SUPER_ADMIN and FINANCE may publish a GST version server-side.
+    if (module === 'gstReports' && action === 'configure') return false;
     const mapped = {
       orders: 'orders',
       riders: 'riders',
       customers: 'customers',
       payments: 'payments',
       reports: 'reports',
+      gstReports: 'reports',
       payouts: 'finance',
       coupons: 'dashboard',
       promotions: 'dashboard',

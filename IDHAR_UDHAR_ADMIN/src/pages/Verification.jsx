@@ -15,7 +15,6 @@ import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import { TableSkeleton } from '../components/common/Skeleton';
 import useMockLoader from '../hooks/useMockLoader';
 import { useAuth } from '../context/AuthContext';
-import { verifications as seed } from '../data/mockData';
 
 const tabs = [
   { value: 'All', label: 'All' },
@@ -29,7 +28,7 @@ export default function Verification() {
   const { searchQuery } = useOutletContext() || {};
   const { can } = useAuth();
   const loading = useMockLoader();
-  const [rows, setRows] = useState(seed);
+  const [rows, setRows] = useState([]);
   const [tab, setTab] = useState('All');
   const [selected, setSelected] = useState(null);
   const [view, setView] = useState(null);

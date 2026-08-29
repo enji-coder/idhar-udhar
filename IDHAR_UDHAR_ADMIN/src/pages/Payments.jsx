@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { Eye, Download, FileText, RotateCcw } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
@@ -14,9 +14,10 @@ import Tabs from '../components/common/Tabs';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import { TableSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
+import ErrorState from '../components/common/ErrorState';
 import useStore from '../hooks/useStore';
-import { paymentStore } from '../services/stores';
+import { orderStore, paymentStore } from '../services/stores';
+import { fetchAdminPayments } from '../api/adminApi';
 import { downloadCsv, formatINR } from '../utils/format';
 import { formatNumericOrderId, invoiceNumberFor } from '../utils/orderId';
 import { useAuth } from '../context/AuthContext';
@@ -33,12 +34,53 @@ export default function Payments() {
   const navigate = useNavigate();
   const { searchQuery } = useOutletContext() || {};
   const { can } = useAuth();
-  const loading = useMockLoader();
-  const transactions = useStore(paymentStore);
+  const stored = useStore(paymentStore);
+  const orders = useStore(orderStore);
   const [tab, setTab] = useState('All');
   const [method, setMethod] = useState('All');
   const [selected, setSelected] = useState(null);
   const [refund, setRefund] = useState(null);
+  const [fetched, setFetched] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchAdminPayments()
+      .then((rows) => {
+        if (!cancelled) {
+          paymentStore.replace(rows);
+          setFetched(rows);
+          setLoadError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          paymentStore.replace([]);
+          setFetched([]);
+          setLoadError(error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const transactions = useMemo(() => {
+    const source = fetched ?? stored;
+    return source.map((row) => {
+      const order = orders.find((item) => item.backendOrderId === row.backendOrderId || item.id === row.orderId);
+      return {
+        ...row,
+        customer: order?.customer || row.customer,
+        orderId: order?.id || row.orderId,
+      };
+    });
+  }, [fetched, stored, orders]);
 
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
@@ -49,6 +91,16 @@ export default function Payments() {
   }, [tab, method, searchQuery, transactions]);
 
   if (loading) return <TableSkeleton />;
+  if (loadError) {
+    return (
+      <PageContainer>
+        <ErrorState
+          title="Couldn't load payments"
+          description={loadError.message || 'The payments API did not respond. Dummy transactions are not shown.'}
+        />
+      </PageContainer>
+    );
+  }
 
   const columns = [
     { key: 'orderId', label: 'Order ID', render: (row) => formatNumericOrderId(row.orderId) },
@@ -114,11 +166,11 @@ export default function Payments() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setRefund(null)}>Cancel</Button>
-            <Button variant="reject" onClick={() => { paymentStore.patch(refund.id, { status: 'Refunded' }); setRefund(null); }}>Refund</Button>
+            <Button variant="reject" onClick={() => setRefund(null)}>Close</Button>
           </>
         }
       >
-        <p className="text-sm text-ink-muted">Refund {refund ? formatINR(refund.amount) : ''} to {refund?.customer}.</p>
+        <p className="text-sm text-ink-muted">Refunds are not available on the server yet. {refund ? `${formatINR(refund.amount)} for ${refund.customer}` : ''} remains unchanged.</p>
       </Modal>
     </PageContainer>
   );

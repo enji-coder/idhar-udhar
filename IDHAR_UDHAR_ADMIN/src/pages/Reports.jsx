@@ -13,8 +13,6 @@ import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import BarChart from '../components/charts/BarChart';
 import EmptyState from '../components/common/EmptyState';
 import FilterBar from '../components/common/FilterBar';
-import { PageSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import {
   auditStore,
@@ -26,7 +24,6 @@ import {
   riderStore,
   vehicleStore,
 } from '../services/stores';
-import { monthlyRevenue, yearlyComparison } from '../data/mockData';
 import { formatCompactINR, formatINR, formatINRExact, printReport } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { filterByDate, joinOrders, searchRows } from '../services/reportJoin';
@@ -45,6 +42,17 @@ import {
 } from '../config/status';
 
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function orderTripFare(order) {
+  return Number(order?.financeSnapshot?.totalAmount ?? order?.tripFare ?? order?.amount ?? 0);
+}
+
+function ordersInYear(orders, yearNum) {
+  return orders.filter((order) => {
+    const stamp = parseAppDate(order.date);
+    return stamp && stamp.getFullYear() === yearNum;
+  });
+}
 
 const reportTypes = [
   { value: 'orders', label: 'Order Report' },
@@ -78,7 +86,6 @@ function money(row, key) {
 }
 
 export default function Reports() {
-  const loading = useMockLoader();
   const { can, user } = useAuth();
   const orders = useStore(orderStore);
   const riders = useStore(riderStore);
@@ -120,15 +127,23 @@ export default function Reports() {
   const dated = useMemo(() => filterByDate(joined, range.from, range.to, 'orderDate'), [joined, range]);
 
   const chart = useMemo(() => {
+    const yearNum = Number(year);
     if (chartMode === 'yearly') {
-      return Object.entries(monthlyRevenue).map(([label, values]) => ({
-        label,
-        value: values.reduce((sum, item) => sum + item, 0),
+      const years = [...new Set(orders.map((order) => parseAppDate(order.date)?.getFullYear()).filter(Boolean))];
+      const labels = years.length ? years.sort() : [yearNum];
+      return labels.map((label) => ({
+        label: String(label),
+        value: ordersInYear(orders, label).reduce((sum, order) => sum + orderTripFare(order), 0),
       }));
     }
-    const values = monthlyRevenue[year] || monthlyRevenue[2026];
-    return months.map((label, index) => ({ label: label.slice(0, 3), value: values[index] || 0 })).filter((item) => item.value > 0 || year !== '2026');
-  }, [year, chartMode]);
+    return months.map((label, index) => ({
+      label: label.slice(0, 3),
+      value: orders.filter((order) => {
+        const stamp = parseAppDate(order.date);
+        return stamp && stamp.getFullYear() === yearNum && stamp.getMonth() === index;
+      }).reduce((sum, order) => sum + orderTripFare(order), 0),
+    }));
+  }, [year, chartMode, orders]);
 
   const table = useMemo(() => {
     if (type === 'riders') {
@@ -458,10 +473,14 @@ export default function Reports() {
     [visibleRows, pay],
   );
 
-  if (loading) return <PageSkeleton />;
-
   const title = reportTypes.find((item) => item.value === type)?.label;
-  const revenueGrowth = (((yearlyComparison.revenue.current - yearlyComparison.revenue.previous) / yearlyComparison.revenue.previous) * 100).toFixed(1);
+  const currentYearRevenue = ordersInYear(orders, Number(year)).reduce((sum, order) => sum + orderTripFare(order), 0);
+  const previousYearRevenue = ordersInYear(orders, Number(year) - 1).reduce((sum, order) => sum + orderTripFare(order), 0);
+  const currentYearOrders = ordersInYear(orders, Number(year)).length;
+  const previousYearOrders = ordersInYear(orders, Number(year) - 1).length;
+  const revenueGrowth = previousYearRevenue
+    ? (((currentYearRevenue - previousYearRevenue) / previousYearRevenue) * 100).toFixed(1)
+    : currentYearRevenue ? '100.0' : '0.0';
   const exportCols = table.columns.map((column) => ({ key: column.key, label: column.label }));
   const totals = {
     amount: visibleRows.reduce((sum, row) => sum + Number(row.paymentAmount || row.customerPayment || row.amount || 0), 0),
@@ -500,10 +519,10 @@ export default function Reports() {
       </GlassCard>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <GlassCard><p className="text-sm text-ink-muted">2026 Revenue</p><p className="text-2xl font-bold">{formatCompactINR(yearlyComparison.revenue.current)}</p></GlassCard>
-        <GlassCard><p className="text-sm text-ink-muted">2025 Revenue</p><p className="text-2xl font-bold">{formatCompactINR(yearlyComparison.revenue.previous)}</p></GlassCard>
+        <GlassCard><p className="text-sm text-ink-muted">{year} Revenue</p><p className="text-2xl font-bold">{formatCompactINR(currentYearRevenue)}</p></GlassCard>
+        <GlassCard><p className="text-sm text-ink-muted">{Number(year) - 1} Revenue</p><p className="text-2xl font-bold">{formatCompactINR(previousYearRevenue)}</p></GlassCard>
         <GlassCard><p className="text-sm text-ink-muted">YoY growth</p><p className="text-2xl font-bold text-success">+{revenueGrowth}%</p></GlassCard>
-        <GlassCard><p className="text-sm text-ink-muted">Orders YoY</p><p className="text-2xl font-bold">{yearlyComparison.orders.previous.toLocaleString('en-IN')} → {yearlyComparison.orders.current.toLocaleString('en-IN')}</p></GlassCard>
+        <GlassCard><p className="text-sm text-ink-muted">Orders YoY</p><p className="text-2xl font-bold">{previousYearOrders.toLocaleString('en-IN')} → {currentYearOrders.toLocaleString('en-IN')}</p></GlassCard>
       </div>
 
       <GlassCard className="overflow-hidden">
@@ -516,9 +535,9 @@ export default function Reports() {
 
       <div className="grid gap-3 md:grid-cols-4">
         {[
-          ['Customer growth', `${yearlyComparison.customers.previous} → ${yearlyComparison.customers.current}`],
-          ['Rider growth', `${yearlyComparison.riders.previous} → ${yearlyComparison.riders.current}`],
-          ['On-time', `${yearlyComparison.onTime.previous}% → ${yearlyComparison.onTime.current}%`],
+          ['Customer growth', `0 → ${customers.length}`],
+          ['Rider growth', `0 → ${riders.length}`],
+          ['On-time', 'N/A'],
           ['Selected month', `${month} ${year}`],
         ].map(([label, value]) => (
           <GlassCard key={label}><p className="text-sm text-ink-muted">{label}</p><p className="font-semibold">{value}</p></GlassCard>

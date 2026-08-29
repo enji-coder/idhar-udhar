@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../state/rider_session.dart';
 import '../data/dummy/dummy_rider_repository.dart';
-import '../data/local/rider_prefs.dart';
 import '../routing/rider_routes.dart';
 import '../screens/profile/rider_profile_screen.dart';
 import '../theme/rider_colors.dart';
@@ -116,7 +116,7 @@ class RiderDrawer extends ConsumerWidget {
               ),
               onTap: () async {
                 Navigator.of(context).pop();
-                await RiderPrefs.clearLoggedIn();
+                await ref.read(riderSessionProvider.notifier).logout();
                 if (context.mounted) context.go(RiderRoutes.login);
               },
             ),

@@ -21,6 +21,7 @@ import {
   FileText,
   Receipt,
   UserRound,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export const navSections = [
@@ -51,6 +52,7 @@ export const navSections = [
       { label: 'Purchase Invoices', path: '/purchase-invoices', icon: Receipt },
       { label: 'Earnings', path: '/earnings', icon: Banknote },
       { label: 'Payouts', path: '/payouts', icon: Banknote },
+      { label: 'GST Reports', path: '/gst-reports', icon: FileSpreadsheet },
     ],
   },
   {
@@ -99,6 +101,7 @@ export const pageMeta = {
   '/invoices': { title: 'Invoices', subtitle: 'Customer invoices and billing.', crumbs: ['Finance', 'Invoices'] },
   '/purchase-invoices': { title: 'Purchase Invoices', subtitle: 'Vendor, vehicle and expense invoices.', crumbs: ['Finance', 'Purchase Invoices'] },
   '/announcements': { title: 'Company Announcements', subtitle: 'Internal and customer-facing notices.', crumbs: ['Management', 'Company Announcements'] },
+  '/gst-reports': { title: 'GST Reports', subtitle: 'GST on company commission from frozen finance snapshots.', crumbs: ['Finance', 'GST Reports'] },
 };
 
 export function resolvePageMeta(pathname) {

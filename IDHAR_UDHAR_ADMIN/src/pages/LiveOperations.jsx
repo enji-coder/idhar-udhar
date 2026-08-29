@@ -7,22 +7,22 @@ import DataTable from '../components/common/DataTable';
 import Drawer from '../components/common/Drawer';
 import Button from '../components/common/Button';
 import StatusBadge from '../components/common/StatusBadge';
-import { TableSkeleton } from '../components/common/Skeleton';
 import EmptyState from '../components/common/EmptyState';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import { orderStore, riderStore } from '../services/stores';
-import { mapStops, trackingPins } from '../data/mockData';
 import { theme } from '../config/theme';
 import { formatINR } from '../utils/format';
+import { transitionAdminOrder } from '../api/adminApi';
+import { hydrateAdminDirectory } from '../api/hydrate';
+import { UI_TO_CANONICAL } from '../api/mappers';
+import { ApiError } from '../api/errors';
 
 const liveStatuses = ['Assigned', 'Accepted', 'Rider Arriving', 'Picked Up', 'In Transit'];
 
 export default function LiveOperations() {
   const { searchQuery } = useOutletContext() || {};
-  const loading = useMockLoader();
   const rows = useStore(orderStore);
   const riders = useStore(riderStore);
   const [selected, setSelected] = useState(null);
@@ -47,8 +47,6 @@ export default function LiveOperations() {
     deliveryPending: data.filter((row) => ['Picked Up', 'In Transit'].includes(row.status)).length,
     delayed: data.filter((row) => row.delayed).length,
   }), [data, riders]);
-
-  if (loading) return <TableSkeleton />;
 
   const columns = [
     { key: 'id', label: 'Order ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
@@ -95,19 +93,9 @@ export default function LiveOperations() {
           <svg viewBox="0 0 100 70" className="h-full w-full" role="img" aria-label="Ahmedabad operations panel">
             <path d="M8 40 C22 18, 38 52, 55 28 S82 12, 94 36" fill="none" stroke={theme.primaryLight} strokeWidth="6" />
             <path d="M6 22 C30 48, 48 8, 70 32 S90 54, 98 28" fill="none" stroke={theme.chartTertiary} strokeWidth="3" />
-            {mapStops.map((stop) => (
-              <rect key={stop.id} x={stop.x - 1.4} y={stop.y - 1.4} width="2.8" height="2.8" rx="0.6" fill={stop.type === 'pickup' ? theme.cyan : theme.primaryDark} />
-            ))}
-            {trackingPins.map((pin) => (
-              <g key={pin.id}>
-                <circle cx={pin.x} cy={pin.y} r="3.2" fill={theme.primary} opacity="0.2" />
-                <circle cx={pin.x} cy={pin.y} r="1.6" fill={theme.primary} />
-                <text x={pin.x + 2.2} y={pin.y - 2} fontSize="2.4" fill="#0F1F3D">{pin.name.split(' ')[0]}</text>
-              </g>
-            ))}
           </svg>
           <div className="absolute bottom-3 left-3 rounded-2xl bg-white/90 px-3 py-2 text-xs shadow-card">
-            Ahmedabad live ops panel · dummy GPS overlay
+            Ahmedabad live ops panel · live GPS overlay not connected yet
           </div>
         </div>
       </GlassCard>
@@ -128,7 +116,19 @@ export default function LiveOperations() {
         footer={
           selected ? (
             <>
-              <Button variant="secondary" onClick={() => { orderStore.patch(selected.id, { status: 'In Transit', lastUpdated: '17 Aug 2026 1:48 PM' }); setSelected({ ...selected, status: 'In Transit' }); }}>Mark In Transit</Button>
+              <Button variant="secondary" onClick={async () => {
+                if (!selected?.backendOrderId) return;
+                try {
+                  await transitionAdminOrder(selected.backendOrderId, UI_TO_CANONICAL['In Transit'] || 'IN_TRANSIT');
+                  await hydrateAdminDirectory({ silent: true });
+                  setSelected((current) => (current ? { ...current, status: 'In Transit' } : current));
+                } catch (error) {
+                  setSelected((current) => current);
+                  if (error instanceof ApiError) {
+                    /* keep drawer open; status unchanged */
+                  }
+                }
+              }}>Mark In Transit</Button>
               <Button onClick={() => setSelected(null)}>Close</Button>
             </>
           ) : null

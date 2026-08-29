@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -15,11 +20,24 @@ import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_secondary_button.dart';
 import '../../widgets/rider_text_field.dart';
 
-class RiderWalletScreen extends ConsumerWidget {
+class RiderWalletScreen extends ConsumerStatefulWidget {
   const RiderWalletScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RiderWalletScreen> createState() => _RiderWalletScreenState();
+}
+
+class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(riderSessionProvider.notifier).refreshWallet());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final balance = ref.watch(riderWalletBalanceProvider);
     final codDue = ref.watch(riderCodDueProvider);
     final last = ref.watch(riderLastSettlementProvider);
@@ -78,7 +96,18 @@ class RiderWalletScreen extends ConsumerWidget {
               ref: ref,
               title: 'Add Money',
               confirmLabel: 'Add',
-              onConfirm: (amount) => applyRiderRecharge(ref, amount),
+              onConfirm: (amount) async {
+                try {
+                  await ref.read(walletApiProvider).recharge(amount);
+                  await ref.read(riderSessionProvider.notifier).refreshWallet();
+                } on ApiException catch (error) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error.message)),
+                    );
+                  }
+                }
+              },
             ),
           ),
           const SizedBox(height: RiderSpacing.md),
@@ -155,7 +184,7 @@ Future<void> _amountSheet({
                 Text(title, style: RiderTextStyles.title),
                 const SizedBox(height: RiderSpacing.sm),
                 Text(
-                  'Dummy local update only.',
+                  'Recharge is applied by the server. COD Due is settled first.',
                   style: RiderTextStyles.caption,
                 ),
                 const SizedBox(height: RiderSpacing.lg),

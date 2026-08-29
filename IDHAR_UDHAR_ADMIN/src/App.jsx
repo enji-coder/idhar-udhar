@@ -29,6 +29,7 @@ import Zones from './pages/Zones';
 import Invoices from './pages/Invoices';
 import PurchaseInvoices from './pages/PurchaseInvoices';
 import Announcements from './pages/Announcements';
+import GstReports from './pages/GstReports';
 
 export default function App() {
   return (
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/purchase-invoices" element={<PurchaseInvoices />} />
             <Route path="/announcements" element={<Announcements />} />
+            <Route path="/gst-reports" element={<GstReports />} />
             <Route path="/upi-settings" element={<Navigate to="/payments" replace />} />
             <Route path="/promo-codes" element={<Navigate to="/coupons" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

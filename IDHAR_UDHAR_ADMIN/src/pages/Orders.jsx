@@ -14,7 +14,6 @@ import ErrorState from '../components/common/ErrorState';
 import Toast from '../components/common/Toast';
 import Field, { inputClass } from '../components/common/Field';
 import FilterBar from '../components/common/FilterBar';
-import { TableSkeleton } from '../components/common/Skeleton';
 import OrderRowActions from '../components/orders/OrderRowActions';
 import OrderDetailDrawer from '../components/orders/OrderDetailDrawer';
 import ReassignRiderDrawer from '../components/orders/ReassignRiderDrawer';
@@ -23,17 +22,17 @@ import InvoicePreview from '../components/orders/InvoicePreview';
 import CreateOrderModal from '../components/orders/CreateOrderModal';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import PageHeader from '../components/common/PageHeader';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import useQueryAction from '../hooks/useQueryAction';
-import { customerStore, orderStore, paymentStore, riderStore, vehicleStore } from '../services/stores';
-import { composeOrderCode, nextNumericOrderId } from '../utils/orderId';
+import { customerStore, orderStore, riderStore, vehicleStore } from '../services/stores';
+import { ORDER_STATUSES, normalizeOrder } from '../services/orderRules';
 import { useAuth } from '../context/AuthContext';
 import { formatINR } from '../utils/format';
-import { ORDER_STATUSES, normalizeOrder } from '../services/orderRules';
 import { buildInvoice, downloadInvoicePdf, invoicePrintMarkup, invoiceShareText, printInvoiceHtml } from '../services/invoiceService';
-import { attachFinanceSnapshot } from '../services/commission';
-import { buildCreatePaymentPlan } from '../services/paymentPlan';
+import { assignAdminOrder, cancelAdminOrder, transitionAdminOrder } from '../api/adminApi';
+import { hydrateAdminDirectory } from '../api/hydrate';
+import { UI_TO_CANONICAL } from '../api/mappers';
+import { ApiError } from '../api/errors';
 import { vehicleCategoryNames, vehicleCategoryStore } from '../services/vehicleCategories';
 
 const activeStatuses = ['Assigned', 'Accepted', 'Rider Arriving', 'Picked Up', 'In Transit', 'Pending', 'Searching'];
@@ -53,7 +52,6 @@ export default function Orders() {
   const { searchQuery } = useOutletContext() || {};
   const { can } = useAuth();
   const [params, setParams] = useSearchParams();
-  const loading = useMockLoader();
   const rows = useStore(orderStore);
   const riders = useStore(riderStore);
   const customers = useStore(customerStore);
@@ -137,6 +135,16 @@ export default function Orders() {
     setSelectedId(null);
   }
 
+  async function runOrderApi(work, successMessage) {
+    try {
+      await work();
+      await hydrateAdminDirectory({ silent: true });
+      if (successMessage) setToast(successMessage);
+    } catch (error) {
+      setToast(error instanceof ApiError ? error.message : 'Could not update the order.');
+    }
+  }
+
   function handleAction(type, order) {
     if (type === 'proof') {
       openPanel('view', order);
@@ -177,14 +185,6 @@ export default function Orders() {
       render: (row) => <OrderRowActions order={row} can={can} onAction={handleAction} />,
     },
   ];
-
-  if (loading) {
-    return (
-      <PageContainer>
-        <TableSkeleton />
-      </PageContainer>
-    );
-  }
 
   if (error) {
     return (
@@ -253,9 +253,8 @@ export default function Orders() {
         can={can}
         onClose={closePanels}
         onAction={handleAction}
-        onSaveEdit={(values) => {
-          orderStore.patch(selected.id, values);
-          setToast('Order updated.');
+        onSaveEdit={() => {
+          setToast('Editing orders from Admin is not available on the server yet.');
           setPanel('view');
         }}
       />
@@ -267,15 +266,15 @@ export default function Orders() {
         orders={orders}
         onClose={() => setPanel('view')}
         onAssign={(rider) => {
-          orderStore.patch(selected.id, {
-            rider: rider.name,
-            riderId: rider.id,
-            vehicle: rider.vehicle,
-            vehicleNumber: rider.vehicleNumber,
-            status: selected.status === 'Pending' || selected.status === 'Searching' ? 'Assigned' : selected.status,
-          });
+          if (!selected?.backendOrderId) {
+            setToast('This mock order is not on the server.');
+            return;
+          }
+          runOrderApi(
+            () => assignAdminOrder(selected.backendOrderId, rider.id),
+            'Rider successfully reassigned.',
+          );
           setPanel('view');
-          setToast('Rider successfully reassigned.');
         }}
       />
 
@@ -309,16 +308,16 @@ export default function Orders() {
         open={Boolean(selected) && panel === 'cancel'}
         order={selected}
         onClose={() => setPanel('view')}
-        onConfirm={(reason, cancelledBy) => {
-          orderStore.patch(selected.id, {
-            status: 'Cancelled',
-            cancelReason: reason,
-            cancelledBy: cancelledBy || 'Admin',
-            cancelledAt: '17 Aug 2026, 1:45 PM',
-            paymentStatus: selected.paymentStatus === 'Paid' ? 'Refunded' : selected.paymentStatus,
-          });
-          setPanel('view');
-          setToast(`Order ${selected.id} cancelled.`);
+        onConfirm={() => {
+          if (!selected?.backendOrderId) {
+            setToast('This mock order is not on the server.');
+            return;
+          }
+          runOrderApi(
+            () => cancelAdminOrder(selected.backendOrderId),
+            'Order cancelled.',
+          );
+          setPanel(null);
         }}
       />
 
@@ -330,15 +329,13 @@ export default function Orders() {
           <>
             <Button variant="ghost" onClick={() => setRefund(null)}>Keep</Button>
             <Button variant="reject" icon={RotateCcw} onClick={() => {
-              orderStore.patch(refund.id, { status: 'Cancelled', cancelReason: 'Admin refund', cancelledBy: 'Admin', cancelledAt: '17 Aug 2026, 1:45 PM', paymentStatus: 'Refunded' });
-              paymentStore.upsert({ id: `TXN-R-${refund.id.slice(-4)}`, orderId: refund.id, customer: refund.customer, amount: refund.amount, method: refund.payment, status: 'Refunded', date: '14 Aug 2026' });
               setRefund(null);
-              setToast('Refund recorded.');
+              setToast('Refunds are not available on the server yet.');
             }}>Refund</Button>
           </>
         }
       >
-        <p className="text-sm text-ink-muted">This will mark {refund?.id} as cancelled and create a refund transaction in the mock ledger.</p>
+        <p className="text-sm text-ink-muted">Refunds are not available on the server yet. {refund ? `${formatINR(refund.amount)} for ${refund.customer}` : ''} remains unchanged.</p>
       </Modal>
 
       <Drawer
@@ -384,45 +381,16 @@ export default function Orders() {
         riders={riders}
         vehicles={vehicles}
         onClose={() => setCreateOpen(false)}
-        onSave={(values) => {
-          const orderId = nextNumericOrderId(rows);
-          const id = composeOrderCode(orderId);
-          const tripFare = Number(values.amount);
-          const { error, paymentPlan } = buildCreatePaymentPlan({
-            totalAmount: tripFare,
-            whoPays: values.whoPays,
-            customerAmount: Number(values.customerAmount || 0),
-            customerMode: values.customerMode,
-            receiverMode: values.receiverMode,
-            orderId: id,
-          });
-          if (error) {
-            setToast(error);
-            return;
-          }
-          const snapshot = attachFinanceSnapshot({ ...values, id, orderId, tripFare, amount: tripFare });
-          orderStore.upsert({
-            ...values,
-            id,
-            orderId,
-            customerId: values.customerId,
-            riderId: values.riderId,
-            tripFare,
-            amount: tripFare,
-            canonicalStatus: values.status === 'Assigned' ? 'assigned' : 'searching',
-            paymentPlan,
-            paymentStatus: 'UNPAID',
-            ...snapshot,
-          });
+        onSave={() => {
+          setToast('Creating orders from Admin is not available on the server yet.');
           setCreateOpen(false);
-          setToast('Order created.');
         }}
       />
       <ConfirmDialog
         open={Boolean(deleteRow)}
         description={`${deleteRow?.id} will be removed from the orders list.`}
         onClose={() => setDeleteRow(null)}
-        onConfirm={() => { orderStore.remove(deleteRow.id); setDeleteRow(null); setToast('Order deleted.'); }}
+        onConfirm={() => { setDeleteRow(null); setToast('Deleting orders from Admin is not available on the server yet.'); }}
       />
       <Modal
         open={Boolean(statusRow)}
@@ -432,7 +400,27 @@ export default function Orders() {
       >
         <div className="grid gap-2 sm:grid-cols-2">
           {ORDER_STATUSES.map((status) => (
-            <Button key={status} variant="secondary" onClick={() => { orderStore.patch(statusRow.id, { status, lastUpdated: '17 Aug 2026 1:45 PM', ...(status === 'Delivered' || status === 'Cancelled' || status === 'Failed' ? attachFinanceSnapshot({ ...statusRow, status }) : {}) }); setStatusRow(null); setToast(`Status updated to ${status}.`); }}>{status}</Button>
+            <Button key={status} variant="secondary" onClick={() => {
+              if (!statusRow?.backendOrderId) {
+                setToast('This mock order is not on the server.');
+                return;
+              }
+              if (status === 'Cancelled') {
+                runOrderApi(() => cancelAdminOrder(statusRow.backendOrderId), 'Order cancelled.');
+                setStatusRow(null);
+                return;
+              }
+              const canonical = UI_TO_CANONICAL[status];
+              if (!canonical) {
+                setToast('That status is display-only.');
+                return;
+              }
+              runOrderApi(
+                () => transitionAdminOrder(statusRow.backendOrderId, canonical),
+                `Status updated to ${status}.`,
+              );
+              setStatusRow(null);
+            }}>{status}</Button>
           ))}
         </div>
       </Modal>

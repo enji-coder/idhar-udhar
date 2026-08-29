@@ -33,4 +33,5 @@ abstract final class RiderRoutes {
   static const String income = '/rider/income';
   static const String history = '/rider/history';
   static const String settings = '/rider/settings';
+  static const String notifications = '/rider/notifications';
 }

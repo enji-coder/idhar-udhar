@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Eye, Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
@@ -10,6 +10,7 @@ import Select from '../components/common/Select';
 import Modal from '../components/common/Modal';
 import Drawer from '../components/common/Drawer';
 import EmptyState from '../components/common/EmptyState';
+import ErrorState from '../components/common/ErrorState';
 import Field, { inputClass } from '../components/common/Field';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
@@ -17,17 +18,16 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import Toast from '../components/common/Toast';
 import PageHeader from '../components/common/PageHeader';
 import { TableSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
 import usePanelState from '../hooks/usePanelState';
 import useQueryAction from '../hooks/useQueryAction';
 import { riderStore, vehicleStore } from '../services/stores';
 import { VEHICLE_STATUSES, TWO_WHEELER_TYPES } from '../data/vehicles';
 import { defaultVehicleCategoryName, isTwoWheelerCategory, vehicleCategoryNames, vehicleCategoryStore } from '../services/vehicleCategories';
-import { nextId } from '../utils/ids';
 import { compactErrors, isVehicleRc, required } from '../utils/validation';
 import { enrichVehicleRecord } from '../services/profileEnrichment';
-import { useState } from 'react';
+import { createAdminVehicle, deleteAdminVehicle, fetchAdminVehicles, updateAdminVehicle } from '../api/adminApi';
+import { ApiError } from '../api/errors';
 
 const emptyVehicle = {
   id: '',
@@ -44,23 +44,45 @@ const emptyVehicle = {
   riderId: '',
   status: 'Available',
   capacity: '',
-  registered: '17 Aug 2026',
-  lastService: '17 Aug 2026',
-  insurance: 'Valid',
-  rcExpiry: '17 Aug 2028',
-  insuranceExpiry: '17 Aug 2027',
+  registered: '',
+  lastService: '',
+  insurance: '',
+  rcExpiry: '',
+  insuranceExpiry: '',
 };
 
 export default function Vehicles() {
   const { searchQuery } = useOutletContext() || {};
-  const loading = useMockLoader();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const rows = useStore(vehicleStore);
   const riders = useStore(riderStore);
-  useStore(vehicleCategoryStore);
+  const categories = useStore(vehicleCategoryStore);
   const [status, setStatus] = useState('All');
   const [type, setType] = useState('All');
   const panel = usePanelState(emptyVehicle);
   useQueryAction('add', panel.openCreate);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchAdminVehicles()
+      .then((next) => {
+        if (!cancelled) {
+          vehicleStore.replace(next);
+          setLoadError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
@@ -70,34 +92,66 @@ export default function Vehicles() {
     });
   }, [rows, searchQuery, status, type, riders]);
 
-  function save() {
+  async function save() {
     const rc = panel.form.rcNumber || panel.form.number;
     const issues = compactErrors({
       number: required(rc, 'Vehicle RC number cannot be empty.') || (isVehicleRc(rc) ? '' : 'Enter a valid RC number (e.g. GJ 01 RX 2145).'),
-      capacity: required(panel.form.capacity, 'Capacity is required.'),
+      category: required(panel.form.category || panel.form.type, 'Vehicle category is required.'),
     });
-    const duplicate = rows.some((row) => (row.rcNumber || row.number).replace(/\s/g, '').toUpperCase() === String(rc).replace(/\s/g, '').toUpperCase() && row.id !== panel.form.id);
-    if (duplicate) issues.number = 'A vehicle with this RC number already exists.';
     panel.setErrors(issues);
     if (Object.keys(issues).length) return;
-    const rider = riders.find((item) => item.name === panel.form.rider);
-    const id = panel.form.id || nextId('VH', rows);
-    const category = panel.form.category || panel.form.type;
-    vehicleStore.upsert({
-      ...panel.form,
-      id,
-      number: rc,
-      rcNumber: rc,
-      type: category,
-      category,
-      riderId: rider?.id || '',
-      rider: panel.form.rider || 'Unassigned',
-    });
-    panel.setToast(panel.mode === 'edit' ? 'Vehicle updated.' : 'Vehicle added.');
-    panel.closeForm();
+    const rider = riders.find((item) => item.id === panel.form.riderId || item.name === panel.form.rider);
+    const categoryName = panel.form.category || panel.form.type;
+    const category = categories.find((item) => item.name === categoryName);
+    if (!category) {
+      panel.setErrors({ category: 'Select a vehicle category from the database.' });
+      return;
+    }
+    const twoWheeler = isTwoWheelerCategory(categoryName)
+      ? (panel.form.twoWheelerType === 'Scooter' ? 'SCOOTER' : 'BIKE')
+      : null;
+    const payload = {
+      vehicle_category_id: category.id,
+      registration: rc,
+      rider_profile_id: rider?.id || null,
+      two_wheeler_subtype: twoWheeler,
+      active: panel.form.status !== 'Inactive',
+    };
+    try {
+      const record = panel.form.id
+        ? await updateAdminVehicle(panel.form.id, payload)
+        : await createAdminVehicle(payload);
+      vehicleStore.upsert(record);
+      panel.setToast(panel.mode === 'edit' ? 'Vehicle updated.' : 'Vehicle added.');
+      panel.closeForm();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'VEHICLE_REGISTRATION_TAKEN') {
+        panel.setErrors({ number: error.message });
+        return;
+      }
+      panel.setToast(error.message || 'Could not save vehicle.');
+    }
   }
 
   if (loading) return <TableSkeleton />;
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Couldn't load vehicles"
+        description={loadError.message || 'The Admin Panel could not load vehicles from NestJS. Dummy records are not shown.'}
+        onRetry={() => {
+          setLoading(true);
+          fetchAdminVehicles()
+            .then((next) => {
+              vehicleStore.replace(next);
+              setLoadError(null);
+            })
+            .catch((error) => setLoadError(error))
+            .finally(() => setLoading(false));
+        }}
+      />
+    );
+  }
 
   const columns = [
     { key: 'id', label: 'Vehicle ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
@@ -166,9 +220,12 @@ export default function Vehicles() {
           <Field label="Variant"><input className={inputClass} value={panel.form.variant || ''} onChange={(event) => panel.setForm({ ...panel.form, variant: event.target.value })} /></Field>
           <Field label="Vehicle color"><input className={inputClass} value={panel.form.color || ''} onChange={(event) => panel.setForm({ ...panel.form, color: event.target.value })} /></Field>
           <Field label="Assigned rider">
-            <select className={inputClass} value={panel.form.rider} onChange={(event) => panel.setForm({ ...panel.form, rider: event.target.value })}>
-              <option>Unassigned</option>
-              {riders.map((item) => <option key={item.id}>{item.name}</option>)}
+            <select className={inputClass} value={panel.form.riderId || ''} onChange={(event) => {
+              const rider = riders.find((item) => item.id === event.target.value);
+              panel.setForm({ ...panel.form, riderId: event.target.value, rider: rider?.name || 'Unassigned' });
+            }}>
+              <option value="">Unassigned</option>
+              {riders.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </Field>
           <Field label="Status">
@@ -214,7 +271,17 @@ export default function Vehicles() {
         open={Boolean(panel.confirm)}
         description={`${panel.confirm?.number} will be removed from the fleet list.`}
         onClose={() => panel.setConfirm(null)}
-        onConfirm={() => { vehicleStore.remove(panel.confirm.id); panel.setConfirm(null); panel.setToast('Vehicle deleted.'); }}
+        onConfirm={async () => {
+          try {
+            await deleteAdminVehicle(panel.confirm.id);
+            vehicleStore.remove(panel.confirm.id);
+            panel.setConfirm(null);
+            panel.setToast('Vehicle deleted.');
+          } catch (error) {
+            panel.setToast(error.message || 'Could not delete vehicle.');
+            panel.setConfirm(null);
+          }
+        }}
       />
       <Toast open={Boolean(panel.toast)} message={panel.toast} onClose={() => panel.setToast('')} />
     </PageContainer>

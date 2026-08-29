@@ -5,7 +5,11 @@ import Sidebar from './Sidebar';
 import CommandPalette from './CommandPalette';
 import Modal from '../common/Modal';
 import Button from '../common/Button';
+import ErrorState from '../common/ErrorState';
+import { PageSkeleton } from '../common/Skeleton';
 import { useAuth } from '../../context/AuthContext';
+import { hydrateAdminDirectory } from '../../api/hydrate';
+import { getDirectoryError, isDirectoryLoading, subscribeDirectory } from '../../api/directory';
 
 export default function AdminLayout() {
   const { canPath, logout } = useAuth();
@@ -16,6 +20,19 @@ export default function AdminLayout() {
   const [searchQuery, setSearchQuery] = useState('');
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
+  const [directoryError, setDirectoryError] = useState(getDirectoryError);
+  const [directoryLoading, setDirectoryLoading] = useState(isDirectoryLoading);
+
+  useEffect(() => subscribeDirectory(({ error, loading }) => {
+    setDirectoryError(error);
+    setDirectoryLoading(loading);
+  }), []);
+
+  useEffect(() => {
+    hydrateAdminDirectory().catch(() => {
+      /* directoryError is set by hydrate; ErrorState is shown instead of dummy rows */
+    });
+  }, []);
 
   useEffect(() => {
     setSearchQuery('');
@@ -42,6 +59,21 @@ export default function AdminLayout() {
     navigate('/login', { replace: true });
   }
 
+  let main = <Outlet context={{ searchQuery }} />;
+  if (directoryLoading) {
+    main = <PageSkeleton />;
+  } else if (directoryError) {
+    main = (
+      <ErrorState
+        title="Couldn't reach the API"
+        description={directoryError.message || 'The Admin Panel could not load live data from NestJS. Dummy records are not shown.'}
+        onRetry={() => {
+          hydrateAdminDirectory().catch(() => {});
+        }}
+      />
+    );
+  }
+
   return (
     <div className="page-shell admin-app">
       <Sidebar
@@ -60,7 +92,7 @@ export default function AdminLayout() {
           onOpenCommand={() => setCommandOpen(true)}
         />
         <main className="admin-main pt-3">
-          <Outlet context={{ searchQuery }} />
+          {main}
         </main>
       </div>
 

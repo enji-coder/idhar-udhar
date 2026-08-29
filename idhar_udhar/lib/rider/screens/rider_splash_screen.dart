@@ -1,11 +1,13 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/local/rider_permissions.dart';
 import '../data/local/rider_prefs.dart';
 import '../routing/rider_routes.dart';
+import '../state/rider_session.dart';
 import '../theme/rider_colors.dart';
 import '../theme/rider_spacing.dart';
 import '../theme/rider_text_styles.dart';
@@ -15,14 +17,14 @@ import '../widgets/rider_logo_widget.dart';
 
 /// Rider splash — larger centered vehicle + journey loading → login.
 /// Theme/colors intentionally unchanged. Existing image unchanged.
-class RiderSplashScreen extends StatefulWidget {
+class RiderSplashScreen extends ConsumerStatefulWidget {
   const RiderSplashScreen({super.key});
 
   @override
-  State<RiderSplashScreen> createState() => _RiderSplashScreenState();
+  ConsumerState<RiderSplashScreen> createState() => _RiderSplashScreenState();
 }
 
-class _RiderSplashScreenState extends State<RiderSplashScreen>
+class _RiderSplashScreenState extends ConsumerState<RiderSplashScreen>
     with TickerProviderStateMixin {
   late final AnimationController _master;
   late final AnimationController _idle;
@@ -153,12 +155,13 @@ class _RiderSplashScreenState extends State<RiderSplashScreen>
     }
     _navigated = true;
     try {
-      final loggedIn = await RiderPrefs.isLoggedIn();
+      final restored = await ref.read(riderSessionProvider.notifier).restore();
       if (!mounted) return;
-      if (loggedIn) {
+      if (restored) {
         await riderGoHomeOrPermissionGate(context);
         return;
       }
+      await RiderPrefs.clearLoggedIn();
       final setupDone = await RiderPrefs.isInitialSetupComplete();
       if (!mounted) return;
       context.go(setupDone ? RiderRoutes.login : RiderRoutes.terms);

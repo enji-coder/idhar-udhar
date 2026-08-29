@@ -1,0 +1,266 @@
+## IDHAR UDHAR — Real Services Stack
+
+### 1. 📱 Real SMS OTP — **MSG91**
+
+**Use:** Customer + Rider login/registration
+
+```text
+Flutter
+   ↓
+NestJS
+   ↓
+MSG91 OTP API
+   ↓
+Indian mobile number
+   ↓
+OTP
+   ↓
+NestJS verifies
+   ↓
+JWT Session
+```
+
+Important: **OTP verification authority remains our backend**, not Flutter.
+
+For India, DLT entity registration, sender/header and approved SMS templates are required before production SMS delivery. ([MSG91][2])
+
+MSG91 currently publishes India OTP pricing starting around ₹0.25 at 5,000 OTPs and reducing with volume; actual commercial pricing should be confirmed when we create the account. ([MSG91][3])
+
+---
+
+### 2. 🗺️ Google Maps — **Google Routes API**
+
+**Use:**
+
+* Pickup → Drop road distance
+* Multi-stop routing
+* ETA/duration
+* Later rider/customer map features
+
+We already built the backend adapter in Phase 7.
+
+Production:
+
+```text
+NestJS
+   ↓
+Google Routes API
+   ↓
+Road distance + duration
+   ↓
+Fare Engine
+```
+
+The important part is that **Flutter never decides the final distance/fare**.
+
+---
+
+### 3. 🔔 Push Notifications — **Firebase Cloud Messaging (FCM)**
+
+**Use:**
+
+* New rider offer
+* Rider assigned
+* Order status
+* Payment notification
+* COD warning
+* etc.
+
+Architecture:
+
+```text
+NestJS Worker
+     ↓
+FCM
+     ↓
+Customer/Rider phone
+```
+
+Our Phase 6 `PushProvider` architecture is already designed for this, so we don't need to redesign notifications.
+
+---
+
+### 4. 📍 Real-time Rider Location — **Redis**
+
+**Use:**
+
+```text
+Rider GPS
+   ↓
+NestJS
+   ↓
+Redis
+   ↓
+Admin / Customer tracking
+```
+
+PostgreSQL mein every GPS ping store **nahi** karenge.
+
+Redis will hold the rider's latest location / short-lived tracking data.
+
+---
+
+### 5. 💳 Online Payment — **Payment Gateway**
+
+This one we should choose carefully.
+
+For India, likely candidates include:
+
+* Razorpay
+* Cashfree
+* PhonePe Payment Gateway
+
+Architecture:
+
+```text
+Customer
+   ↓
+Flutter
+   ↓
+Payment Gateway
+   ↓
+Webhook
+   ↓
+NestJS
+   ↓
+PostgreSQL
+```
+
+**Webhook is the authority**, not "payment success" returned blindly by Flutter.
+
+I would **not select the provider yet** until we compare fees, settlement, refunds, webhook behavior and our COD/payment model.
+
+---
+
+### 6. 🪪 Rider KYC — Dedicated KYC Provider
+
+For:
+
+* Aadhaar
+* PAN
+* Driving Licence
+* RC
+* Bank verification
+
+Architecture:
+
+```text
+Rider
+ ↓
+NestJS
+ ↓
+KYC Provider
+ ↓
+Verification
+ ↓
+PostgreSQL
+ ↓
+Admin
+```
+
+We should choose the provider after comparing current India KYC APIs.
+
+---
+
+### 7. ☁️ Document Storage — **Cloud Storage**
+
+Rider documents should **not** be stored directly inside PostgreSQL.
+
+Likely:
+
+**Google Cloud Storage / AWS S3**
+
+```text
+Rider
+ ↓
+NestJS
+ ↓
+Private Object Storage
+ ↓
+KYC Provider / Admin
+```
+
+With:
+
+* private bucket
+* signed URLs
+* encryption
+* access control
+* audit trail
+
+---
+
+### 8. 🗄️ Production Database — **PostgreSQL**
+
+We're already using PostgreSQL locally.
+
+Production can later move to something like:
+
+* AWS RDS PostgreSQL
+* Google Cloud SQL
+* managed PostgreSQL provider
+
+The application architecture doesn't need to change.
+
+---
+
+### 9. ⚡ Redis Production
+
+Same Redis architecture we already prepared.
+
+Use for:
+
+* latest rider location
+* temporary/cache data
+* later dispatch/TTL workloads
+* possibly notification unread counters
+
+---
+
+### 10. 🌐 Backend Deployment
+
+Current:
+
+```text
+Local Docker
+    ↓
+NestJS
+    ↓
+Local PostgreSQL
+```
+
+Production eventually:
+
+```text
+Flutter / Admin
+       ↓
+ HTTPS
+       ↓
+ Production NestJS
+       ↓
+ PostgreSQL
+       ↓
+ Redis
+```
+
+---
+
+# So our REAL service list looks like this
+
+| Requirement         | Service                                      |
+| ------------------- | -------------------------------------------- |
+| SMS OTP             | **MSG91** candidate                          |
+| Maps / Routing      | **Google Routes API**                        |
+| Push notifications  | **Firebase FCM**                             |
+| Rider live location | **Redis**                                    |
+| Online payments     | **Razorpay/Cashfree/PhonePe** — choose later |
+| Rider KYC           | **Dedicated KYC provider** — choose later    |
+| Document storage    | **S3/GCS**                                   |
+| Database            | **Managed PostgreSQL**                       |
+| Backend             | **NestJS**                                   |
+| Admin               | Existing React app                           |
+| Customer            | Existing Flutter                             |
+| Rider               | Existing Flutter                             |
+
+
+

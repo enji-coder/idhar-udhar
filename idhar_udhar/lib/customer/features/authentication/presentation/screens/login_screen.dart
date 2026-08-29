@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+
 import '../../../../config/app_constants.dart';
 import '../../../../core/animations/animations.dart';
 import '../../../../core/constants/asset_paths.dart';
@@ -109,17 +111,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 350));
     if (!mounted || _navigating) {
       return;
     }
 
     final String phone = _phoneController.text.trim();
     ref.read(sessionProvider.notifier).startLogin(phone);
-    _navigating = true;
-    if (mounted) {
+    try {
+      await ref.read(sessionProvider.notifier).requestOtp();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
       setState(() => _isLoading = false);
+      final String message = error is ApiException
+          ? error.message
+          : 'Could not send OTP. Try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
     }
+    if (!mounted || _navigating) {
+      return;
+    }
+    _navigating = true;
+    setState(() => _isLoading = false);
     context.go(
       '${AppRoutes.otp}?phone=${Uri.encodeComponent('${AppConstants.defaultCountryCode}$phone')}',
     );

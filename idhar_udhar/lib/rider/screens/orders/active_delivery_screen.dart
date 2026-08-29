@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:intl/intl.dart';
 
+import '../../state/rider_session.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../data/models/rider_order.dart';
@@ -69,7 +73,29 @@ class ActiveDeliveryScreen extends ConsumerWidget {
               child: RiderSecondaryButton(
                 label: 'Receiver Unavailable',
                 destructive: true,
-                onPressed: () {
+                onPressed: () async {
+                  final String? orderId = order.backendOrderId;
+                  if (orderId != null) {
+                    final hops = OrderMapper.riderStatusHops(
+                      from: status,
+                      to: DeliveryLifecycleStatus.receiverUnavailable,
+                    );
+                    try {
+                      for (final String hop in hops) {
+                        await ref.read(riderApiProvider).transitionStatus(
+                              orderId: orderId,
+                              toStatus: hop,
+                            );
+                      }
+                    } on ApiException catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error.message)),
+                        );
+                      }
+                      return;
+                    }
+                  }
                   ref.read(deliveryStatusProvider.notifier).state =
                       DeliveryLifecycleStatus.receiverUnavailable;
                 },
@@ -103,7 +129,7 @@ class ActiveDeliveryScreen extends ConsumerWidget {
             ),
           RiderPrimaryButton(
             label: done ? 'Back to Dashboard' : status.actionLabel,
-            onPressed: () {
+            onPressed: () async {
               if (done) {
                 ref.read(activeOrderProvider.notifier).state = null;
                 ref.read(deliveryStatusProvider.notifier).state =
@@ -112,12 +138,32 @@ class ActiveDeliveryScreen extends ConsumerWidget {
                 return;
               }
               final next = status.next;
+              final String? orderId = order.backendOrderId;
+              if (next != null && orderId != null) {
+                final hops = OrderMapper.riderStatusHops(from: status, to: next);
+                try {
+                  for (final String hop in hops) {
+                    await ref.read(riderApiProvider).transitionStatus(
+                          orderId: orderId,
+                          toStatus: hop,
+                        );
+                  }
+                } on ApiException catch (error) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error.message)),
+                    );
+                  }
+                  return;
+                }
+              }
               if (next == DeliveryLifecycleStatus.delivered) {
                 completeRiderTrip(
                   ref,
                   cashCollected: order.cashCollected,
                   riderAmount: order.riderAmount,
                 );
+                await ref.read(riderSessionProvider.notifier).refreshWallet();
               }
               if (next != null) {
                 ref.read(deliveryStatusProvider.notifier).state = next;

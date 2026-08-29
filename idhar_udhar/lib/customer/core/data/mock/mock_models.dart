@@ -296,6 +296,8 @@ class MockOrder {
     required this.vehicle,
     required this.fare,
     required this.createdAt,
+    this.displayId,
+    this.backendOrderId,
     this.customerId,
     this.riderId,
     this.rider,
@@ -330,6 +332,10 @@ class MockOrder {
   });
 
   final String id;
+  /// Backend display_id when the order came from Nest. Falls back to [id].
+  final String? displayId;
+  /// Nest order UUID. Use for `/v1/orders/:id` when present.
+  final String? backendOrderId;
   final OrderStatus status;
   final MockLocation pickup;
   final MockLocation drop;
@@ -555,6 +561,8 @@ class MockOrder {
   }) {
     return MockOrder(
       id: id,
+      displayId: displayId,
+      backendOrderId: backendOrderId,
       status: status ?? this.status,
       pickup: pickup,
       drop: drop,

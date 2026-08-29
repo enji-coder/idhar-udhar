@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Eye } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
@@ -11,12 +11,12 @@ import EmptyState from '../components/common/EmptyState';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import { TableSkeleton } from '../components/common/Skeleton';
+import ErrorState from '../components/common/ErrorState';
 import BarChart from '../components/charts/BarChart';
-import useMockLoader from '../hooks/useMockLoader';
 import usePaymentSettings from '../hooks/usePaymentSettings';
-import { earnings } from '../data/mockData';
-import { earningsSeries } from '../data/earnings';
-import { calculateDistribution } from '../services/commission';
+import useStore from '../hooks/useStore';
+import { riderStore } from '../services/stores';
+import { fetchAdminEarnings } from '../api/adminApi';
 import { formatINR, formatINRExact } from '../utils/format';
 import { theme } from '../config/theme';
 
@@ -26,35 +26,120 @@ const periods = [
   { value: 'monthly', label: 'Monthly' },
 ];
 
+function round2(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function inPeriod(iso, period) {
+  if (!iso) return true;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return true;
+  const now = new Date();
+  if (period === 'daily') {
+    return date.toDateString() === now.toDateString();
+  }
+  if (period === 'weekly') {
+    const from = new Date(now);
+    from.setDate(now.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+    return date >= from;
+  }
+  return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+}
+
 export default function Earnings() {
   const { searchQuery } = useOutletContext() || {};
-  const loading = useMockLoader();
+  const pay = usePaymentSettings();
+  const riders = useStore(riderStore);
   const [view, setView] = useState(null);
   const [period, setPeriod] = useState('daily');
+  const [rows, setRows] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchAdminEarnings()
+      .then((list) => {
+        if (!cancelled) {
+          setRows(list);
+          setLoadError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRows([]);
+          setLoadError(error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const named = useMemo(() => rows.map((row) => {
+    const rider = riders.find((item) => item.id === row.riderId);
+    return {
+      ...row,
+      rider: rider?.name || row.rider,
+      total: row.tripFare,
+      commission: row.companyCommission,
+      incentive: 0,
+      tips: 0,
+    };
+  }), [rows, riders]);
+
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
-    return earnings.filter((row) => row.rider.toLowerCase().includes(query));
-  }, [searchQuery]);
+    return named
+      .filter((row) => inPeriod(row.date, period))
+      .filter((row) => `${row.rider} ${row.id}`.toLowerCase().includes(query));
+  }, [named, searchQuery, period]);
 
-  const series = earningsSeries[period] || earningsSeries.daily;
-  const pay = usePaymentSettings();
-  const chart = series.map((item) => ({ label: item.label, value: item.rider + item.company }));
-  const raw = series.reduce((acc, item) => ({
-    rider: acc.rider + item.rider,
-    company: acc.company + item.company,
-    refunds: acc.refunds + item.refunds,
-  }), { rider: 0, company: 0, refunds: 0 });
-  const finance = calculateDistribution(raw.rider + raw.company, pay);
-  const totals = {
-    totalAmount: finance.totalAmount,
-    riderAmount: finance.riderAmount,
-    companyCommission: finance.companyCommission,
-    operationalCost: finance.operationalCost,
-    actualProfit: finance.actualProfit,
-    refunds: raw.refunds,
-  };
+  const totals = useMemo(() => data.reduce((acc, row) => ({
+    totalAmount: round2(acc.totalAmount + Number(row.tripFare || 0)),
+    riderAmount: round2(acc.riderAmount + Number(row.riderEarning || 0)),
+    companyCommission: round2(acc.companyCommission + Number(row.companyCommission || 0)),
+    operationalCost: round2(acc.operationalCost + Number(row.operationalExpense || 0)),
+    actualProfit: round2(acc.actualProfit + Number(row.netCompanyEarnings || 0)),
+    refunds: 0,
+  }), {
+    totalAmount: 0,
+    riderAmount: 0,
+    companyCommission: 0,
+    operationalCost: 0,
+    actualProfit: 0,
+    refunds: 0,
+  }), [data]);
+
+  const chart = useMemo(() => {
+    const buckets = new Map();
+    data.forEach((row) => {
+      const stamp = row.date ? new Date(row.date) : null;
+      const label = stamp && !Number.isNaN(stamp.getTime())
+        ? stamp.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+        : '—';
+      buckets.set(label, round2((buckets.get(label) || 0) + Number(row.tripFare || 0)));
+    });
+    const points = [...buckets.entries()].map(([label, value]) => ({ label, value }));
+    return points.length ? points : [{ label: 'No data', value: 0 }];
+  }, [data]);
 
   if (loading) return <TableSkeleton />;
+  if (loadError) {
+    return (
+      <PageContainer>
+        <ErrorState
+          title="Couldn't load earnings"
+          description={loadError.message || 'The earnings API did not respond. Dummy figures are not shown.'}
+        />
+      </PageContainer>
+    );
+  }
 
   const columns = [
     { key: 'rider', label: 'Rider', sortable: true },
@@ -89,16 +174,17 @@ export default function Earnings() {
         <BarChart data={chart} color={theme.primary} />
       </GlassCard>
       <GlassCard className="overflow-hidden">
-        {data.length === 0 ? <EmptyState title="No earnings found" description="Try changing your search criteria." /> : <DataTable columns={columns} data={data} rowKey="id" pageSize={8} itemLabel="records" compact />}
+        {data.length === 0 ? <EmptyState title="No earnings found" description="Frozen order snapshots will appear here." /> : <DataTable columns={columns} data={data} rowKey="id" pageSize={8} itemLabel="records" compact />}
       </GlassCard>
       <Drawer open={Boolean(view)} size="lg" eyebrow="Earnings" title={view?.rider} onClose={() => setView(null)} footer={<Button onClick={() => setView(null)}>Close</Button>}>
         {view ? (
           <DetailSection title="Breakdown">
             <DetailRow label="Orders" value={view.orders} />
-            <DetailRow label="Commission" value={formatINR(view.commission)} />
-            <DetailRow label="Incentive" value={formatINR(view.incentive)} />
-            <DetailRow label="Tips" value={formatINR(view.tips)} />
-            <DetailRow label="Total" value={formatINR(view.total)} />
+            <DetailRow label="Trip fare" value={formatINR(view.tripFare)} />
+            <DetailRow label="Rider earning" value={formatINR(view.riderEarning)} />
+            <DetailRow label="Company commission" value={formatINR(view.companyCommission)} />
+            <DetailRow label="Operational cost" value={formatINR(view.operationalExpense)} />
+            <DetailRow label="Profit" value={formatINR(view.netCompanyEarnings)} />
             <DetailRow label="Date" value={view.date} />
           </DetailSection>
         ) : null}

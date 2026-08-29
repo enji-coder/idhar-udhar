@@ -3,6 +3,7 @@ import { Eye, EyeOff } from 'lucide-react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ASSETS } from '../config/assets';
 import { useAuth } from '../context/AuthContext';
+import { ApiError } from '../api/errors';
 import Button from '../components/common/Button';
 import Field, { inputClass } from '../components/common/Field';
 
@@ -31,8 +32,8 @@ export default function Login() {
     try {
       await login({ email, password });
       navigate(location.state?.from || '/dashboard', { replace: true });
-    } catch {
-      setError('Invalid email or password.');
+    } catch (error) {
+      setError(error instanceof ApiError ? error.message : 'Invalid email or password.');
     } finally {
       setLoading(false);
     }

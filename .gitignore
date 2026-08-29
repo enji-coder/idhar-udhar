@@ -41,9 +41,24 @@ coverage/
 *.jks
 *.keystore
 key.properties
+*.pem
+*.p8
+*.p12
+*.key
+id_rsa
+id_ed25519
+*service-account*.json
 **/google-services.json
 **/GoogleService-Info.plist
 **/firebase_options.dart
+
+# Local database dumps / runtime backups — never production source
+*.dump
+*.backup
+**/backups/
+
+# Local Docker/pgAdmin credential notes
+records_database/DEVELOPER_NOTE/database_note.txt
 
 # Local account/password dump (not project documentation)
 Project_Documentation/000_info.txt

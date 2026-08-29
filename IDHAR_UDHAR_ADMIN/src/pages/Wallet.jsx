@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { Eye, Pencil, Plus, Trash2, Check } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
@@ -17,20 +17,15 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import Toast from '../components/common/Toast';
 import PageHeader from '../components/common/PageHeader';
 import { TableSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
+import ErrorState from '../components/common/ErrorState';
 import useStore from '../hooks/useStore';
 import usePanelState from '../hooks/usePanelState';
 import useQueryAction from '../hooks/useQueryAction';
-import { walletStore, orderStore, payoutStore, riderStore } from '../services/stores';
-import { walletSummary } from '../data/wallet';
-import { nextId } from '../utils/ids';
-import { compactErrors, nonNegative, required } from '../utils/validation';
+import { riderStore } from '../services/stores';
 import { formatINR } from '../utils/format';
-import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Tabs from '../components/common/Tabs';
-import { buildRiderWallets } from '../services/riderWallet';
-import { recordAudit } from '../services/auditService';
+import { fetchRiderCod, fetchRiderEarnings, fetchRiderWallet, fetchRiderWalletLedger } from '../api/adminApi';
 
 const emptyTxn = {
   id: '',
@@ -39,25 +34,91 @@ const emptyTxn = {
   type: 'Credit',
   amount: '',
   balance: '',
-  date: '17 Aug 2026',
+  date: '',
   status: 'Success',
   description: '',
 };
 
 export default function WalletPage() {
   const { searchQuery } = useOutletContext() || {};
-  const { can, user } = useAuth();
-  const loading = useMockLoader();
-  const rows = useStore(walletStore);
+  const { can } = useAuth();
   const riders = useStore(riderStore);
-  const orders = useStore(orderStore);
-  const payouts = useStore(payoutStore);
   const [type, setType] = useState('All');
   const [tab, setTab] = useState('ledger');
+  const [rows, setRows] = useState([]);
+  const [wallets, setWallets] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const panel = usePanelState(emptyTxn);
   useQueryAction('add', panel.openCreate);
 
-  const wallets = useMemo(() => buildRiderWallets({ riders, orders, payouts }), [riders, orders, payouts]);
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      const apiRiders = riders.filter((rider) => rider.id);
+      const walletRows = await Promise.all(apiRiders.map(async (rider) => {
+        try {
+          const [wallet, cod, earnings] = await Promise.all([
+            fetchRiderWallet(rider.id),
+            fetchRiderCod(rider.id),
+            fetchRiderEarnings(rider.id),
+          ]);
+          const available = Number(wallet.available_balance || 0);
+          const totalEarnings = earnings.reduce((sum, row) => sum + Number(row.riderEarning || 0), 0);
+          return {
+            riderId: rider.id,
+            rider: rider.name,
+            availableWallet: available,
+            onlinePayoutBalance: available,
+            codDue: Number(cod.cod_due || 0),
+            suspended: Boolean(cod.suspended),
+            totalEarnings,
+            paidAmount: 0,
+            pendingPayout: 0,
+            payoutStatus: available > 0 ? 'Pending' : 'Paid',
+          };
+        } catch {
+          return null;
+        }
+      }));
+      const ledgerRows = (await Promise.all(apiRiders.map(async (rider) => {
+        try {
+          const entries = await fetchRiderWalletLedger(rider.id);
+          return entries.map((entry) => ({
+            id: entry.wallet_ledger_id,
+            user: rider.name,
+            userType: 'Rider',
+            type: entry.direction === 'CREDIT' ? 'Credit' : 'Debit',
+            amount: Number(entry.amount || 0),
+            balance: Number(entry.amount || 0),
+            date: entry.created_at,
+            status: 'Success',
+            description: entry.entry_type,
+          }));
+        } catch {
+          return [];
+        }
+      }))).flat();
+      if (!cancelled) {
+        if (apiRiders.length > 0 && walletRows.every((row) => row == null)) {
+          setLoadError(new Error('Could not load wallet or COD data from the API.'));
+          setWallets([]);
+          setRows([]);
+          setLoading(false);
+          return;
+        }
+        setLoadError(null);
+        setWallets(walletRows.filter(Boolean));
+        setRows(ledgerRows);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [riders]);
 
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
@@ -65,31 +126,31 @@ export default function WalletPage() {
   }, [rows, searchQuery, type]);
 
   const collected = useMemo(() => {
-    const credit = rows.filter((row) => row.type === 'Credit' && row.status === 'Success').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const debit = rows.filter((row) => row.type === 'Debit' && row.status === 'Success').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const available = wallets.reduce((sum, row) => sum + Number(row.availableWallet || 0), 0);
     return {
-      total: walletSummary.total,
-      available: Math.max(0, walletSummary.available + credit - debit),
-      pending: rows.filter((row) => row.status === 'Pending').reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      total: available,
+      available,
+      pending: 0,
       count: rows.length,
     };
-  }, [rows]);
+  }, [rows, wallets]);
 
   function save() {
-    const issues = compactErrors({
-      user: required(panel.form.user, 'User is required.'),
-      amount: required(panel.form.amount, 'Amount is required.') || nonNegative(panel.form.amount, 'Amount cannot be negative.'),
-      description: required(panel.form.description, 'Description is required.'),
-    });
-    panel.setErrors(issues);
-    if (Object.keys(issues).length) return;
-    const id = panel.form.id || nextId('WLT', rows);
-    walletStore.upsert({ ...panel.form, id, amount: Number(panel.form.amount), balance: Number(panel.form.balance) || Number(panel.form.amount) });
-    panel.setToast(panel.mode === 'edit' ? 'Transaction updated.' : 'Wallet transaction added.');
+    panel.setToast('Admin wallet credit/debit is not available on the server yet.');
     panel.closeForm();
   }
 
   if (loading) return <TableSkeleton />;
+  if (loadError) {
+    return (
+      <PageContainer>
+        <ErrorState
+          title="Couldn't load wallet"
+          description={loadError.message || 'Wallet and COD values from the API are required. Dummy balances are not shown.'}
+        />
+      </PageContainer>
+    );
+  }
 
   const columns = [
     { key: 'id', label: 'Transaction ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
@@ -168,7 +229,7 @@ export default function WalletPage() {
           </DetailSection>
         ) : null}
       </Drawer>
-      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.id} will be removed from the ledger.`} onClose={() => panel.setConfirm(null)} onConfirm={() => { walletStore.remove(panel.confirm.id); panel.setConfirm(null); panel.setToast('Transaction deleted.'); }} />
+      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.id} cannot be deleted from Admin. Wallet ledgers are server-owned.`} onClose={() => panel.setConfirm(null)} onConfirm={() => { panel.setConfirm(null); panel.setToast('Wallet ledgers cannot be deleted from Admin.'); }} />
         </>
       ) : (
         <GlassCard className="overflow-hidden">
@@ -191,18 +252,7 @@ export default function WalletPage() {
                   <ActionGroup>
                     {can('payouts', 'approve') && row.pendingPayout > 0 ? (
                       <ActionButton icon={Check} tone="approve" onClick={() => {
-                        payoutStore.upsert({
-                          id: `PO-${String(row.riderId).slice(-4)}`,
-                          rider: row.rider,
-                          riderId: row.riderId,
-                          amount: row.pendingPayout,
-                          status: 'Approved',
-                          method: 'UPI',
-                          date: '17 Aug 2026',
-                          period: '17 Aug 2026',
-                        });
-                        recordAudit({ user, action: 'Approve', module: 'Finance', recordId: row.riderId, newValue: `Payout ${row.pendingPayout}` });
-                        panel.setToast('Payout approved.');
+                        panel.setToast('Admin payout approval is not available on the server yet.');
                       }}>Approve</ActionButton>
                     ) : null}
                   </ActionGroup>

@@ -85,6 +85,8 @@ class RiderOrder {
     required this.estimatedMinutes,
     required this.customerMaskedName,
     required this.customerMaskedPhone,
+    this.offerId,
+    this.backendOrderId,
     this.paymentMethod = RiderOrderPaymentMethod.online,
     this.decisionSeconds = 27,
     this.tripAmount = 0,
@@ -104,6 +106,8 @@ class RiderOrder {
   });
 
   final String id;
+  final String? offerId;
+  final String? backendOrderId;
   final String pickup;
   final String drop;
   final double distanceKm;

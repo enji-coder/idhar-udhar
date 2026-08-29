@@ -121,7 +121,7 @@ class ProfileScreen extends ConsumerWidget {
             _tile(
               icon: Icons.notifications_none_rounded,
               title: 'Notifications',
-              onTap: () {},
+              onTap: () => context.push(AppRoutes.notifications),
             ),
             _tile(
               icon: Icons.help_outline_rounded,

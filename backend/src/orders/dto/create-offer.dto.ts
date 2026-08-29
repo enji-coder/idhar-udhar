@@ -1,0 +1,7 @@
+import { Matches } from 'class-validator';
+import { UUID_RE } from '../../common/uuid-param.pipe';
+
+export class CreateOfferDto {
+  @Matches(UUID_RE)
+  rider_profile_id!: string;
+}

@@ -112,20 +112,7 @@ class DashboardScreen extends ConsumerWidget {
                       children: [
                         GestureDetector(
                           onTap: () {
-                            final List<CustomerNotice> notices =
-                                session.notices;
-                            final String body = notices.isEmpty
-                                ? 'No new notifications.'
-                                : notices.first.body;
-                            CustomDialog.show(
-                              context: context,
-                              title: notices.isEmpty
-                                  ? 'Notifications'
-                                  : notices.first.title,
-                              message: body,
-                              confirmLabel: 'OK',
-                              cancelLabel: null,
-                            );
+                            context.push(AppRoutes.notifications);
                           },
                           child: GlassContainer(
                             padding: const EdgeInsets.all(AppSpacing.md),

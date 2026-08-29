@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
 
-import '../data/local/rider_permissions.dart';
+import '../routing/rider_otp_args.dart';
 import '../routing/rider_routes.dart';
+import '../state/rider_session.dart';
 import '../theme/rider_colors.dart';
 import '../theme/rider_spacing.dart';
 import '../theme/rider_text_styles.dart';
@@ -14,14 +17,14 @@ import '../widgets/rider_primary_button.dart';
 import '../widgets/rider_text_field.dart';
 
 /// Rider login — phone-only dummy flow (no social / no backend).
-class RiderLoginScreen extends StatefulWidget {
+class RiderLoginScreen extends ConsumerStatefulWidget {
   const RiderLoginScreen({super.key});
 
   @override
-  State<RiderLoginScreen> createState() => _RiderLoginScreenState();
+  ConsumerState<RiderLoginScreen> createState() => _RiderLoginScreenState();
 }
 
-class _RiderLoginScreenState extends State<RiderLoginScreen> {
+class _RiderLoginScreenState extends ConsumerState<RiderLoginScreen> {
   final TextEditingController _phone = TextEditingController();
   String? _error;
   bool _submitting = false;
@@ -55,12 +58,37 @@ class _RiderLoginScreenState extends State<RiderLoginScreen> {
       return;
     }
     setState(() => _submitting = true);
-    await Future<void>.delayed(const Duration(milliseconds: 650));
-    if (!mounted) {
-      return;
+    final String digits = _phone.text.replaceAll(RegExp(r'\D'), '');
+    try {
+      await ref.read(riderSessionProvider.notifier).requestOtp(digits);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _submitting = false);
+      context.go(
+        RiderRoutes.otpVerification,
+        extra: RiderOtpArgs(
+          mobile: digits,
+          flow: RiderAuthFlow.login,
+        ),
+      );
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submitting = false;
+        _error = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submitting = false;
+        _error = 'Could not send OTP. Try again.';
+      });
     }
-    setState(() => _submitting = false);
-    await riderEnterAfterAuth(context);
   }
 
   @override

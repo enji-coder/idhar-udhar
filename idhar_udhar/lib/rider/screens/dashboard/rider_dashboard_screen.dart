@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:intl/intl.dart';
 
@@ -12,6 +15,7 @@ import '../../data/models/recent_activity.dart';
 import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../screens/earnings/rider_income_screen.dart';
 import '../../screens/orders/rider_history_screen.dart';
 import '../../screens/profile/rider_profile_screen.dart';
@@ -48,6 +52,16 @@ class RiderDashboardScreen extends ConsumerStatefulWidget {
 
 class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
   int _tab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(riderSessionProvider.notifier).refreshWallet());
+      unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
+      unawaited(ref.read(riderSessionProvider.notifier).refreshNotices());
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,10 +148,15 @@ class _HomeTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final repo = ref.watch(dummyRiderRepositoryProvider);
     final profile = ref.watch(riderProfileStateProvider);
-    final earnings = repo.getEarnings();
+    final earnings =
+        ref.watch(riderApiEarningsProvider).value ?? repo.getEarnings();
     final activity = repo.getRecentActivity();
     final announcements = repo.getAnnouncements();
-    final order = repo.getIncomingOrder();
+    final offers = ref.watch(riderSessionProvider).offers;
+    final RiderOrder? order = offers.isEmpty
+        ? null
+        : OrderMapper.toRiderOrder(offer: offers.first);
+    final notices = ref.watch(riderSessionProvider).notices;
     final online = ref.watch(riderOnlineProvider);
     final wallet = ref.watch(riderWalletBalanceProvider);
     final codDue = ref.watch(riderCodDueProvider);
@@ -167,18 +186,23 @@ class _HomeTab extends ConsumerWidget {
                 greeting: '${_greeting()}, ${profile.firstName} 👋',
                 online: online,
                 onNotifications: () {
+                  final unread =
+                      notices.where((n) => n.readAt == null).length;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       behavior: SnackBarBehavior.floating,
                       backgroundColor: RiderColors.secondary,
                       content: Text(
-                        'No new notifications (demo)',
+                        unread == 0
+                            ? 'No unread notifications'
+                            : '$unread unread notification${unread == 1 ? '' : 's'}',
                         style: _d(RiderTextStyles.bodyMedium).copyWith(
                           color: RiderColors.textOnPrimary,
                         ),
                       ),
                     ),
                   );
+                  context.push(RiderRoutes.notifications);
                 },
               ),
               const SizedBox(height: RiderSpacing.lg),
@@ -188,7 +212,7 @@ class _HomeTab extends ConsumerWidget {
                   ref.read(riderOnlineProvider.notifier).state = !online;
                 },
               ),
-              if (online && !suspended) ...[
+              if (online && !suspended && order != null) ...[
                 const SizedBox(height: RiderSpacing.md),
                 _IncomingOrderCard(
                   order: order,
@@ -264,7 +288,20 @@ class _HomeTab extends ConsumerWidget {
                   ref: ref,
                   title: 'Add Money',
                   confirmLabel: 'Add',
-                  onConfirm: (amount) => applyRiderRecharge(ref, amount),
+                  onConfirm: (amount) async {
+                    try {
+                      await ref.read(walletApiProvider).recharge(amount);
+                      await ref
+                          .read(riderSessionProvider.notifier)
+                          .refreshWallet();
+                    } on ApiException catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error.message)),
+                        );
+                      }
+                    }
+                  },
                 ),
                 onWithdraw: () => showRiderWalletAmountSheet(
                   context: context,

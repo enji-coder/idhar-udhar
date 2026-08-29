@@ -5,6 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/api_config.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+
 import '../../../../core/animations/animations.dart';
 import '../../../../core/permissions/location_permission_service.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -30,7 +33,7 @@ class OtpVerificationScreen extends ConsumerStatefulWidget {
 }
 
 class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
-  static const int _otpLength = 4;
+  static const int _otpLength = ApiConfig.otpLength;
   static const int _resendSeconds = 30;
 
   final GlobalKey<OTPInputRowState> _otpKey = GlobalKey<OTPInputRowState>();
@@ -102,12 +105,30 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       _error = null;
     });
 
-    await Future<void>.delayed(const Duration(milliseconds: 220));
-    if (!mounted) {
+    bool ok = false;
+    try {
+      ok = await ref.read(sessionProvider.notifier).verifyOtp(code);
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _verifying = false;
+        _error = error.message;
+      });
+      _resetOtpBoxes();
+      return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _verifying = false;
+        _error = 'Invalid OTP. Please try again.';
+      });
+      _resetOtpBoxes();
       return;
     }
-
-    final bool ok = ref.read(sessionProvider.notifier).verifyOtp(code);
     if (!ok) {
       setState(() {
         _verifying = false;
@@ -129,24 +150,41 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     context.go(nextRoute);
   }
 
-  void _onResend() {
+  Future<void> _onResend() async {
     if (_secondsLeft.value > 0 || _verifying) {
       return;
     }
-    HapticFeedback.selectionClick();
+    unawaited(HapticFeedback.selectionClick());
     _resetOtpBoxes();
     _startTimer();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'A new code was sent (demo). Use any $_otpLength digits.',
-          style: AppTextStyles.bodyMedium.copyWith(color: AppColors.white),
+    try {
+      await ref.read(sessionProvider.notifier).requestOtp();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'A new $_otpLength-digit code was sent.',
+            style: AppTextStyles.bodyMedium.copyWith(color: AppColors.white),
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.navy,
+          duration: const Duration(seconds: 2),
         ),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: AppColors.navy,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+      );
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: AppColors.navy,
+        ),
+      );
+    }
   }
 
   String get _maskedPhone {

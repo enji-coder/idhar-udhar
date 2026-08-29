@@ -26,6 +26,7 @@ abstract final class AppRoutes {
   static const String profileEdit = '/profile/edit';
   static const String savedAddresses = '/profile/saved-addresses';
   static const String help = '/help';
+  static const String notifications = '/profile/notifications';
 
   static String orderDetailsPath(String id) => '/orders/$id';
 }

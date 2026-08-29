@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../data/models/vehicle_info.dart';
 import '../screens/dashboard/rider_dashboard_screen.dart';
 import '../screens/earnings/rider_income_screen.dart';
+import '../screens/notifications/rider_notifications_screen.dart';
 import '../screens/onboarding/rider_terms_screen.dart';
 import '../screens/orders/active_delivery_screen.dart';
 import '../screens/orders/incoming_order_screen.dart';
@@ -308,6 +309,14 @@ abstract final class RiderRouter {
         pageBuilder: (context, state) => _fadePage(
           state: state,
           child: const RiderSettingsScreen(),
+        ),
+      ),
+      GoRoute(
+        path: RiderRoutes.notifications,
+        name: 'riderNotifications',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const RiderNotificationsScreen(),
         ),
       ),
     ],

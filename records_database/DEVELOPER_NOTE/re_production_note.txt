@@ -1,0 +1,15 @@
+| Service                          | Cost Type                             |                      Approximate Cost |
+| -------------------------------- | ------------------------------------- | ------------------------------------: |
+| AWS Cloud Infrastructure         | Monthly                               |             ₹15,000–₹35,000 initially |
+| PostgreSQL Production DB         | Monthly                               | Included in AWS infrastructure budget |
+| Redis                            | Monthly                               | Included in AWS infrastructure budget |
+| Rider Document Storage (S3)      | Usage-based                           |                        ₹1,000–₹5,000+ |
+| Google Maps Platform             | Usage-based                           |             ₹3,000–₹15,000+ initially |
+| **OTP / SMS (MSG91 or similar)** | **Usage-based**                       |                   **₹2,000–₹10,000+** |
+| Payment Gateway                  | Transaction-based                     |      Provider charges per transaction |
+| Domain                           | Annual                                |                    ₹1,000–₹2,000/year |
+| **Google Play Console**          | **One-time**                          |            **US$25 (~₹2,000–₹2,500)** |
+| **Apple Developer Program**      | **Annual**                            |  **US$99/year (~₹8,500–₹9,000/year)** |
+| Push Notifications (FCM)         | Generally no major per-message charge |            Mostly infrastructure cost |
+| SSL                              | Usually                               |       ₹0 with AWS Certificate Manager |
+| Monitoring/Logs/Backup           | Monthly                               |                        ₹2,000–₹5,000+ |

@@ -1,22 +1,9 @@
 import { createEntityStore } from './entityStore';
 
-const seed = [
-  {
-    id: 'AUD-1001',
-    timestamp: '14 Aug 2026, 09:12 AM',
-    adminId: 'ADM-1001',
-    adminName: 'Ananya Sharma',
-    role: 'Super Admin',
-    action: 'Login',
-    module: 'System',
-    recordId: '',
-    previousValue: '',
-    newValue: 'Session started',
-  },
-];
+const seed = [];
 
 function makeStore() {
-  const store = createEntityStore('audit_v1', seed);
+  const store = createEntityStore('audit_v2', seed, { persist: false });
   return {
     ...store,
     remove() {

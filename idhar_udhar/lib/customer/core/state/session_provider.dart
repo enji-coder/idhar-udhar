@@ -1,4 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/auth_api.dart';
+import 'package:idhar_udhar/shared/api/notifications_api.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
+import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/api/profiles_api.dart';
+import 'package:idhar_udhar/shared/api/token_store.dart';
 
 import '../data/mock/mock_data.dart';
 import '../data/mock/mock_models.dart';
@@ -60,11 +70,27 @@ class CustomerNotice {
 }
 
 class SessionNotifier extends StateNotifier<SessionState> {
-  SessionNotifier({SessionStorage? storage})
-      : _storage = storage ?? SessionStorage(),
+  SessionNotifier({
+    SessionStorage? storage,
+    AuthApi? authApi,
+    OrdersApi? ordersApi,
+    NotificationsApi? notificationsApi,
+    ProfilesApi? profilesApi,
+    TokenStore? tokenStore,
+  })  : _storage = storage ?? SessionStorage(),
+        _authApi = authApi,
+        _ordersApi = ordersApi,
+        _notificationsApi = notificationsApi,
+        _profilesApi = profilesApi,
+        _tokenStore = tokenStore,
         super(SessionState(orders: MockData.seedOrders()));
 
   final SessionStorage _storage;
+  final AuthApi? _authApi;
+  final OrdersApi? _ordersApi;
+  final NotificationsApi? _notificationsApi;
+  final ProfilesApi? _profilesApi;
+  final TokenStore? _tokenStore;
 
   /// Returning-user names keyed by phone (demo; persisted locally).
   final Map<String, String> _knownNames = <String, String>{};
@@ -72,7 +98,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// Invoicing emails keyed by phone (demo; persisted locally).
   final Map<String, String> _knownEmails = <String, String>{};
 
-  /// Restore persisted login before first navigation decision.
+  /// Restore backend session when tokens are still valid.
   Future<void> hydrate() async {
     if (state.isHydrated) {
       return;
@@ -87,19 +113,31 @@ class SessionNotifier extends StateNotifier<SessionState> {
       ..clear()
       ..addAll(emails);
 
-    final PersistedSession? saved = await _storage.loadSession();
-    if (saved != null) {
-      state = SessionState(
-        user: saved.user,
-        isAuthenticated: true,
-        walletBalance: 420,
-        orders: MockData.seedOrders(),
+    final TokenStore? tokens = _tokenStore;
+    final AuthApi? auth = _authApi;
+    if (tokens == null || auth == null || !(await tokens.hasRefreshToken)) {
+      state = state.copyWith(
         isHydrated: true,
+        isAuthenticated: false,
+        clearUser: true,
+        orders: const <MockOrder>[],
       );
       return;
     }
 
-    state = state.copyWith(isHydrated: true);
+    try {
+      await auth.session();
+      final String phone = (await tokens.phone) ?? '';
+      await _loadAuthenticated(phone);
+    } on ApiException {
+      await tokens.clear();
+      await _storage.clearSession();
+      state = const SessionState(isHydrated: true);
+    } catch (_) {
+      await tokens.clear();
+      await _storage.clearSession();
+      state = const SessionState(isHydrated: true);
+    }
   }
 
   void startLogin(String phone) {
@@ -115,15 +153,39 @@ class SessionNotifier extends StateNotifier<SessionState> {
     );
   }
 
-  /// Dummy OTP verify — any 4-digit code accepted for UI demo.
-  bool verifyOtp(String code) {
-    if (code.length != 4 || state.user == null) {
+  Future<void> requestOtp() async {
+    final MockUser? user = state.user;
+    final AuthApi? auth = _authApi;
+    if (user == null || auth == null) {
+      return;
+    }
+    await auth.requestOtp(
+      phone: user.phone,
+      actor: MarketplaceActor.customer,
+    );
+  }
+
+  /// Backend OTP verify. Dummy 4-digit path remains only when APIs are absent.
+  Future<bool> verifyOtp(String code) async {
+    final MockUser? user = state.user;
+    if (user == null) {
       return false;
     }
-    state = state.copyWith(isAuthenticated: true);
-    // Persist immediately so kill/reopen keeps the session.
-    // ignore: discarded_futures
-    _persistAuthenticatedUser();
+    final AuthApi? auth = _authApi;
+    if (auth == null) {
+      if (code.length != 4) {
+        return false;
+      }
+      state = state.copyWith(isAuthenticated: true);
+      unawaited(_persistAuthenticatedUser());
+      return true;
+    }
+    await auth.verifyOtp(
+      phone: user.phone,
+      actor: MarketplaceActor.customer,
+      code: code,
+    );
+    await _loadAuthenticated(user.phone);
     return true;
   }
 
@@ -138,10 +200,8 @@ class SessionNotifier extends StateNotifier<SessionState> {
     final String trimmed = name.trim();
     _knownNames[current.phone] = trimmed;
     state = state.copyWith(user: current.copyWith(name: trimmed));
-    // ignore: discarded_futures
-    _persistAuthenticatedUser();
-    // ignore: discarded_futures
-    _storage.saveKnownNames(_knownNames);
+    unawaited(_persistAuthenticatedUser());
+    unawaited(_storage.saveKnownNames(_knownNames));
   }
 
   void setEmail(String email) {
@@ -152,16 +212,14 @@ class SessionNotifier extends StateNotifier<SessionState> {
     final String trimmed = email.trim();
     _knownEmails[current.phone] = trimmed;
     state = state.copyWith(user: current.copyWith(email: trimmed));
-    // ignore: discarded_futures
-    _persistAuthenticatedUser();
-    // ignore: discarded_futures
-    _storage.saveKnownEmails(_knownEmails);
+    unawaited(_persistAuthenticatedUser());
+    unawaited(_storage.saveKnownEmails(_knownEmails));
   }
 
   void upsertOrder(MockOrder order) {
     final List<MockOrder> next = [
       order,
-      ...state.orders.where((o) => o.id != order.id),
+      ...state.orders.where((o) => o.apiId != order.apiId && o.id != order.id),
     ];
     state = state.copyWith(orders: next);
   }
@@ -170,11 +228,84 @@ class SessionNotifier extends StateNotifier<SessionState> {
 
   MockOrder? orderById(String id) {
     for (final MockOrder order in state.orders) {
-      if (order.id == id) {
+      if (order.id == id ||
+          order.backendOrderId == id ||
+          order.displayId == id) {
         return order;
       }
     }
     return null;
+  }
+
+  Future<void> refreshOrders() async {
+    final OrdersApi? api = _ordersApi;
+    if (api == null || !state.isAuthenticated) {
+      return;
+    }
+    final List<MockOrder> orders =
+        (await api.list()).map(OrderMapper.toMockOrder).toList(growable: false);
+    state = state.copyWith(orders: orders);
+  }
+
+  Future<void> refreshNotices() async {
+    final NotificationsApi? api = _notificationsApi;
+    if (api == null || !state.isAuthenticated) {
+      return;
+    }
+    final notices = (await api.list())
+        .map(
+          (item) => CustomerNotice(
+            id: item.id,
+            title: item.title,
+            body: item.body,
+            orderId: item.orderId,
+            read: item.isRead,
+          ),
+        )
+        .toList(growable: false);
+    state = state.copyWith(notices: notices);
+  }
+
+  Future<void> markNoticeRead(String id) async {
+    final NotificationsApi? api = _notificationsApi;
+    if (api != null) {
+      await api.markRead(id);
+    }
+    state = state.copyWith(
+      notices: state.notices
+          .map(
+            (CustomerNotice notice) => notice.id == id
+                ? CustomerNotice(
+                    id: notice.id,
+                    title: notice.title,
+                    body: notice.body,
+                    orderId: notice.orderId,
+                    read: true,
+                  )
+                : notice,
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Future<void> markAllNoticesRead() async {
+    final NotificationsApi? api = _notificationsApi;
+    if (api != null) {
+      await api.markAllRead();
+    }
+    state = state.copyWith(
+      notices: state.notices
+          .map(
+            (CustomerNotice notice) => CustomerNotice(
+              id: notice.id,
+              title: notice.title,
+              body: notice.body,
+              orderId: notice.orderId,
+              read: true,
+            ),
+          )
+          .toList(growable: false),
+    );
   }
 
   void addNotice(CustomerNotice notice) {
@@ -189,11 +320,83 @@ class SessionNotifier extends StateNotifier<SessionState> {
   }
 
   Future<void> logout() async {
+    final AuthApi? auth = _authApi;
+    if (auth != null) {
+      await auth.logout();
+    } else {
+      await _tokenStore?.clear();
+    }
     await _storage.clearSession();
-    state = SessionState(
-      orders: MockData.seedOrders(),
-      isHydrated: true,
+    state = SessionState(isHydrated: true);
+  }
+
+  Future<void> _loadAuthenticated(String phone) async {
+    String name = _knownNames[phone] ?? _knownNames['+91$phone'] ?? '';
+    String email = _knownEmails[phone] ?? _knownEmails['+91$phone'] ?? '';
+    String id = 'u_${phone.hashCode.abs()}';
+    try {
+      final ProfilesApi? profiles = _profilesApi;
+      if (profiles != null) {
+        final profile = await profiles.customer();
+        id = profile.customerProfileId;
+        final String? remoteName = profile.displayName?.trim();
+        if (remoteName != null && remoteName.isNotEmpty) {
+          name = remoteName;
+        }
+        final String? remoteEmail =
+            (profile.invoiceEmail ?? profile.email)?.trim();
+        if (remoteEmail != null && remoteEmail.isNotEmpty) {
+          email = remoteEmail;
+        }
+      }
+    } catch (_) {
+      // Local name overlay still applies when profile GET fails.
+    }
+    final MockUser user = MockUser(
+      id: id,
+      phone: phone.startsWith('+') ? phone : '+91$phone',
+      name: name,
+      email: email,
     );
+    List<MockOrder> orders = const <MockOrder>[];
+    try {
+      final OrdersApi? api = _ordersApi;
+      if (api != null) {
+        orders = (await api.list())
+            .map(OrderMapper.toMockOrder)
+            .toList(growable: false);
+      }
+    } catch (_) {
+      orders = const <MockOrder>[];
+    }
+    List<CustomerNotice> notices = const <CustomerNotice>[];
+    try {
+      final NotificationsApi? api = _notificationsApi;
+      if (api != null) {
+        notices = (await api.list())
+            .map(
+              (item) => CustomerNotice(
+                id: item.id,
+                title: item.title,
+                body: item.body,
+                orderId: item.orderId,
+                read: item.isRead,
+              ),
+            )
+            .toList(growable: false);
+      }
+    } catch (_) {
+      notices = const <CustomerNotice>[];
+    }
+    state = SessionState(
+      user: user,
+      isAuthenticated: true,
+      walletBalance: 420,
+      orders: orders,
+      isHydrated: true,
+      notices: notices,
+    );
+    unawaited(_persistAuthenticatedUser());
   }
 
   Future<void> _persistAuthenticatedUser() async {
@@ -207,5 +410,11 @@ class SessionNotifier extends StateNotifier<SessionState> {
 
 final sessionProvider =
     StateNotifierProvider<SessionNotifier, SessionState>((ref) {
-  return SessionNotifier();
+  return SessionNotifier(
+    authApi: ref.watch(authApiProvider),
+    ordersApi: ref.watch(ordersApiProvider),
+    notificationsApi: ref.watch(notificationsApiProvider),
+    profilesApi: ref.watch(profilesApiProvider),
+    tokenStore: ref.watch(tokenStoreProvider),
+  );
 });

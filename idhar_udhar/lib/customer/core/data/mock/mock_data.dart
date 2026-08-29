@@ -75,6 +75,8 @@ abstract final class MockData {
       address: 'Vesu Main Road, Surat',
       city: 'Surat',
       iconName: 'place',
+      latitude: 21.1418,
+      longitude: 72.7709,
     ),
     const MockLocation(
       id: 'loc_sg',

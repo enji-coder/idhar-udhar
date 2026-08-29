@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:idhar_udhar/main.dart';
+import 'package:idhar_udhar/customer/customer_main.dart';
 
 void main() {
   testWidgets('App boots into splash route', (tester) async {

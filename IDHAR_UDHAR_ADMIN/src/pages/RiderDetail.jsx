@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Eye } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
 import GlassCard from '../components/common/GlassCard';
@@ -12,61 +12,106 @@ import Field, { inputClass } from '../components/common/Field';
 import ActionButton from '../components/common/ActionButton';
 import Toast from '../components/common/Toast';
 import { PageSkeleton } from '../components/common/Skeleton';
-import useMockLoader from '../hooks/useMockLoader';
 import useStore from '../hooks/useStore';
-import { orderStore, payoutStore, riderStore, vehicleStore, walletStore } from '../services/stores';
-import { activityTimeline, earnings } from '../data/mockData';
+import { orderStore, riderStore } from '../services/stores';
 import { useAuth } from '../context/AuthContext';
 import { formatINR, initials } from '../utils/format';
 import { formatAppDate, formatAppTime, parseAppDate, sortByDateTime } from '../utils/dates';
 import { maskAadhaar, maskBankAccount } from '../utils/masking';
 import { enrichRiderProfile, enrichVehicleRecord, riderDocumentsFor } from '../services/profileEnrichment';
-import { buildRiderTransactions } from '../services/riderWallet';
 import { calculateOrderFinance } from '../services/commission';
+import { fetchAdminRider, fetchRiderCod, fetchRiderEarnings, fetchRiderWallet, fetchRiderWalletLedger } from '../api/adminApi';
 
 const DOC_STATUSES = ['Pending', 'Verified', 'Rejected'];
 
 export default function RiderDetail() {
   const { id } = useParams();
   const { can } = useAuth();
-  const loading = useMockLoader();
   const riders = useStore(riderStore);
   const orders = useStore(orderStore);
-  const vehicles = useStore(vehicleStore);
-  const wallet = useStore(walletStore);
-  const payouts = useStore(payoutStore);
-  const rider = riders.find((item) => item.id === id);
+  const stored = riders.find((item) => item.id === id);
+  const [rider, setRider] = useState(stored || null);
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState(null);
   const [docView, setDocView] = useState(null);
   const [toast, setToast] = useState('');
+  const [wallet, setWalletBalance] = useState(null);
+  const [cod, setCod] = useState(null);
+  const [pay, setPay] = useState([]);
+  const [ledger, setLedger] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  useEffect(() => {
+    if (!id) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const profile = await fetchAdminRider(id);
+        if (cancelled) return;
+        setRider(profile);
+        const [walletResult, codResult, earningsResult, ledgerResult] = await Promise.allSettled([
+          fetchRiderWallet(id),
+          fetchRiderCod(id),
+          fetchRiderEarnings(id),
+          fetchRiderWalletLedger(id),
+        ]);
+        if (cancelled) return;
+        if (walletResult.status === 'fulfilled') setWalletBalance(walletResult.value);
+        else setWalletBalance(null);
+        if (codResult.status === 'fulfilled') setCod(codResult.value);
+        else setCod(null);
+        if (earningsResult.status === 'fulfilled') setPay(earningsResult.value);
+        else setPay([]);
+        if (ledgerResult.status === 'fulfilled') {
+          setLedger((ledgerResult.value || []).map((entry) => ({
+            id: entry.wallet_ledger_id,
+            date: entry.created_at,
+            time: '',
+            type: entry.direction === 'CREDIT' ? 'Credit' : 'Debit',
+            amount: Number(entry.amount || 0),
+            status: 'Success',
+            method: 'Wallet',
+            reference: entry.related_order_id || entry.entry_type,
+          })));
+        } else {
+          setLedger([]);
+        }
+        setLoadError(null);
+      } catch (error) {
+        if (!cancelled) setLoadError(error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const profile = useMemo(() => (rider ? enrichRiderProfile(rider) : null), [rider]);
   const vehicleRecord = useMemo(() => {
     if (!rider) return null;
-    const match = vehicles.find((item) => item.riderId === rider.id || item.number === rider.vehicleNumber);
-    return enrichVehicleRecord(match || { number: rider.vehicleNumber, category: rider.vehicle, type: rider.vehicle }, rider);
-  }, [vehicles, rider]);
+    return enrichVehicleRecord({ number: rider.vehicleNumber, category: rider.vehicle, type: rider.vehicle }, rider);
+  }, [rider]);
   const documents = useMemo(() => (rider ? riderDocumentsFor(rider) : []), [rider]);
   const history = useMemo(
     () => sortByDateTime(orders.filter((order) => order.riderId === id || order.rider === rider?.name)),
     [orders, id, rider?.name],
   );
-  const transactions = useMemo(
-    () => (rider ? buildRiderTransactions({ rider, orders, wallet, payouts }) : []),
-    [rider, orders, wallet, payouts],
-  );
-  const pay = earnings.filter((item) => item.rider === rider?.name);
+  const transactions = ledger;
 
   if (loading) return <PageSkeleton />;
+  if (loadError && !rider) {
+    return <PageContainer><ErrorState title="Couldn't load rider" description={loadError.message || 'The rider API did not respond. Dummy records are not shown.'} /></PageContainer>;
+  }
   if (!rider) {
-    return <PageContainer><ErrorState title="Rider not found" description="This rider ID is not in the mock fleet." /></PageContainer>;
+    return <PageContainer><ErrorState title="Rider not found" description="This rider is not in the current directory." /></PageContainer>;
   }
 
-  function updateDocumentStatus(key, status) {
-    riderStore.patch(rider.id, { documents: { ...(rider.documents || {}), [key]: status } });
-    setDocView((current) => (current?.key === key ? { ...current, status } : current));
-    setToast(`${key === 'photo' ? 'Profile photo' : documents.find((item) => item.key === key)?.label || 'Document'} marked ${status}.`);
+  function updateDocumentStatus() {
+    setToast('Document verification is not available on the server yet.');
   }
 
   return (
@@ -84,16 +129,18 @@ export default function RiderDetail() {
           <dl className="mt-4 space-y-2 text-sm">
             <div className="flex justify-between"><dt className="text-ink-muted">Phone</dt><dd>{rider.phone}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Vehicle</dt><dd>{rider.vehicle}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Rating</dt><dd>{rider.rating || '—'}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">On-time</dt><dd>{rider.onTime || 0}%</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Score</dt><dd>{rider.score || 0}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-muted">Earnings</dt><dd>{formatINR(rider.earnings)}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Rating</dt><dd>{rider.rating || 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">On-time</dt><dd>{rider.onTime != null ? `${rider.onTime}%` : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Score</dt><dd>{rider.score != null ? rider.score : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Earnings</dt><dd>{wallet ? formatINR(wallet.available_balance) : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Wallet</dt><dd>{wallet ? formatINR(wallet.available_balance) : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">COD Due</dt><dd>{cod ? formatINR(cod.cod_due) : 'N/A'}</dd></div>
             <StatusBadge status={rider.status} />
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
             {can('riders', 'edit') ? <Button size="sm" variant="edit" onClick={() => { setDraft(rider); setEdit(true); }}>Edit</Button> : null}
-            {can('riders', 'suspend') && rider.status !== 'Suspended' ? <Button size="sm" variant="danger" onClick={() => riderStore.patch(rider.id, { status: 'Suspended' })}>Suspend</Button> : null}
-            {can('riders', 'activate') && rider.status === 'Suspended' ? <Button size="sm" variant="approve" onClick={() => riderStore.patch(rider.id, { status: 'Active' })}>Activate</Button> : null}
+            {can('riders', 'suspend') && rider.status !== 'Suspended' ? <Button size="sm" variant="danger" onClick={() => setToast('Suspending riders from Admin is not available on the server yet.')}>Suspend</Button> : null}
+            {can('riders', 'activate') && rider.status === 'Suspended' ? <Button size="sm" variant="approve" onClick={() => setToast('Activating riders from Admin is not available on the server yet.')}>Activate</Button> : null}
           </div>
         </GlassCard>
         <GlassCard className="lg:col-span-2">
@@ -118,19 +165,19 @@ export default function RiderDetail() {
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Rider KYC & Banking</h3>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Driving License (DL) No.</dt><dd className="text-right font-medium">{profile.drivingLicenseNumber}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">RC No.</dt><dd className="text-right font-medium">{profile.rcNumber}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Aadhaar</dt><dd className="text-right font-medium">{maskAadhaar(profile.aadhaarNumber)}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">PAN No.</dt><dd className="text-right font-medium">{profile.panNumber}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Bank Account No.</dt><dd className="text-right font-medium">{maskBankAccount(profile.bankAccountNumber)}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">IFSC Code</dt><dd className="text-right font-medium">{profile.ifscCode}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Driving License (DL) No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? (rider.kyc || 'N/A') : profile.drivingLicenseNumber}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">RC No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : profile.rcNumber}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Aadhaar</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : maskAadhaar(profile.aadhaarNumber)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">PAN No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : profile.panNumber}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Bank Account No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : maskBankAccount(profile.bankAccountNumber)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">IFSC Code</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : profile.ifscCode}</dd></div>
           </dl>
         </GlassCard>
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Vehicle Information</h3>
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between gap-3"><dt className="text-ink-muted">Rider Vehicle Registration Number</dt><dd className="text-right font-medium">{vehicleRecord?.rcNumber || rider.vehicleNumber || 'N/A'}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Vehicle Category</dt><dd className="text-right font-medium">{rider.vehicle || vehicleRecord?.category || 'Bike'}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Vehicle Category</dt><dd className="text-right font-medium">{rider.vehicle || vehicleRecord?.category || 'N/A'}</dd></div>
             {vehicleRecord?.brand ? <div className="flex justify-between gap-3"><dt className="text-ink-muted">Brand / Model</dt><dd className="text-right font-medium">{vehicleRecord.brand} {vehicleRecord.model}</dd></div> : null}
           </dl>
         </GlassCard>
@@ -178,14 +225,14 @@ export default function RiderDetail() {
       <section className="grid gap-4 lg:grid-cols-2">
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Earnings</h3>
-          {pay.length ? pay.map((item) => <p key={item.id} className="rounded-2xl bg-white/70 px-3 py-3 text-sm">{item.date}{item.time ? `, ${item.time}` : ''}: {formatINR(item.total)} · {item.orders} orders</p>) : <p className="text-sm text-ink-muted">No earnings rows for this rider today.</p>}
+          {pay.length ? pay.map((item) => <p key={item.id} className="rounded-2xl bg-white/70 px-3 py-3 text-sm">{item.date}: {formatINR(item.riderEarning || item.tripFare)} · {item.orders} order</p>) : <p className="text-sm text-ink-muted">No frozen earnings for this rider yet.</p>}
         </GlassCard>
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Performance</h3>
           <ul className="space-y-3 text-sm">
-            {activityTimeline.map((item) => (
-              <li key={item.time} className="flex gap-3"><span className="font-semibold text-brand-600">{item.time}</span><span>{item.text}</span></li>
-            ))}
+            {history.length ? history.slice(0, 8).map((item) => (
+              <li key={item.id} className="flex gap-3"><span className="font-semibold text-brand-600">{item.status}</span><span>{item.id}</span></li>
+            )) : <li className="text-ink-muted">No recent order activity.</li>}
           </ul>
         </GlassCard>
       </section>
@@ -210,7 +257,7 @@ export default function RiderDetail() {
           </div>
         ) : null}
       </Modal>
-      <Modal open={edit} title="Edit rider" onClose={() => setEdit(false)} footer={<><Button variant="ghost" onClick={() => setEdit(false)}>Cancel</Button><Button onClick={() => { riderStore.upsert(draft); setEdit(false); }}>Save</Button></>}>
+      <Modal open={edit} title="Edit rider" onClose={() => setEdit(false)} footer={<><Button variant="ghost" onClick={() => setEdit(false)}>Cancel</Button><Button onClick={() => { setEdit(false); setToast('Editing riders from Admin is not available on the server yet.'); }}>Save</Button></>}>
         {draft ? (
           <div className="space-y-3">
             <Field label="Name"><input className={inputClass} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>

@@ -133,6 +133,20 @@ export function calculateOrderFinance(order, settings = getPaymentSettings()) {
     return withLegacyAliases(fromSnapshot(order.financeSnapshot, tripFare || payment));
   }
 
+  if (order?.source === 'api') {
+    return withLegacyAliases({
+      totalAmount: tripFare || payment,
+      riderAmount: 0,
+      riderPercentage: 0,
+      companyCommission: 0,
+      companyCommissionPercentage: 0,
+      operationalCost: 0,
+      operationalCostPercentage: 0,
+      actualProfit: 0,
+      actualProfitPercentage: 0,
+    });
+  }
+
   const hasStored = order?.riderCommission != null || order?.riderEarning != null;
   const hasCompanyStored = order?.companyCommission != null;
   const hasOpexStored = order?.operationalExpense != null;

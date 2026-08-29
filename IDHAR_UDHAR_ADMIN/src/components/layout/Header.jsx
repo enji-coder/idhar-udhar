@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Bell, LogOut, Menu, Search, Settings, UserRound, Zap } from 'lucide-react';
 import SearchBar from '../common/SearchBar';
-import { notifications as mockNotifications } from '../../data/mockData';
 import { resolvePageMeta } from '../../data/navigation';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeDashboardLive } from '../../hooks/dashboardLive';
+import { fetchAdminNotices, markAllNoticesRead } from '../../api/adminApi';
 
 function DashboardLiveBadge() {
   const [live, setLive] = useState({ phase: 'live', updatedAt: Date.now() });
@@ -43,13 +43,27 @@ export default function Header({ searchQuery, onSearch, onMenuClick, onLogout, o
   const navigate = useNavigate();
   const [showNotes, setShowNotes] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [notes, setNotes] = useState(mockNotifications);
+  const [notes, setNotes] = useState([]);
   const notesRef = useRef(null);
   const profileRef = useRef(null);
 
   const meta = resolvePageMeta(location.pathname);
   const unread = notes.filter((item) => item.unread).length;
   const crumbs = meta.crumbs || ['Dashboard'];
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAdminNotices()
+      .then((rows) => {
+        if (!cancelled) setNotes(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setNotes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     function handleClick(event) {
@@ -106,7 +120,14 @@ export default function Header({ searchQuery, onSearch, onMenuClick, onLogout, o
               <div className="absolute right-0 z-30 mt-3 w-[min(22rem,calc(100vw-2rem))] glass-panel p-3">
                 <div className="mb-2 flex items-center justify-between px-2">
                   <p className="text-sm font-semibold text-ink">Notifications</p>
-                  <button type="button" onClick={() => setNotes((items) => items.map((item) => ({ ...item, unread: false })))} className="text-xs font-medium text-brand-600">Mark all read</button>
+                  <button type="button" onClick={async () => {
+                    try {
+                      await markAllNoticesRead();
+                      setNotes((items) => items.map((item) => ({ ...item, unread: false })));
+                    } catch {
+                      /* keep unread until the API confirms */
+                    }
+                  }} className="text-xs font-medium text-brand-600">Mark all read</button>
                 </div>
                 <ul className="max-h-80 space-y-1 overflow-y-auto">
                   {notes.map((item) => (
