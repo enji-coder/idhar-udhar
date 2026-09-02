@@ -7,4 +7,7 @@ backups/
 !.env.example
 
 # Local Docker/pgAdmin credentials — never commit
-DEVELOPER_NOTE/database_note.txt
+# DEVELOPER_NOTE/database_note.txt
+
+# Local SSL certificates
+*.pem
