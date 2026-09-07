@@ -25,6 +25,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY scripts ./scripts
 
 EXPOSE 3000
 
