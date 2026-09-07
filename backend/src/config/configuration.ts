@@ -12,6 +12,7 @@ export type AppConfig = {
     user: string;
     password: string;
     ssl: boolean;
+    sslRootCert: string | null;
     poolMax: number;
   };
   jwt: {
@@ -233,6 +234,7 @@ export function loadAppConfig(): AppConfig {
       user: required('DATABASE_USER'),
       password: required('DATABASE_PASSWORD'),
       ssl: (process.env.DATABASE_SSL ?? 'false').toLowerCase() === 'true',
+      sslRootCert: (process.env.DATABASE_SSL_ROOT_CERT ?? '').trim() || null,
       poolMax: integer('DATABASE_POOL_MAX', 10),
     },
     jwt: {

@@ -26,6 +26,7 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY scripts ./scripts
+COPY rds-global-bundle.pem /app/certs/rds-global-bundle.pem
 
 EXPOSE 3000
 

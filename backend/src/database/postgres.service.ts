@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { AppLogger } from '../common/logger/app-logger';
 import { AppConfig } from '../config/configuration';
+import { postgresSslOption } from './postgres-ssl';
 import { Queryable } from './queryable';
 
 @Injectable()
@@ -22,7 +23,10 @@ export class PostgresService implements OnModuleInit, OnModuleDestroy, Queryable
       database: database.name,
       user: database.user,
       password: database.password,
-      ssl: database.ssl ? { rejectUnauthorized: true } : false,
+      ssl: postgresSslOption({
+        ssl: database.ssl,
+        rootCertPath: database.sslRootCert,
+      }),
       max: database.poolMax,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
