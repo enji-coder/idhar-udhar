@@ -1,5 +1,5 @@
 import { Bell, FileText, MapPinned, Package, Plus, Truck, Users, Wallet } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import BarChart from '../components/charts/BarChart';
 import LineChart from '../components/charts/LineChart';
@@ -11,11 +11,9 @@ import StatusBadge from '../components/common/StatusBadge';
 import Tabs from '../components/common/Tabs';
 import { ASSETS } from '../config/assets';
 import { useAuth } from '../context/AuthContext';
-import { publishDashboardLive } from '../hooks/dashboardLive';
 import usePaymentSettings from '../hooks/usePaymentSettings';
 import useStore from '../hooks/useStore';
 import PageContainer from '../components/layout/PageContainer';
-import { hydrateAdminDirectory } from '../api/hydrate';
 import { customerStore, orderStore, riderStore } from '../services/stores';
 import { buildDashboardMetrics, REVENUE_PERIODS } from '../services/dashboardMetrics';
 import { formatINR } from '../utils/format';
@@ -35,7 +33,6 @@ const kpiLinks = {
 };
 
 const liveStatuses = ['Assigned', 'Accepted', 'Rider Arriving', 'Picked Up', 'In Transit'];
-const REFRESH_MS = 10000;
 
 const toneStyles = {
   success: { wrap: 'border-emerald-100', label: 'text-emerald-700', dot: 'bg-emerald-500' },
@@ -52,56 +49,18 @@ export default function Dashboard() {
   const riders = useStore(riderStore);
   const customers = useStore(customerStore);
   const pay = usePaymentSettings();
-  const [tick, setTick] = useState(0);
   const [revenuePeriod, setRevenuePeriod] = useState('weekly');
-  const timerRef = useRef(null);
-  const settleRef = useRef(null);
-  const inFlightRef = useRef(false);
-
-  useEffect(() => {
-    async function refresh() {
-      if (document.hidden || inFlightRef.current) return;
-      inFlightRef.current = true;
-      publishDashboardLive({ phase: 'updating' });
-      try {
-        await hydrateAdminDirectory({ silent: true });
-        setTick((value) => value + 1);
-        window.clearTimeout(settleRef.current);
-        settleRef.current = window.setTimeout(() => {
-          publishDashboardLive({ phase: 'live', updatedAt: Date.now() });
-          inFlightRef.current = false;
-        }, 280);
-      } catch {
-        inFlightRef.current = false;
-      }
-    }
-
-    function onVisibility() {
-      if (!document.hidden) refresh();
-    }
-
-    publishDashboardLive({ phase: 'live', updatedAt: Date.now() });
-    timerRef.current = window.setInterval(refresh, REFRESH_MS);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.clearInterval(timerRef.current);
-      window.clearTimeout(settleRef.current);
-      document.removeEventListener('visibilitychange', onVisibility);
-      timerRef.current = null;
-      inFlightRef.current = false;
-    };
-  }, []);
 
   const metrics = useMemo(
     () => buildDashboardMetrics(orders, riders, customers, pay),
-    [orders, riders, customers, pay, tick],
+    [orders, riders, customers, pay],
   );
   const revenue = metrics.periods[revenuePeriod] || metrics.periods.weekly;
 
   const recentOrders = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
     return orders.filter((order) => `${order.id} ${order.customer} ${order.rider}`.toLowerCase().includes(query)).slice(0, 6);
-  }, [orders, searchQuery, tick]);
+  }, [orders, searchQuery]);
 
   const operational = useMemo(() => {
     const live = orders.filter((row) => liveStatuses.includes(row.status));
@@ -112,7 +71,7 @@ export default function Dashboard() {
       pickupPending: orders.filter((row) => ['Assigned', 'Accepted', 'Rider Arriving'].includes(row.status)).length,
       delayed: orders.filter((row) => row.status === 'In Transit' && Number.parseInt(row.eta, 10) > 20).length,
     };
-  }, [orders, riders, tick]);
+  }, [orders, riders]);
 
   const highlightKpis = metrics.kpis;
 
