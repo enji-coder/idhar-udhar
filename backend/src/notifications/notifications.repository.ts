@@ -47,6 +47,7 @@ export type RecipientRef = {
 
 export type ClaimedDelivery = NotificationDeliveryRow & {
   recipient_identity_id: string;
+  recipient_profile_type: ProfileRole | null;
   type: string;
   title: string | null;
   body: string;
@@ -548,6 +549,7 @@ export class NotificationsRepository {
         u.provider_message_id,
         u.created_at,
         n.recipient_identity_id,
+        n.recipient_profile_type,
         n.type,
         n.title,
         n.body,

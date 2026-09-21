@@ -15,6 +15,12 @@ import {
   RoutingResult,
 } from './routing-provider';
 
+export const GOOGLE_ROUTES_MAX_ATTEMPTS = 2;
+
+function isTransientHttpStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 export type RoutingHttpPost = (
   url: string,
   headers: Record<string, string>,
@@ -92,28 +98,67 @@ export class GoogleRoutingProvider implements RoutingProvider {
       waypoint_count: Math.max(0, request.points.length - 2),
       stop_count: request.points.length,
     });
-    const { status, json } = await this.httpPost(
-      GOOGLE_ROUTES_URL,
-      {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': GOOGLE_FIELD_MASK,
-      },
-      body,
-      routing.timeoutMs,
-    );
-    if (status >= 500 || status === 429) {
-      throw new RoutingProviderError(
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': GOOGLE_FIELD_MASK,
+    };
+
+    let lastUnavailable: RoutingProviderError | null = null;
+    for (let attempt = 1; attempt <= GOOGLE_ROUTES_MAX_ATTEMPTS; attempt += 1) {
+      let status: number;
+      let json: unknown;
+      try {
+        const response = await this.httpPost(
+          GOOGLE_ROUTES_URL,
+          headers,
+          body,
+          routing.timeoutMs,
+        );
+        status = response.status;
+        json = response.json;
+      } catch (err) {
+        if (err instanceof RoutingProviderError && err.kind === 'invalid_response') {
+          throw err;
+        }
+        lastUnavailable =
+          err instanceof RoutingProviderError && err.kind === 'unavailable'
+            ? err
+            : new RoutingProviderError(
+                'unavailable',
+                'Google routing provider is unavailable',
+              );
+        if (attempt < GOOGLE_ROUTES_MAX_ATTEMPTS) {
+          continue;
+        }
+        throw lastUnavailable;
+      }
+
+      if (isTransientHttpStatus(status)) {
+        lastUnavailable = new RoutingProviderError(
+          'unavailable',
+          'Google routing provider is unavailable',
+        );
+        if (attempt < GOOGLE_ROUTES_MAX_ATTEMPTS) {
+          continue;
+        }
+        throw lastUnavailable;
+      }
+      if (status >= 400) {
+        throw new RoutingProviderError(
+          'unavailable',
+          'Google routing provider returned an error',
+        );
+      }
+      return parseGoogleComputeRoutesResponse(json, request.points);
+    }
+
+    throw (
+      lastUnavailable ??
+      new RoutingProviderError(
         'unavailable',
         'Google routing provider is unavailable',
-      );
-    }
-    if (status >= 400) {
-      throw new RoutingProviderError(
-        'unavailable',
-        'Google routing provider returned an error',
-      );
-    }
-    return parseGoogleComputeRoutesResponse(json, request.points);
+      )
+    );
   }
 }

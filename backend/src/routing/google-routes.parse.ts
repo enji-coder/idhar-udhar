@@ -23,6 +23,7 @@ export function buildGoogleComputeRoutesBody(points: LatLng[]) {
     routingPreference: 'TRAFFIC_UNAWARE',
     computeAlternativeRoutes: false,
     optimizeWaypointOrder: false,
+    units: 'METRIC',
   };
 }
 

@@ -34,6 +34,7 @@ export type OrderStopRow = {
   contact_phone: string | null;
   arrived_at: Date | null;
   completed_at: Date | null;
+  proof_file_id: string | null;
 };
 
 export type OrderOfferRow = {
@@ -161,7 +162,8 @@ export class OrdersRepository {
           contact_name,
           contact_phone,
           arrived_at,
-          completed_at
+          completed_at,
+          proof_file_id
         `,
         [
           orderId,
@@ -392,7 +394,8 @@ export class OrdersRepository {
         contact_name,
         contact_phone,
         arrived_at,
-        completed_at
+        completed_at,
+        proof_file_id
       FROM order_stops
       WHERE order_id = $1
       ORDER BY sequence ASC
@@ -400,6 +403,36 @@ export class OrdersRepository {
       [orderId],
     );
     return result.rows;
+  }
+
+  async findStopById(
+    orderId: string,
+    stopId: string,
+    db: Queryable = this.postgres,
+  ): Promise<OrderStopRow | null> {
+    const result = await db.query<OrderStopRow>(
+      `
+      SELECT
+        order_stop_id,
+        order_id,
+        sequence,
+        stop_type,
+        address_text,
+        latitude::text AS latitude,
+        longitude::text AS longitude,
+        zone_id,
+        contact_name,
+        contact_phone,
+        arrived_at,
+        completed_at,
+        proof_file_id
+      FROM order_stops
+      WHERE order_id = $1 AND order_stop_id = $2
+      LIMIT 1
+      `,
+      [orderId, stopId],
+    );
+    return result.rows[0] ?? null;
   }
 
   async compareAndSetStatus(

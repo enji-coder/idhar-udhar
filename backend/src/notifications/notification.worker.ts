@@ -153,6 +153,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
           deliveryId: claimed.notification_delivery_id,
           notificationId: claimed.notification_id,
           identityId: claimed.recipient_identity_id,
+          profileType: claimed.recipient_profile_type,
           type: claimed.type,
           title: claimed.title ?? '',
           body: claimed.body,
@@ -185,6 +186,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
           pushResult.error,
           worker.maxAttempts,
           tx,
+          pushResult.retryable !== false,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : 'unknown';
@@ -196,6 +198,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
           message,
           worker.maxAttempts,
           tx,
+          true,
         );
       }
     });
@@ -209,8 +212,9 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
     error: string,
     maxAttempts: number,
     tx: Queryable,
+    retryable: boolean,
   ): Promise<'failed' | 'retried'> {
-    const terminal = attempt >= maxAttempts;
+    const terminal = !retryable || attempt >= maxAttempts;
     await this.repo.completeDelivery(
       {
         deliveryId,

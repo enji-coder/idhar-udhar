@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parseFirebaseServiceAccountJson } from './firebase-credentials';
 
 export type AppConfig = {
   nodeEnv: string;
@@ -34,13 +35,23 @@ export type AppConfig = {
     cooldownSeconds: number;
     maxRequestsPerHour: number;
     pepper: string;
-    delivery: 'capture' | 'unconfigured';
+    delivery: 'capture' | 'unconfigured' | 'msg91';
     /**
      * DEVELOPMENT ONLY. When true, loopback may read the in-memory capture
      * code so Chrome can complete OTP. Always false in production.
      * Never log the code. Never enable on a public host.
      */
     httpPeek: boolean;
+    /**
+     * MSG91 SendOTP. Required only when delivery is msg91.
+     * Auth key never falls back to capture/unconfigured.
+     */
+    msg91: {
+      authKey: string | null;
+      templateId: string | null;
+      senderId: string | null;
+      timeoutMs: number;
+    };
   };
   /**
    * Quote/offer TTLs are DEVELOPMENT DEFAULTS.
@@ -62,23 +73,51 @@ export type AppConfig = {
     batchSize: number;
     maxAttempts: number;
     retryBackoffSeconds: number;
-    pushProvider: 'capture' | 'unconfigured';
+    pushProvider: 'capture' | 'unconfigured' | 'fcm';
   };
   routing: {
     /**
      * Provider selection is an engineering switch.
+     * Unset defaults to mock outside production and google in production.
      * google without GOOGLE_MAPS_API_KEY fails at startup — never falls back to mock.
      */
     provider: 'mock' | 'google';
     googleApiKey: string | null;
     timeoutMs: number;
   };
+  payment: {
+    /**
+     * Online adapter. Only `unconfigured` exists: record an ONLINE intent,
+     * never mark PAID, never call a gateway. Unknown values fail startup
+     * so production cannot silently assume Razorpay/Cashfree/Stripe/sandbox.
+     */
+    provider: 'unconfigured';
+  };
   location: {
     /**
-     * Redis is the architecture direction for hot GPS (Master §39).
-     * This phase only implements the in-memory seam. LOCATION_STORE=redis fails clearly.
+     * Redis/Valkey is the hot last-GPS store (Master §39).
+     * Unset defaults to memory outside production and redis in production.
+     * redis requires REDIS_ENABLED=true and REDIS_HOST and never falls back to memory.
      */
-    store: 'memory';
+    store: 'memory' | 'redis';
+  };
+  redis: {
+    enabled: boolean;
+    host: string | null;
+    port: number;
+    tls: boolean;
+  };
+  /**
+   * Private object storage for rider KYC and POD bytes.
+   * Metadata stays in PostgreSQL (`stored_files`).
+   * s3 uses the default AWS credential provider chain (ECS task role).
+   * Never configure static access keys in this process.
+   */
+  storage: {
+    provider: 'unconfigured' | 's3';
+    bucket: string | null;
+    region: string | null;
+    signedUrlTtlSeconds: number;
   };
 };
 
@@ -88,6 +127,20 @@ function required(name: string): string {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function booleanFlag(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) {
+    return fallback;
+  }
+  if (raw === 'true') {
+    return true;
+  }
+  if (raw === 'false') {
+    return false;
+  }
+  throw new Error(`Invalid boolean environment variable: ${name}`);
 }
 
 function integer(name: string, fallback: number): number {
@@ -167,20 +220,52 @@ export function loadAppConfig(): AppConfig {
 
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const deliveryRaw = (process.env.OTP_DELIVERY_PROVIDER ?? '').toLowerCase();
-  const delivery: 'capture' | 'unconfigured' =
-    deliveryRaw === 'capture' || deliveryRaw === 'unconfigured'
-      ? deliveryRaw
+  // Capture (in-memory OTP) cannot be enabled in production even if env says so.
+  // msg91 is the production SMS vendor and is allowed when explicitly selected.
+  const delivery: 'capture' | 'unconfigured' | 'msg91' =
+    deliveryRaw === 'msg91'
+      ? 'msg91'
       : nodeEnv === 'production'
         ? 'unconfigured'
-        : 'capture';
+        : deliveryRaw === 'unconfigured'
+          ? 'unconfigured'
+          : 'capture';
+
+  const msg91AuthKey = (process.env.MSG91_AUTHKEY ?? '').trim() || null;
+  const msg91TemplateId = (process.env.MSG91_TEMPLATE_ID ?? '').trim() || null;
+  const msg91SenderId = (process.env.MSG91_SENDER_ID ?? '').trim() || null;
+  if (delivery === 'msg91') {
+    if (!msg91AuthKey) {
+      throw new Error(
+        'OTP_DELIVERY_PROVIDER=msg91 requires MSG91_AUTHKEY; refusing to fall back to capture or unconfigured',
+      );
+    }
+    if (!msg91TemplateId) {
+      throw new Error(
+        'OTP_DELIVERY_PROVIDER=msg91 requires MSG91_TEMPLATE_ID; refusing to fall back to capture or unconfigured',
+      );
+    }
+    if (!msg91SenderId) {
+      throw new Error(
+        'OTP_DELIVERY_PROVIDER=msg91 requires MSG91_SENDER_ID; refusing to fall back to capture or unconfigured',
+      );
+    }
+  }
 
   const pushRaw = (process.env.PUSH_PROVIDER ?? '').toLowerCase();
-  const pushProvider: 'capture' | 'unconfigured' =
-    pushRaw === 'capture' || pushRaw === 'unconfigured'
-      ? pushRaw
+  // Capture (in-memory fake SENT) cannot be enabled in production even if env says so.
+  // fcm is the production push vendor and is allowed when explicitly selected.
+  const pushProvider: 'capture' | 'unconfigured' | 'fcm' =
+    pushRaw === 'fcm'
+      ? 'fcm'
       : nodeEnv === 'production'
         ? 'unconfigured'
-        : 'capture';
+        : pushRaw === 'unconfigured'
+          ? 'unconfigured'
+          : 'capture';
+  if (pushProvider === 'fcm') {
+    parseFirebaseServiceAccountJson(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  }
 
   const workerEnabledRaw = (process.env.NOTIFICATION_WORKER_ENABLED ?? '').toLowerCase();
   const workerEnabled =
@@ -195,16 +280,21 @@ export function loadAppConfig(): AppConfig {
     throw new Error('OTP_HASH_PEPPER (or REFRESH_TOKEN_PEPPER fallback) must be at least 32 characters');
   }
 
-  const otpLength = integer('OTP_LENGTH', 6);
+  const otpLength = integer('OTP_LENGTH', 4);
   if (otpLength < 4 || otpLength > 8) {
     throw new Error('OTP_LENGTH engineering bound is 4–8 until business policy is set');
   }
 
-  const routingRaw = (process.env.ROUTING_PROVIDER ?? 'mock').toLowerCase();
-  if (routingRaw !== 'mock' && routingRaw !== 'google') {
+  const routingRaw = (process.env.ROUTING_PROVIDER ?? '').trim().toLowerCase();
+  if (routingRaw && routingRaw !== 'mock' && routingRaw !== 'google') {
     throw new Error('ROUTING_PROVIDER must be mock or google');
   }
-  const routingProvider: 'mock' | 'google' = routingRaw;
+  const routingProvider: 'mock' | 'google' =
+    routingRaw === 'mock' || routingRaw === 'google'
+      ? routingRaw
+      : nodeEnv === 'production'
+        ? 'google'
+        : 'mock';
   const googleApiKeyRaw = (process.env.GOOGLE_MAPS_API_KEY ?? '').trim();
   const googleApiKey = googleApiKeyRaw.length > 0 ? googleApiKeyRaw : null;
   if (routingProvider === 'google' && !googleApiKey) {
@@ -213,14 +303,57 @@ export function loadAppConfig(): AppConfig {
     );
   }
 
-  const locationStoreRaw = (process.env.LOCATION_STORE ?? 'memory').toLowerCase();
-  if (locationStoreRaw === 'redis') {
+  const paymentRaw = (process.env.PAYMENT_PROVIDER ?? 'unconfigured')
+    .trim()
+    .toLowerCase();
+  if (paymentRaw !== 'unconfigured') {
     throw new Error(
-      'LOCATION_STORE=redis is not implemented in this phase; use LOCATION_STORE=memory',
+      'PAYMENT_PROVIDER must be unconfigured; no online payment vendor is implemented (refusing sandbox, mock capture, or an unnamed gateway)',
     );
   }
-  if (locationStoreRaw !== 'memory') {
-    throw new Error('LOCATION_STORE must be memory');
+  const paymentProvider = 'unconfigured' as const;
+
+  const redisEnabled = booleanFlag('REDIS_ENABLED', false);
+  const redisHost = (process.env.REDIS_HOST ?? '').trim() || null;
+  const redisTls = booleanFlag('REDIS_TLS', redisEnabled);
+  if (redisEnabled && !redisHost) {
+    throw new Error(
+      'REDIS_ENABLED=true requires REDIS_HOST; refusing to start without Redis',
+    );
+  }
+
+  const locationStoreRaw = (process.env.LOCATION_STORE ?? '').trim().toLowerCase();
+  if (locationStoreRaw && locationStoreRaw !== 'memory' && locationStoreRaw !== 'redis') {
+    throw new Error('LOCATION_STORE must be memory or redis');
+  }
+  const locationStore: 'memory' | 'redis' =
+    locationStoreRaw === 'memory' || locationStoreRaw === 'redis'
+      ? locationStoreRaw
+      : nodeEnv === 'production'
+        ? 'redis'
+        : 'memory';
+  if (locationStore === 'redis' && !redisEnabled) {
+    throw new Error(
+      'LOCATION_STORE=redis requires REDIS_ENABLED=true; refusing to fall back to memory',
+    );
+  }
+  if (locationStore === 'redis' && !redisHost) {
+    throw new Error(
+      'LOCATION_STORE=redis requires REDIS_HOST; refusing to fall back to memory',
+    );
+  }
+
+  const documentsBucket = (process.env.S3_DOCUMENTS_BUCKET ?? '').trim() || null;
+  const awsRegion = (process.env.AWS_REGION ?? '').trim() || null;
+  const storageProvider: 'unconfigured' | 's3' = documentsBucket ? 's3' : 'unconfigured';
+  if (storageProvider === 's3' && !awsRegion) {
+    throw new Error(
+      'S3_DOCUMENTS_BUCKET requires AWS_REGION; refusing to start without a region',
+    );
+  }
+  const signedUrlTtlSeconds = integer('S3_SIGNED_URL_TTL_SECONDS', 300);
+  if (signedUrlTtlSeconds < 60 || signedUrlTtlSeconds > 900) {
+    throw new Error('S3_SIGNED_URL_TTL_SECONDS must be between 60 and 900');
   }
 
   return {
@@ -255,7 +388,13 @@ export function loadAppConfig(): AppConfig {
       httpPeek:
         nodeEnv !== 'production' &&
         delivery === 'capture' &&
-        (process.env.DEV_OTP_PEEK ?? '').toLowerCase() === 'true',
+        (process.env.DEV_OTP_PEEK ?? 'true').toLowerCase() !== 'false',
+      msg91: {
+        authKey: msg91AuthKey,
+        templateId: msg91TemplateId,
+        senderId: msg91SenderId,
+        timeoutMs: integer('MSG91_TIMEOUT_MS', 10000),
+      },
     },
     fare: {
       quoteTtlSeconds: integer('FARE_QUOTE_TTL_SECONDS', 900),
@@ -276,8 +415,23 @@ export function loadAppConfig(): AppConfig {
       googleApiKey,
       timeoutMs: integer('ROUTING_TIMEOUT_MS', 10000),
     },
+    payment: {
+      provider: paymentProvider,
+    },
     location: {
-      store: 'memory',
+      store: locationStore,
+    },
+    redis: {
+      enabled: redisEnabled,
+      host: redisHost,
+      port: integer('REDIS_PORT', 6379),
+      tls: redisTls,
+    },
+    storage: {
+      provider: storageProvider,
+      bucket: documentsBucket,
+      region: awsRegion,
+      signedUrlTtlSeconds,
     },
   };
 }

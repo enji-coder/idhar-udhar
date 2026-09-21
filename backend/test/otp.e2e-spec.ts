@@ -7,6 +7,8 @@ import {
   assertNoSecrets,
   createTestApp,
   deleteByPhone,
+  deleteIdentity,
+  issueAdminSession,
   uniquePhone,
 } from './helpers';
 
@@ -15,6 +17,7 @@ describe('OTP authentication (e2e)', () => {
   let postgres: PostgresService;
   let capture: CapturingOtpDeliveryProvider;
   const phones: string[] = [];
+  const identityIds: string[] = [];
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -25,6 +28,9 @@ describe('OTP authentication (e2e)', () => {
   afterAll(async () => {
     for (const phone of phones) {
       await deleteByPhone(postgres, phone);
+    }
+    for (const identityId of identityIds) {
+      await deleteIdentity(postgres, identityId);
     }
     await app.close();
   });
@@ -48,7 +54,7 @@ describe('OTP authentication (e2e)', () => {
     expect(created.status).toBe(200);
     expect(created.body.requested).toBe(true);
     const code = capture.peek(phone);
-    expect(code).toMatch(/^\d{6}$/);
+    expect(code).toMatch(/^\d{4}$/);
     expect(JSON.stringify(created.body)).not.toContain(code as string);
     assertNoSecrets(created.body);
 
@@ -87,12 +93,51 @@ describe('OTP authentication (e2e)', () => {
     expect(session.body.role).toBe('CUSTOMER');
   });
 
-  it('rejects an incorrect OTP', async () => {
+  it('accepts any 4-digit OTP in development capture and persists the customer', async () => {
+    const phone = uniquePhone();
+    const created = await requestOtp(phone);
+    expect(created.status).toBe(200);
+    expect(created.body.delivery).toBe('capture');
+    expect(capture.peek(phone)).toMatch(/^\d{4}$/);
+
+    const verified = await request(app.getHttpServer())
+      .post('/v1/auth/otp/verify')
+      .send({ phone, actor_type: 'CUSTOMER', code: '5678' });
+    expect(verified.status).toBe(200);
+    expect(verified.body.role).toBe('CUSTOMER');
+    expect(verified.body.access_token).toBeDefined();
+    expect(verified.body.refresh_token).toBeDefined();
+    expect(verified.body.profile_id).toBeDefined();
+    assertNoSecrets(verified.body);
+
+    const named = await request(app.getHttpServer())
+      .put('/v1/customer/profile')
+      .set('Authorization', `Bearer ${verified.body.access_token}`)
+      .send({ display_name: 'Dummy Capture User' });
+    expect(named.status).toBe(200);
+    expect(named.body.display_name).toBe('Dummy Capture User');
+
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const listed = await request(app.getHttpServer())
+      .get('/v1/admin/customers')
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
+    expect(listed.status).toBe(200);
+    expect(
+      listed.body.customers.some(
+        (row: { customer_profile_id: string; display_name: string }) =>
+          row.customer_profile_id === verified.body.profile_id &&
+          row.display_name === 'Dummy Capture User',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a non-4-digit OTP in development capture', async () => {
     const phone = uniquePhone();
     await requestOtp(phone);
     const response = await request(app.getHttpServer())
       .post('/v1/auth/otp/verify')
-      .send({ phone, actor_type: 'CUSTOMER', code: '000000' });
+      .send({ phone, actor_type: 'CUSTOMER', code: '00000' });
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('OTP_INVALID');
   });
@@ -138,7 +183,7 @@ describe('OTP authentication (e2e)', () => {
     for (let i = 0; i < 5; i += 1) {
       last = await request(app.getHttpServer())
         .post('/v1/auth/otp/verify')
-        .send({ phone, actor_type: 'CUSTOMER', code: '000000' });
+        .send({ phone, actor_type: 'CUSTOMER', code: '00000' });
     }
     expect(last?.status).toBe(401);
     expect(last?.body.error?.code).toBe('OTP_ATTEMPTS_EXCEEDED');

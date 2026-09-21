@@ -159,6 +159,62 @@ export class IdentityRepository {
     return raced;
   }
 
+  async updateCustomerProfile(
+    input: {
+      identityId: string;
+      customerProfileId: string;
+      displayName: string;
+      email?: string | null;
+      updateEmail: boolean;
+    },
+    db: Queryable = this.postgres,
+  ): Promise<CustomerProfileRow | null> {
+    const result = input.updateEmail
+      ? await db.query<CustomerProfileRow>(
+          `
+          UPDATE customer_profiles
+          SET
+            display_name = $3,
+            email = $4,
+            invoice_email = $4
+          WHERE identity_id = $1
+            AND customer_profile_id = $2
+          RETURNING
+            customer_profile_id,
+            identity_id,
+            display_name,
+            email,
+            invoice_email,
+            status,
+            default_city_id
+          `,
+          [
+            input.identityId,
+            input.customerProfileId,
+            input.displayName,
+            input.email,
+          ],
+        )
+      : await db.query<CustomerProfileRow>(
+          `
+          UPDATE customer_profiles
+          SET display_name = $3
+          WHERE identity_id = $1
+            AND customer_profile_id = $2
+          RETURNING
+            customer_profile_id,
+            identity_id,
+            display_name,
+            email,
+            invoice_email,
+            status,
+            default_city_id
+          `,
+          [input.identityId, input.customerProfileId, input.displayName],
+        );
+    return result.rows[0] ?? null;
+  }
+
   async findRiderProfile(
     identityId: string,
     db: Queryable = this.postgres,

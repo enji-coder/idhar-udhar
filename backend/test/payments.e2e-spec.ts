@@ -696,4 +696,40 @@ describe('Payments and finance (e2e)', () => {
     expect(after.rows[0].wallet_ledger).toBe(before.rows[0].wallet_ledger);
     expect(after.rows[0].cod_ledger).toBe(before.rows[0].cod_ledger);
   });
+
+  it('rejects an ONLINE charge above remaining owed without marking PAID', async () => {
+    const order = await createConfirmedOrder();
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/responsibility`)
+      .set(bearer(order.token))
+      .send({ who_pays: 'CUSTOMER' });
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/plan`)
+      .set(bearer(order.token))
+      .send({
+        customer_planned_online: order.netPayable,
+        customer_planned_cash: '0.00',
+        receiver_planned_online: '0.00',
+        receiver_planned_cash: '0.00',
+      });
+    const over = await postgres.query<{ amount: string }>(
+      `SELECT ($1::numeric(12,2) + 0.01)::text AS amount`,
+      [order.netPayable],
+    );
+    const response = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/transactions`)
+      .set(bearer(order.token))
+      .set('Idempotency-Key', uniqueIdempotencyKey())
+      .send({
+        payer_type: 'CUSTOMER',
+        method: 'ONLINE',
+        amount: formatInr(over.rows[0].amount),
+      });
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe('PAYMENT_EXCEEDS_OWED');
+    const payment = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.orderId}/payment`)
+      .set(bearer(order.token));
+    expect(payment.body.payment_status.overall.status).toBe('UNPAID');
+  });
 });

@@ -10,6 +10,7 @@ import { AuthService } from '../auth.service';
 import { IdentityRepository } from '../identity/identity.repository';
 import { maskPhone, normalizePhone } from '../phone';
 import { ProfileRole, TokenPair } from '../types/auth-context';
+import { isDevCaptureDummyOtp } from './otp-dev-fixed';
 import { OTP_DELIVERY, OtpDeliveryProvider } from './otp-delivery';
 import { OtpHashService } from './otp-hash.service';
 import { OtpChallengeRow, OtpRepository } from './otp.repository';
@@ -42,7 +43,7 @@ export class OtpService {
     requested: true;
     expires_in_seconds: number;
     cooldown_seconds: number;
-    delivery: 'capture' | 'unconfigured';
+    delivery: 'capture' | 'unconfigured' | 'msg91';
   }> {
     const phoneNormalized = normalizePhone(input.phone);
     const otp = this.otpConfig();
@@ -135,7 +136,10 @@ export class OtpService {
         return { kind: 'exceeded' as const };
       }
 
-      if (!this.hashes.matches(phoneNormalized, code, challenge.code_hash)) {
+      if (
+        !this.hashes.matches(phoneNormalized, code, challenge.code_hash) &&
+        !this.allowsDevCaptureDummyOtp(code)
+      ) {
         const attempts = await this.otps.incrementAttempts(
           challenge.otp_challenge_id,
           tx,
@@ -258,5 +262,22 @@ export class OtpService {
 
   private otpConfig(): AppConfig['otp'] {
     return this.configService.getOrThrow<AppConfig['otp']>('otp');
+  }
+
+  /**
+   * DEVELOPMENT + capture only. Any exactly-4-digit code is accepted.
+   * Production never accepts this bypass, even if capture is mis-set.
+   */
+  private allowsDevCaptureDummyOtp(code: string): boolean {
+    const nodeEnv =
+      this.configService.get<AppConfig['nodeEnv']>('nodeEnv') ?? 'development';
+    return (
+      this.delivery.mode === 'capture' &&
+      isDevCaptureDummyOtp({
+        code,
+        nodeEnv,
+        delivery: this.otpConfig().delivery,
+      })
+    );
   }
 }

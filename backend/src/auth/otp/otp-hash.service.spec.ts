@@ -13,7 +13,7 @@ describe('OtpHashService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: () => ({
-              length: 6,
+              length: 4,
               pepper: 'unit-test-otp-pepper-min-32-chars!!',
             }),
           },
@@ -25,15 +25,15 @@ describe('OtpHashService', () => {
 
   it('generates a numeric code of configured length', () => {
     const code = hashes.generateCode();
-    expect(code).toMatch(/^\d{6}$/);
+    expect(code).toMatch(/^\d{4}$/);
   });
 
   it('stores a hash that is not the plaintext code', () => {
-    const code = '123456';
+    const code = '1234';
     const hash = hashes.hash('9876543210', code);
     expect(hash).not.toBe(code);
     expect(hash).toHaveLength(64);
     expect(hashes.matches('9876543210', code, hash)).toBe(true);
-    expect(hashes.matches('9876543210', '000000', hash)).toBe(false);
+    expect(hashes.matches('9876543210', '0000', hash)).toBe(false);
   });
 });

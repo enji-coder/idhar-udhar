@@ -1,4 +1,10 @@
-import { parseGoogleComputeRoutesResponse, parseGoogleDuration } from './google-routes.parse';
+import {
+  GOOGLE_FIELD_MASK,
+  GOOGLE_ROUTES_URL,
+  buildGoogleComputeRoutesBody,
+  parseGoogleComputeRoutesResponse,
+  parseGoogleDuration,
+} from './google-routes.parse';
 import { RoutingProviderError } from './routing-provider';
 
 const points = [
@@ -7,6 +13,43 @@ const points = [
 ];
 
 describe('Google Routes response parser', () => {
+  it('builds a computeRoutes body from validated lat/lng only', () => {
+    const via = { latitude: 23.03, longitude: 72.55 };
+    const body = buildGoogleComputeRoutesBody([points[0], via, points[1]]);
+    expect(body).toEqual({
+      origin: {
+        location: {
+          latLng: { latitude: points[0].latitude, longitude: points[0].longitude },
+        },
+      },
+      destination: {
+        location: {
+          latLng: { latitude: points[1].latitude, longitude: points[1].longitude },
+        },
+      },
+      intermediates: [
+        {
+          location: {
+            latLng: { latitude: via.latitude, longitude: via.longitude },
+          },
+        },
+      ],
+      travelMode: 'DRIVE',
+      routingPreference: 'TRAFFIC_UNAWARE',
+      computeAlternativeRoutes: false,
+      optimizeWaypointOrder: false,
+      units: 'METRIC',
+    });
+    expect(body).not.toHaveProperty('extraComputations');
+    expect(GOOGLE_ROUTES_URL).toBe(
+      'https://routes.googleapis.com/directions/v2:computeRoutes',
+    );
+    expect(GOOGLE_FIELD_MASK).toBe(
+      'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline',
+    );
+    expect(GOOGLE_FIELD_MASK).not.toMatch(/toll|traffic|legs|viewport/i);
+  });
+
   it('parses a successful computeRoutes payload', () => {
     const result = parseGoogleComputeRoutesResponse(
       {

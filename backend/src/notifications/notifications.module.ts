@@ -2,6 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
 import { CapturingPushProvider } from './capturing-push.provider';
+import { DeviceTokensController } from './device-tokens.controller';
+import { DeviceTokensRepository } from './device-tokens.repository';
+import { DeviceTokensService } from './device-tokens.service';
+import { FcmPushProvider } from './fcm-push.provider';
+import { createFirebaseMessaging } from './firebase-messaging.factory';
 import { NotificationPreferencesController } from './notification-preferences.controller';
 import { NotificationService } from './notification.service';
 import { NotificationWorkerHealthController } from './notification-worker-health.controller';
@@ -19,6 +24,7 @@ import { WalletNotificationDispatcher } from './wallet-notification.dispatcher';
     NotificationsController,
     NotificationPreferencesController,
     NotificationWorkerHealthController,
+    DeviceTokensController,
   ],
   providers: [
     NotificationsRepository,
@@ -27,23 +33,35 @@ import { WalletNotificationDispatcher } from './wallet-notification.dispatcher';
     OrderNotificationDispatcher,
     PaymentNotificationDispatcher,
     WalletNotificationDispatcher,
+    DeviceTokensRepository,
+    DeviceTokensService,
     CapturingPushProvider,
     UnconfiguredPushProvider,
+    FcmPushProvider,
     {
       provide: PUSH_PROVIDER,
       inject: [
         ConfigService,
         CapturingPushProvider,
         UnconfiguredPushProvider,
+        FcmPushProvider,
       ],
       useFactory: (
         config: ConfigService,
         capture: CapturingPushProvider,
         unconfigured: UnconfiguredPushProvider,
+        fcm: FcmPushProvider,
       ) => {
         const notifications =
           config.getOrThrow<AppConfig['notifications']>('notifications');
-        return notifications.pushProvider === 'capture' ? capture : unconfigured;
+        if (notifications.pushProvider === 'capture') {
+          return capture;
+        }
+        if (notifications.pushProvider === 'fcm') {
+          fcm.useMessagingFactory(createFirebaseMessaging);
+          return fcm;
+        }
+        return unconfigured;
       },
     },
   ],
@@ -55,6 +73,7 @@ import { WalletNotificationDispatcher } from './wallet-notification.dispatcher';
     PaymentNotificationDispatcher,
     WalletNotificationDispatcher,
     CapturingPushProvider,
+    DeviceTokensService,
   ],
 })
 export class NotificationsModule {}

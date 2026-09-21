@@ -11,6 +11,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { IdentityRepository } from './identity/identity.repository';
 import { CapturingOtpDeliveryProvider } from './otp/capturing-otp-delivery.provider';
+import { Msg91OtpDeliveryProvider } from './otp/msg91-otp-delivery.provider';
 import { OTP_DELIVERY } from './otp/otp-delivery';
 import { OtpHashService } from './otp/otp-hash.service';
 import { OtpRepository } from './otp/otp.repository';
@@ -35,20 +36,29 @@ import { TokenService } from './token.service';
     OtpService,
     CapturingOtpDeliveryProvider,
     UnconfiguredOtpDeliveryProvider,
+    Msg91OtpDeliveryProvider,
     {
       provide: OTP_DELIVERY,
       inject: [
         ConfigService,
         CapturingOtpDeliveryProvider,
         UnconfiguredOtpDeliveryProvider,
+        Msg91OtpDeliveryProvider,
       ],
       useFactory: (
         config: ConfigService,
         capture: CapturingOtpDeliveryProvider,
         unconfigured: UnconfiguredOtpDeliveryProvider,
+        msg91: Msg91OtpDeliveryProvider,
       ) => {
         const otp = config.getOrThrow<AppConfig['otp']>('otp');
-        return otp.delivery === 'capture' ? capture : unconfigured;
+        if (otp.delivery === 'capture') {
+          return capture;
+        }
+        if (otp.delivery === 'msg91') {
+          return msg91;
+        }
+        return unconfigured;
       },
     },
     JwtAuthGuard,

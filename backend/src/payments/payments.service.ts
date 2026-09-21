@@ -271,7 +271,7 @@ export class PaymentsService {
         await this.assertMethodEnabled(body.method, tx);
         await this.assertPayerOwes(responsibility, body.payer_type, direction);
 
-        if (direction === 'CHARGE' && status === 'PAID') {
+        if (direction === 'CHARGE') {
           const remaining = await this.payments.remainingOwed(
             order.order_id,
             body.payer_type,

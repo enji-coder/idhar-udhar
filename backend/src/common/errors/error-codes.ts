@@ -63,6 +63,7 @@ export const ErrorCodes = {
   TAX_CONFIG_UNAVAILABLE: 'TAX_CONFIG_UNAVAILABLE',
   TAX_CONFIG_INVALID: 'TAX_CONFIG_INVALID',
   REPORT_RANGE_INVALID: 'REPORT_RANGE_INVALID',
+  STORAGE_UNAVAILABLE: 'STORAGE_UNAVAILABLE',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppLogger } from '../common/logger/app-logger';
 import { PostgresService } from '../database/postgres.service';
+import { RedisService } from '../redis/redis.service';
 
 export type HealthStatus = 'ok' | 'degraded';
 
@@ -10,6 +11,7 @@ export type HealthReport = {
   checks: {
     process: 'ok';
     database: 'ok' | 'unavailable';
+    redis?: 'ok' | 'unavailable';
   };
   database?: {
     name: string;
@@ -21,6 +23,7 @@ export type HealthReport = {
 export class HealthService {
   constructor(
     private readonly postgres: PostgresService,
+    private readonly redis: RedisService,
     private readonly logger: AppLogger,
   ) {}
 
@@ -55,6 +58,23 @@ export class HealthService {
 
   async overall(): Promise<HealthReport> {
     const db = await this.database();
-    return db;
+    if (!this.redis.enabled) {
+      return db;
+    }
+    const redisOk = await this.redis.ping();
+    if (!redisOk) {
+      this.logger.error('health_redis_failed', {});
+      return {
+        status: 'degraded',
+        service: 'idhar-udhar-api',
+        checks: { ...db.checks, redis: 'unavailable' },
+        database: db.database,
+      };
+    }
+    return {
+      ...db,
+      status: db.status === 'ok' ? 'ok' : 'degraded',
+      checks: { ...db.checks, redis: 'ok' },
+    };
   }
 }

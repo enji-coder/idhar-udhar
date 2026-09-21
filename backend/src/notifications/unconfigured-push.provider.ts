@@ -18,6 +18,6 @@ export class UnconfiguredPushProvider implements PushProvider {
       notification_id: message.notificationId,
       channel: 'PUSH',
     });
-    return { ok: false, error: 'push provider is not configured' };
+    return { ok: false, error: 'push provider is not configured', retryable: false };
   }
 }

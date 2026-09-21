@@ -1,6 +1,6 @@
 export const LOCATION_STORE = 'LOCATION_STORE';
 
-export type LocationStoreBackend = 'memory';
+export type LocationStoreBackend = 'memory' | 'redis';
 
 export type RiderLocationFix = {
   riderProfileId: string;

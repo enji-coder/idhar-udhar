@@ -53,7 +53,7 @@ process.env.DEV_OTP_PEEK = 'false';
 process.env.OTP_COOLDOWN_SECONDS = '0';
 process.env.OTP_TTL_SECONDS ??= '300';
 process.env.OTP_MAX_ATTEMPTS ??= '5';
-process.env.OTP_LENGTH ??= '6';
+process.env.OTP_LENGTH ??= '4';
 process.env.OTP_MAX_REQUESTS_PER_HOUR = '100';
 process.env.OTP_HASH_PEPPER ??=
   'test-otp-hash-pepper-min-32-characters!';
@@ -65,6 +65,11 @@ process.env.NOTIFICATION_MAX_ATTEMPTS ??= '3';
 process.env.NOTIFICATION_RETRY_BACKOFF_SECONDS = '0';
 process.env.NOTIFICATION_WORKER_BATCH_SIZE ??= '20';
 process.env.ROUTING_PROVIDER = 'mock';
+process.env.PAYMENT_PROVIDER = 'unconfigured';
 process.env.LOCATION_STORE = 'memory';
+process.env.REDIS_ENABLED = 'false';
+process.env.S3_DOCUMENTS_BUCKET = '';
+delete process.env.AWS_ACCESS_KEY_ID;
+delete process.env.AWS_SECRET_ACCESS_KEY;
 process.env.CORS_ORIGIN ??=
   'http://localhost:5173,http://localhost:8888,https://idhar-udhar-admin.netlify.app';

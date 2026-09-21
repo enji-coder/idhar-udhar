@@ -1123,6 +1123,7 @@ export class OrdersService {
       zone_id: stop.zone_id,
       contact_name: stop.contact_name,
       contact_phone: stop.contact_phone,
+      proof_file_id: stop.proof_file_id,
     };
   }
 

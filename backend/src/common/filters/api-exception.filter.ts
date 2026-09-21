@@ -66,6 +66,21 @@ export class ApiExceptionFilter implements ExceptionFilter {
       };
     }
 
+    if (isMulterError(exception)) {
+      if (exception.code === 'LIMIT_FILE_SIZE') {
+        return {
+          code: ErrorCodes.VALIDATION_ERROR,
+          message: 'File exceeds the maximum allowed size',
+          status: HttpStatus.BAD_REQUEST,
+        };
+      }
+      return {
+        code: ErrorCodes.VALIDATION_ERROR,
+        message: 'Invalid file upload',
+        status: HttpStatus.BAD_REQUEST,
+      };
+    }
+
     return {
       code: ErrorCodes.INTERNAL_ERROR,
       message: 'An unexpected error occurred',
@@ -95,4 +110,15 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
     return exception.message || 'Request failed';
   }
+}
+
+function isMulterError(
+  exception: unknown,
+): exception is { name: string; code: string } {
+  return (
+    !!exception &&
+    typeof exception === 'object' &&
+    (exception as { name?: string }).name === 'MulterError' &&
+    typeof (exception as { code?: unknown }).code === 'string'
+  );
 }

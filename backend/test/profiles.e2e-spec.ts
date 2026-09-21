@@ -8,6 +8,7 @@ import {
   deleteByPhone,
   deleteIdentity,
   insertAdminFixture,
+  issueAdminSession,
   uniquePhone,
 } from './helpers';
 
@@ -58,6 +59,7 @@ describe('Profiles and authorization (e2e)', () => {
     expect(mine.status).toBe(200);
     expect(mine.body.identity_id).toBe(customer.identity_id);
     expect(mine.body.customer_profile_id).toBe(customer.profile_id);
+    expect(mine.body.needs_profile_setup).toBe(true);
     assertNoSecrets(mine.body);
 
     const other = await request(app.getHttpServer())
@@ -88,6 +90,32 @@ describe('Profiles and authorization (e2e)', () => {
       .get('/v1/admin/profile')
       .set('Authorization', `Bearer ${customer.access_token}`);
     expect(admin.status).toBe(403);
+  });
+
+  it('persists customer registration name and lists it for admin', async () => {
+    const customer = await loginMarketplace('CUSTOMER');
+    const updated = await request(app.getHttpServer())
+      .put('/v1/customer/profile')
+      .set('Authorization', `Bearer ${customer.access_token}`)
+      .send({ display_name: 'Asha Patel' });
+    expect(updated.status).toBe(200);
+    expect(updated.body.display_name).toBe('Asha Patel');
+    expect(updated.body.needs_profile_setup).toBe(false);
+    assertNoSecrets(updated.body);
+
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const listed = await request(app.getHttpServer())
+      .get('/v1/admin/customers')
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
+    expect(listed.status).toBe(200);
+    expect(
+      listed.body.customers.some(
+        (row: { customer_profile_id: string; display_name: string }) =>
+          row.customer_profile_id === customer.profile_id &&
+          row.display_name === 'Asha Patel',
+      ),
+    ).toBe(true);
   });
 
   it('returns admin profile without the password hash', async () => {
