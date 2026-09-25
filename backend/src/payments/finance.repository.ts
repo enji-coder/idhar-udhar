@@ -183,8 +183,8 @@ export class FinanceRepository {
       FROM (
         SELECT
           f.trip_fare,
-          v.rider_percentage,
-          v.company_commission_percentage,
+          f.rider_percentage,
+          f.company_commission_percentage,
           v.operational_cost_percentage_of_commission,
           v.payment_settings_version_id
         FROM order_fare_snapshots f

@@ -9,6 +9,8 @@ import { AuthContext } from '../auth/types/auth-context';
 import { PostgresService } from '../database/postgres.service';
 import {
   fareRatesHaveAmount,
+  fareSharesAreExplicit,
+  fareSharesSumTo100,
   normalizeFareRates,
 } from './dto/fare-rates.dto';
 import { CreateVehicleCategoryDto } from './dto/create-vehicle-category.dto';
@@ -27,6 +29,15 @@ export class VehicleCategoriesService {
     private readonly fares: FarePublishRepository,
     private readonly postgres: PostgresService,
   ) {}
+
+  async listActive() {
+    const rows = await this.categories.list();
+    return {
+      vehicle_categories: rows
+        .filter((row) => row.active)
+        .map((row) => this.serializePublic(row)),
+    };
+  }
 
   async list(_auth: AuthContext) {
     const rows = await this.categories.list();
@@ -63,8 +74,8 @@ export class VehicleCategoriesService {
         },
         db,
       );
-      if (fareRatesHaveAmount(body.rates)) {
-        const rates = normalizeFareRates(body.rates);
+      if (body.rates && (fareRatesHaveAmount(body.rates) || fareSharesAreExplicit(body.rates))) {
+        const rates = this.ratesForPublish(body.rates);
         await this.fares.publishCategoryRates(
           {
             adminProfileId: auth.profileId,
@@ -103,7 +114,7 @@ export class VehicleCategoriesService {
     await this.postgres.transaction(async (db) => {
       await this.categories.update(id, next, db);
       if (body.rates && this.ratesChanged(existing, body.rates)) {
-        const rates = normalizeFareRates(body.rates);
+        const rates = this.ratesForPublish(body.rates, existing);
         await this.fares.publishCategoryRates(
           {
             adminProfileId: auth.profileId,
@@ -176,10 +187,14 @@ export class VehicleCategoriesService {
     existing: VehicleCategoryRow,
     incoming: NonNullable<UpdateVehicleCategoryDto['rates']>,
   ): boolean {
-    if (!fareRatesHaveAmount(incoming) && !existing.fare_config_version_id) {
+    if (
+      !fareRatesHaveAmount(incoming) &&
+      !fareSharesAreExplicit(incoming) &&
+      !existing.fare_config_version_id
+    ) {
       return false;
     }
-    const next = normalizeFareRates(incoming);
+    const next = this.ratesForPublish(incoming, existing);
     return (
       next.base_fare !== (existing.base_fare ?? '0.00') ||
       next.per_km !== (existing.per_km ?? '0.00') ||
@@ -187,8 +202,54 @@ export class VehicleCategoriesService {
       next.waiting !== (existing.waiting ?? '0.00') ||
       next.surge !== (existing.surge ?? '0.00') ||
       next.toll !== (existing.toll ?? '0.00') ||
-      next.parking !== (existing.parking ?? '0.00')
+      next.parking !== (existing.parking ?? '0.00') ||
+      next.rider_percentage !== (existing.rider_percentage ?? '85.00') ||
+      next.company_commission_percentage !==
+        (existing.company_commission_percentage ?? '15.00')
     );
+  }
+
+  private ratesForPublish(
+    incoming: NonNullable<UpdateVehicleCategoryDto['rates']>,
+    existing?: VehicleCategoryRow,
+  ) {
+    if (
+      fareSharesAreExplicit(incoming) &&
+      (incoming.rider_percentage == null ||
+        incoming.company_commission_percentage == null)
+    ) {
+      throw new ApiError(
+        ErrorCodes.VALIDATION_ERROR,
+        'Rider percentage and company commission must both be provided',
+        400,
+      );
+    }
+    const rates = normalizeFareRates({
+      ...incoming,
+      rider_percentage:
+        incoming.rider_percentage ??
+        (existing?.rider_percentage != null
+          ? Number(existing.rider_percentage)
+          : undefined),
+      company_commission_percentage:
+        incoming.company_commission_percentage ??
+        (existing?.company_commission_percentage != null
+          ? Number(existing.company_commission_percentage)
+          : undefined),
+    });
+    if (
+      !fareSharesSumTo100(
+        rates.rider_percentage,
+        rates.company_commission_percentage,
+      )
+    ) {
+      throw new ApiError(
+        ErrorCodes.VALIDATION_ERROR,
+        'Rider percentage and company commission must add up to 100',
+        400,
+      );
+    }
+    return rates;
   }
 
   private normalizeCode(code?: string | null): string | null {
@@ -199,6 +260,26 @@ export class VehicleCategoriesService {
   private emptyToNull(value?: string | null): string | null {
     const trimmed = String(value ?? '').trim();
     return trimmed ? trimmed : null;
+  }
+
+  private serializePublic(row: VehicleCategoryRow) {
+    return {
+      vehicle_category_id: row.vehicle_category_id,
+      code: row.code,
+      name: row.name,
+      active: row.active,
+      weight_capacity: row.weight_capacity,
+      size: row.size,
+      rates: {
+        base_fare: row.base_fare ?? '0.00',
+        per_km: row.per_km ?? '0.00',
+        initial_minimum: row.initial_minimum ?? '0.00',
+        waiting: row.waiting ?? '0.00',
+        surge: row.surge ?? '0.00',
+        toll: row.toll ?? '0.00',
+        parking: row.parking ?? '0.00',
+      },
+    };
   }
 
   private serialize(row: VehicleCategoryRow, usage?: CategoryUsage) {
@@ -220,6 +301,8 @@ export class VehicleCategoriesService {
         surge: row.surge ?? '0.00',
         toll: row.toll ?? '0.00',
         parking: row.parking ?? '0.00',
+        rider_percentage: row.rider_percentage ?? '85.00',
+        company_commission_percentage: row.company_commission_percentage ?? '15.00',
       },
       usage: usage ?? null,
     };

@@ -289,6 +289,17 @@ export class OrdersRepository {
       drop_address: string | null;
       trip_fare: string | null;
       net_payable: string | null;
+      distance_km: string | null;
+      base_fare: string | null;
+      per_km: string | null;
+      distance_charge: string | null;
+      waiting: string | null;
+      surge: string | null;
+      toll: string | null;
+      parking: string | null;
+      discount: string | null;
+      fare_rider_percentage: string | null;
+      fare_company_commission_percentage: string | null;
       rider_amount: string | null;
       company_commission_amount: string | null;
       operational_cost_amount: string | null;
@@ -310,6 +321,17 @@ export class OrdersRepository {
       drop_address: string | null;
       trip_fare: string | null;
       net_payable: string | null;
+      distance_km: string | null;
+      base_fare: string | null;
+      per_km: string | null;
+      distance_charge: string | null;
+      waiting: string | null;
+      surge: string | null;
+      toll: string | null;
+      parking: string | null;
+      discount: string | null;
+      fare_rider_percentage: string | null;
+      fare_company_commission_percentage: string | null;
       rider_amount: string | null;
       company_commission_amount: string | null;
       operational_cost_amount: string | null;
@@ -328,6 +350,17 @@ export class OrdersRepository {
         drop_stop.address_text AS drop_address,
         snap.trip_fare::text AS trip_fare,
         snap.net_payable::text AS net_payable,
+        snap.distance_km::text AS distance_km,
+        snap.base_fare::text AS base_fare,
+        snap.per_km::text AS per_km,
+        snap.distance_charge::text AS distance_charge,
+        snap.waiting::text AS waiting,
+        snap.surge::text AS surge,
+        snap.toll::text AS toll,
+        snap.parking::text AS parking,
+        snap.discount::text AS discount,
+        snap.rider_percentage::text AS fare_rider_percentage,
+        snap.company_commission_percentage::text AS fare_company_commission_percentage,
         fin.rider_amount::text AS rider_amount,
         fin.company_commission_amount::text AS company_commission_amount,
         fin.operational_cost_amount::text AS operational_cost_amount,
@@ -542,9 +575,21 @@ export class OrdersRepository {
   async listOffersForRider(
     riderProfileId: string,
     db: Queryable = this.postgres,
-  ): Promise<Array<OrderOfferRow & { display_id: string; canonical_status: OrderStatus }>> {
+  ): Promise<
+    Array<
+      OrderOfferRow & {
+        display_id: string;
+        canonical_status: OrderStatus;
+        rider_amount: string | null;
+      }
+    >
+  > {
     const result = await db.query<
-      OrderOfferRow & { display_id: string; canonical_status: OrderStatus }
+      OrderOfferRow & {
+        display_id: string;
+        canonical_status: OrderStatus;
+        rider_amount: string | null;
+      }
     >(
       `
       SELECT
@@ -555,9 +600,11 @@ export class OrdersRepository {
         off.created_at,
         off.responded_at,
         o.display_id,
-        o.canonical_status
+        o.canonical_status,
+        ROUND(snap.trip_fare * snap.rider_percentage / 100, 2)::text AS rider_amount
       FROM order_offers off
       JOIN orders o ON o.order_id = off.order_id
+      LEFT JOIN order_fare_snapshots snap ON snap.order_id = o.order_id
       WHERE off.rider_profile_id = $1
       ORDER BY off.created_at DESC
       LIMIT 50

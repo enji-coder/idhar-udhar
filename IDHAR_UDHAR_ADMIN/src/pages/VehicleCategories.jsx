@@ -1,9 +1,8 @@
-import { Eye, Pencil, Plus, Power, Trash2 } from 'lucide-react';
+import { Eye, Pencil, Plus, Power } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import Button from '../components/common/Button';
-import ConfirmDialog from '../components/common/ConfirmDialog';
 import DataTable from '../components/common/DataTable';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import Drawer from '../components/common/Drawer';
@@ -23,9 +22,7 @@ import useStore from '../hooks/useStore';
 import { VEHICLE_CATEGORY_STATUSES } from '../data/vehicleCategories';
 import {
   activateVehicleCategory,
-  categoryUsage,
   deactivateVehicleCategory,
-  deleteVehicleCategory,
   saveVehicleCategory,
   syncVehicleCategories,
   vehicleCategoryStore,
@@ -45,6 +42,8 @@ const emptyCategory = {
   parkingCharge: '',
   weightCapacityKg: '',
   size: '',
+  riderSharePercent: '85',
+  companyCommissionPercent: '15',
 };
 
 export default function VehicleCategories() {
@@ -87,22 +86,6 @@ export default function VehicleCategories() {
       panel.closeForm();
     } catch (error) {
       panel.setToast(error.message || 'Could not save vehicle category.');
-    }
-  }
-
-  async function confirmDelete() {
-    try {
-      const result = await deleteVehicleCategory(panel.confirm.id);
-      if (!result.ok) {
-        panel.setToast(result.message);
-        panel.setConfirm(null);
-        return;
-      }
-      panel.setConfirm(null);
-      panel.setToast('Vehicle category deleted.');
-    } catch (error) {
-      panel.setToast(error.message || 'Could not delete vehicle category.');
-      panel.setConfirm(null);
     }
   }
 
@@ -151,13 +134,10 @@ export default function VehicleCategories() {
           >
             {row.status === 'Active' ? 'Deactivate' : 'Activate'}
           </ActionButton>
-          <ActionButton icon={Trash2} tone="danger" onClick={() => panel.setConfirm(row)}>Delete</ActionButton>
         </ActionGroup>
       ),
     },
   ];
-
-  const confirmUsage = panel.confirm ? categoryUsage(panel.confirm) : null;
 
   return (
     <PageContainer className="space-y-4">
@@ -193,6 +173,8 @@ export default function VehicleCategories() {
             <Field label="Surge Charge"><input type="number" className={inputClass} value={panel.form.surgeCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, surgeCharge: event.target.value })} /></Field>
             <Field label="Toll Charge"><input type="number" className={inputClass} value={panel.form.tollCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, tollCharge: event.target.value })} /></Field>
             <Field label="Parking Charge"><input type="number" className={inputClass} value={panel.form.parkingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, parkingCharge: event.target.value })} /></Field>
+            <Field label="Rider Money Part (%)" error={panel.errors.riderSharePercent}><input type="number" className={inputClass} value={panel.form.riderSharePercent ?? ''} onChange={(event) => panel.setForm({ ...panel.form, riderSharePercent: event.target.value })} /></Field>
+            <Field label="Company Commission (%)" error={panel.errors.companyCommissionPercent}><input type="number" className={inputClass} value={panel.form.companyCommissionPercent ?? ''} onChange={(event) => panel.setForm({ ...panel.form, companyCommissionPercent: event.target.value })} /></Field>
             <Field label="Weight Capacity"><input className={inputClass} value={panel.form.weightCapacityKg ?? ''} onChange={(event) => panel.setForm({ ...panel.form, weightCapacityKg: event.target.value })} /></Field>
           </div>
           <Field label="Size"><input className={inputClass} value={panel.form.size ?? ''} onChange={(event) => panel.setForm({ ...panel.form, size: event.target.value })} /></Field>
@@ -214,36 +196,14 @@ export default function VehicleCategories() {
             <DetailRow label="Surge Charge" value={panel.view.surgeCharge} />
             <DetailRow label="Toll Charge" value={panel.view.tollCharge} />
             <DetailRow label="Parking Charge" value={panel.view.parkingCharge} />
+            <DetailRow label="Rider Money Part (%)" value={panel.view.riderSharePercent} />
+            <DetailRow label="Company Commission (%)" value={panel.view.companyCommissionPercent} />
             <DetailRow label="Weight Capacity" value={panel.view.weightCapacityKg} />
             <DetailRow label="Size" value={panel.view.size} />
           </DetailSection>
         ) : null}
       </Drawer>
 
-      <ConfirmDialog
-        open={Boolean(panel.confirm)}
-        title={confirmUsage?.total ? 'Cannot delete this vehicle category' : 'Delete vehicle category?'}
-        description={
-          confirmUsage?.total
-            ? 'Cannot delete this vehicle category because it is already used by published fare data or other protected records. Please deactivate it instead.'
-            : `${panel.confirm?.name} will be removed from selectable vehicle types.`
-        }
-        confirmLabel={confirmUsage?.total ? 'Deactivate instead' : 'Delete'}
-        onClose={() => panel.setConfirm(null)}
-        onConfirm={async () => {
-          if (confirmUsage?.total) {
-            try {
-              await deactivateVehicleCategory(panel.confirm.id);
-              panel.setConfirm(null);
-              panel.setToast('Vehicle category deactivated.');
-            } catch (error) {
-              panel.setToast(error.message || 'Could not deactivate vehicle category.');
-            }
-            return;
-          }
-          confirmDelete();
-        }}
-      />
       <Toast open={Boolean(panel.toast)} message={panel.toast} onClose={() => panel.setToast('')} />
     </PageContainer>
   );

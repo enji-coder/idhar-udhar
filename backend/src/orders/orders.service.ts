@@ -171,6 +171,9 @@ export class OrdersService {
     return {
       ...this.serializeOrder(order, stops),
       fare_snapshot: snapshot ? serializeSnapshot(snapshot) : null,
+      ...(auth.role === 'RIDER' && snapshot
+        ? { rider_amount: snapshot.rider_amount }
+        : {}),
     };
   }
 
@@ -515,6 +518,7 @@ export class OrdersService {
           ...this.serializeOffer(row),
           display_id: row.display_id,
           order_status: row.canonical_status,
+          rider_amount: row.rider_amount,
         })),
     };
   }
@@ -1094,6 +1098,18 @@ export class OrdersService {
       drop_address: extra?.drop_address ?? null,
       trip_fare: extra?.trip_fare ?? null,
       net_payable: extra?.net_payable ?? null,
+      distance_km: extra?.distance_km ?? null,
+      base_fare: extra?.base_fare ?? null,
+      per_km: extra?.per_km ?? null,
+      distance_charge: extra?.distance_charge ?? null,
+      waiting: extra?.waiting ?? null,
+      surge: extra?.surge ?? null,
+      toll: extra?.toll ?? null,
+      parking: extra?.parking ?? null,
+      discount: extra?.discount ?? null,
+      fare_rider_percentage: extra?.fare_rider_percentage ?? null,
+      fare_company_commission_percentage:
+        extra?.fare_company_commission_percentage ?? null,
       finance_snapshot: frozen
         ? {
             snapshot_kind: 'ORIGINAL',

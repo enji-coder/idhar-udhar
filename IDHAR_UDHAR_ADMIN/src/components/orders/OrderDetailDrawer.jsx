@@ -169,8 +169,18 @@ export default function OrderDetailDrawer({
           </DetailSection>
 
           <DetailSection title="Payment">
+            <DetailRow label="Vehicle category" value={order.vehicle || '—'} />
+            {order.distanceKm != null ? <DetailRow label="Distance (km)" value={order.distanceKm} /> : null}
+            {order.baseFare != null ? <DetailRow label="Base fare" value={formatINR(order.baseFare)} /> : null}
+            {order.distanceCharge != null ? <DetailRow label="Per km component" value={formatINR(order.distanceCharge)} /> : null}
+            {order.waitingCharge != null ? <DetailRow label="Waiting" value={formatINR(order.waitingCharge)} /> : null}
+            {order.surgeCharge != null ? <DetailRow label="Surge" value={formatINR(order.surgeCharge)} /> : null}
+            {order.tollCharge != null ? <DetailRow label="Toll" value={formatINR(order.tollCharge)} /> : null}
+            {order.parkingCharge != null ? <DetailRow label="Parking" value={formatINR(order.parkingCharge)} /> : null}
             <DetailRow label="Trip Fare" value={formatINR(order.tripFare ?? order.amount)} />
-            <DetailRow label="Discount" value={formatINR(order.discount || 0)} />
+            {order.discount != null ? <DetailRow label="Discount" value={formatINR(order.discount)} /> : <DetailRow label="Discount" value={formatINR(order.discount || 0)} />}
+            {order.fareRiderPercentage != null ? <DetailRow label="Rider money part (%)" value={order.fareRiderPercentage} /> : null}
+            {order.fareCompanyPercentage != null ? <DetailRow label="Company commission (%)" value={order.fareCompanyPercentage} /> : null}
             <DetailRow label="Additional charge" value={formatINR(order.additionalCharge || order.resendCharge || 0)} />
             <DetailRow label="Amount payable" value={formatINR(invoice.total)} />
             <DetailRow label="Customer responsibility" value={formatINR(order.customerResponsibility)} />

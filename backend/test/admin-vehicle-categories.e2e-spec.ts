@@ -125,6 +125,8 @@ describe('Admin vehicle categories (e2e)', () => {
       });
     expect(created.status).toBe(201);
     expect(created.body.rates.base_fare).toBe('79.00');
+    expect(created.body.rates.rider_percentage).toBe('85.00');
+    expect(created.body.rates.company_commission_percentage).toBe('15.00');
     categoryIds.push(created.body.vehicle_category_id);
 
     const versions = await postgres.query<{ status: string }>(
@@ -152,6 +154,69 @@ describe('Admin vehicle categories (e2e)', () => {
       .send({ active: false });
     expect(deactivated.status).toBe(200);
     expect(deactivated.body.active).toBe(false);
+  });
+
+  it('rejects a rider and company split that does not total 100', async () => {
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const response = await request(app.getHttpServer())
+      .post('/v1/admin/vehicle-categories')
+      .set(bearer(admin.tokens.accessToken))
+      .send({
+        name: `E2E Split ${Date.now()}`,
+        rates: {
+          base_fare: 40,
+          per_km: 8,
+          rider_percentage: 90,
+          company_commission_percentage: 15,
+        },
+      });
+    expect(response.status).toBe(400);
+  });
+
+  it('accepts 80 and 20 and hides inactive categories from the public list', async () => {
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const name = `E2E Public ${Date.now()}`;
+    const created = await request(app.getHttpServer())
+      .post('/v1/admin/vehicle-categories')
+      .set(bearer(admin.tokens.accessToken))
+      .send({
+        name,
+        rates: {
+          base_fare: 40,
+          per_km: 8,
+          rider_percentage: 80,
+          company_commission_percentage: 20,
+        },
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.rates.rider_percentage).toBe('80.00');
+    expect(created.body.rates.company_commission_percentage).toBe('20.00');
+    categoryIds.push(created.body.vehicle_category_id);
+
+    const visible = await request(app.getHttpServer()).get('/v1/vehicle-categories');
+    expect(visible.status).toBe(200);
+    const shown = visible.body.vehicle_categories.find(
+      (row: { vehicle_category_id: string }) =>
+        row.vehicle_category_id === created.body.vehicle_category_id,
+    );
+    expect(shown).toBeTruthy();
+    expect(shown.vehicle_category_id).toBe(created.body.vehicle_category_id);
+    expect(shown.rates.rider_percentage).toBeUndefined();
+    expect(String(shown.vehicle_category_id)).not.toMatch(/^VC-/);
+
+    await request(app.getHttpServer())
+      .patch(`/v1/admin/vehicle-categories/${created.body.vehicle_category_id}`)
+      .set(bearer(admin.tokens.accessToken))
+      .send({ active: false });
+    const hidden = await request(app.getHttpServer()).get('/v1/vehicle-categories');
+    expect(
+      hidden.body.vehicle_categories.some(
+        (row: { vehicle_category_id: string }) =>
+          row.vehicle_category_id === created.body.vehicle_category_id,
+      ),
+    ).toBe(false);
   });
 
   it('rejects unauthenticated access', async () => {

@@ -18,6 +18,8 @@ export type VehicleCategoryRow = {
   surge: string | null;
   toll: string | null;
   parking: string | null;
+  rider_percentage: string | null;
+  company_commission_percentage: string | null;
   fare_config_version_id: string | null;
 };
 
@@ -45,6 +47,8 @@ const CATEGORY_SELECT = `
   r.surge::text AS surge,
   r.toll::text AS toll,
   r.parking::text AS parking,
+  r.rider_percentage::text AS rider_percentage,
+  r.company_commission_percentage::text AS company_commission_percentage,
   r.fare_config_version_id
 `;
 

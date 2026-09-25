@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, Min } from 'class-validator';
+import { IsNumber, IsOptional, Max, Min } from 'class-validator';
 
 export class FareRatesDto {
   @IsOptional()
@@ -43,6 +43,20 @@ export class FareRatesDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   parking?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  rider_percentage?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  company_commission_percentage?: number;
 }
 
 export function fareRatesHaveAmount(rates?: FareRatesDto | null): boolean {
@@ -67,9 +81,15 @@ export function normalizeFareRates(rates?: FareRatesDto | null): {
   surge: string;
   toll: string;
   parking: string;
+  rider_percentage: string;
+  company_commission_percentage: string;
 } {
   const money = (value: number | undefined) =>
     (Number.isFinite(Number(value)) ? Number(value) : 0).toFixed(2);
+  const riderGiven = rates?.rider_percentage != null;
+  const companyGiven = rates?.company_commission_percentage != null;
+  const rider = riderGiven ? Number(rates?.rider_percentage) : 85;
+  const company = companyGiven ? Number(rates?.company_commission_percentage) : 15;
   return {
     base_fare: money(rates?.base_fare),
     per_km: money(rates?.per_km),
@@ -78,5 +98,21 @@ export function normalizeFareRates(rates?: FareRatesDto | null): {
     surge: money(rates?.surge),
     toll: money(rates?.toll),
     parking: money(rates?.parking),
+    rider_percentage: money(rider),
+    company_commission_percentage: money(company),
   };
+}
+
+export function fareSharesAreExplicit(rates?: FareRatesDto | null): boolean {
+  return (
+    rates?.rider_percentage != null || rates?.company_commission_percentage != null
+  );
+}
+
+export function fareSharesSumTo100(rider: string, company: string): boolean {
+  const paise = (value: string) => {
+    const [whole, frac = ''] = value.split('.');
+    return Number(whole) * 100 + Number((frac + '00').slice(0, 2));
+  };
+  return paise(rider) + paise(company) === 10000;
 }

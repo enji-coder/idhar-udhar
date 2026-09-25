@@ -28,11 +28,9 @@ function toRates(form) {
     surge: number(form.surgeCharge),
     toll: number(form.tollCharge),
     parking: number(form.parkingCharge),
+    rider_percentage: number(form.riderSharePercent ?? 85),
+    company_commission_percentage: number(form.companyCommissionPercent ?? 15),
   };
-}
-
-function ratesHaveAmount(rates) {
-  return Object.values(rates).some((value) => value != null && Number(value) > 0);
 }
 
 export function listVehicleCategories() {
@@ -89,6 +87,13 @@ export function validateVehicleCategory(form, rows = listVehicleCategories()) {
   else if (rows.find((row) => row.id !== form.id && normalizeName(row.name).toLowerCase() === name.toLowerCase())) {
     issues.name = 'This vehicle category already exists.';
   }
+  const rider = Number(form.riderSharePercent);
+  const company = Number(form.companyCommissionPercent);
+  if (!Number.isFinite(rider) || rider < 0) issues.riderSharePercent = 'Rider percentage must be 0 or more.';
+  if (!Number.isFinite(company) || company < 0) issues.companyCommissionPercent = 'Company commission must be 0 or more.';
+  if (Number.isFinite(rider) && Number.isFinite(company) && Math.round((rider + company) * 100) !== 10000) {
+    issues.companyCommissionPercent = 'Rider percentage and company commission must add up to 100%.';
+  }
   return { name, issues };
 }
 
@@ -108,7 +113,7 @@ export async function saveVehicleCategory(form) {
     active: form.status !== 'Inactive',
     weight_capacity: form.weightCapacityKg ? String(form.weightCapacityKg) : '',
     size: form.size ? String(form.size) : '',
-    ...(ratesHaveAmount(rates) ? { rates } : {}),
+    rates,
   };
   try {
     const record = form.id

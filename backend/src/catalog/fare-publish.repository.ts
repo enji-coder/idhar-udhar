@@ -17,6 +17,8 @@ export class FarePublishRepository {
       surge: string;
       toll: string;
       parking: string;
+      rider_percentage: string;
+      company_commission_percentage: string;
     },
     db: Queryable = this.postgres,
   ): Promise<string> {
@@ -52,11 +54,13 @@ export class FarePublishRepository {
         `
         INSERT INTO fare_config_version_rates (
           fare_config_version_id, vehicle_category_id,
-          base_fare, per_km, initial_minimum, waiting, surge, toll, parking
+          base_fare, per_km, initial_minimum, waiting, surge, toll, parking,
+          rider_percentage, company_commission_percentage
         )
         SELECT
           $1, vehicle_category_id,
-          base_fare, per_km, initial_minimum, waiting, surge, toll, parking
+          base_fare, per_km, initial_minimum, waiting, surge, toll, parking,
+          rider_percentage, company_commission_percentage
         FROM fare_config_version_rates
         WHERE fare_config_version_id = $2
           AND vehicle_category_id <> $3
@@ -69,9 +73,10 @@ export class FarePublishRepository {
       `
       INSERT INTO fare_config_version_rates (
         fare_config_version_id, vehicle_category_id,
-        base_fare, per_km, initial_minimum, waiting, surge, toll, parking
+        base_fare, per_km, initial_minimum, waiting, surge, toll, parking,
+        rider_percentage, company_commission_percentage
       )
-      VALUES ($1, $2, $3::numeric, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric)
+      VALUES ($1, $2, $3::numeric, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric)
       `,
       [
         newVersionId,
@@ -83,6 +88,8 @@ export class FarePublishRepository {
         input.surge,
         input.toll,
         input.parking,
+        input.rider_percentage,
+        input.company_commission_percentage,
       ],
     );
 

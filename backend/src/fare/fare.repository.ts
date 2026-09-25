@@ -24,6 +24,8 @@ export type FareQuoteRow = {
   rounding: string;
   net_payable: string;
   tax: string;
+  rider_percentage: string;
+  company_commission_percentage: string;
   expires_at: Date;
   created_at: Date;
 };
@@ -49,6 +51,9 @@ export type FareSnapshotRow = {
   rounding: string;
   net_payable: string;
   tax: string;
+  rider_percentage: string;
+  company_commission_percentage: string;
+  rider_amount: string;
   quoted_at: Date | null;
   confirmed_at: Date;
 };
@@ -73,6 +78,8 @@ const QUOTE_COLUMNS = `
   rounding::text AS rounding,
   net_payable::text AS net_payable,
   tax::text AS tax,
+  rider_percentage::text AS rider_percentage,
+  company_commission_percentage::text AS company_commission_percentage,
   expires_at,
   created_at
 `;
@@ -104,7 +111,9 @@ export class FareRepository {
           r.waiting,
           r.surge,
           r.toll,
-          r.parking
+          r.parking,
+          r.rider_percentage,
+          r.company_commission_percentage
         FROM fare_config_versions v
         JOIN fare_config_version_rates r
           ON r.fare_config_version_id = v.fare_config_version_id
@@ -123,6 +132,8 @@ export class FareRepository {
           surge,
           toll,
           parking,
+          rider_percentage,
+          company_commission_percentage,
           GREATEST(
             initial_minimum,
             ROUND(
@@ -151,6 +162,8 @@ export class FareRepository {
         rounding,
         net_payable,
         tax,
+        rider_percentage,
+        company_commission_percentage,
         expires_at
       )
       SELECT
@@ -172,6 +185,8 @@ export class FareRepository {
         ROUND(trip_fare, 2) - trip_fare,
         ROUND(trip_fare, 2),
         0,
+        rider_percentage,
+        company_commission_percentage,
         now() + ($5::text || ' seconds')::interval
       FROM calc
       RETURNING ${QUOTE_COLUMNS}
@@ -232,6 +247,8 @@ export class FareRepository {
         rounding,
         net_payable,
         tax,
+        rider_percentage,
+        company_commission_percentage,
         quoted_at
       )
       SELECT
@@ -254,6 +271,8 @@ export class FareRepository {
         rounding,
         net_payable,
         tax,
+        rider_percentage,
+        company_commission_percentage,
         created_at
       FROM fare_quotes
       WHERE fare_quote_id = $2
@@ -278,6 +297,9 @@ export class FareRepository {
         rounding::text AS rounding,
         net_payable::text AS net_payable,
         tax::text AS tax,
+        rider_percentage::text AS rider_percentage,
+        company_commission_percentage::text AS company_commission_percentage,
+        ROUND(trip_fare * rider_percentage / 100, 2)::text AS rider_amount,
         quoted_at,
         confirmed_at
       `,
@@ -313,6 +335,9 @@ export class FareRepository {
         rounding::text AS rounding,
         net_payable::text AS net_payable,
         tax::text AS tax,
+        rider_percentage::text AS rider_percentage,
+        company_commission_percentage::text AS company_commission_percentage,
+        ROUND(trip_fare * rider_percentage / 100, 2)::text AS rider_amount,
         quoted_at,
         confirmed_at
       FROM order_fare_snapshots
