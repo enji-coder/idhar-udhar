@@ -10,6 +10,7 @@ class RiderOffer {
     required this.createdAt,
     this.displayId,
     this.orderStatus,
+    this.riderAmount,
   });
 
   final String offerId;
@@ -18,6 +19,7 @@ class RiderOffer {
   final DateTime createdAt;
   final String? displayId;
   final String? orderStatus;
+  final double? riderAmount;
 
   factory RiderOffer.fromJson(Map<String, Object?> json) {
     return RiderOffer(
@@ -27,6 +29,9 @@ class RiderOffer {
       createdAt: jsonDate(json['created_at']) ?? DateTime.now(),
       displayId: jsonString(json['display_id']),
       orderStatus: jsonString(json['order_status']),
+      riderAmount: json['rider_amount'] == null
+          ? null
+          : jsonDouble(json['rider_amount']),
     );
   }
 }

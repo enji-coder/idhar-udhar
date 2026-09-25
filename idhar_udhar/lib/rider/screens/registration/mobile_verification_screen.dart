@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 
-import '../../data/dummy/dummy_rider_data.dart';
 import '../../routing/rider_otp_args.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
@@ -31,19 +30,16 @@ class MobileVerificationScreen extends ConsumerStatefulWidget {
 class _MobileVerificationScreenState
     extends ConsumerState<MobileVerificationScreen> {
   late final TextEditingController _phone;
-  bool _editing = false;
+  late bool _editing;
   bool _sending = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    final seed = widget.initialMobile ?? DummyRiderData.defaultMobileDigits;
-    _phone = TextEditingController(
-      text: seed.replaceAll(RegExp(r'\D'), '').length == 10
-          ? seed.replaceAll(RegExp(r'\D'), '')
-          : DummyRiderData.defaultMobileDigits,
-    );
+    final String seed = riderPhoneDigits(widget.initialMobile ?? '');
+    _phone = TextEditingController(text: seed.length == 10 ? seed : '');
+    _editing = seed.length != 10;
   }
 
   @override
@@ -52,13 +48,7 @@ class _MobileVerificationScreenState
     super.dispose();
   }
 
-  String get _displayMobile {
-    final d = _phone.text.replaceAll(RegExp(r'\D'), '');
-    if (d.length == 10) {
-      return '+91 ${d.substring(0, 5)} ${d.substring(5)}';
-    }
-    return '+91 $d';
-  }
+  String get _displayMobile => formatRiderPhone(_phone.text);
 
   Future<void> _sendOtp() async {
     final digits = _phone.text.replaceAll(RegExp(r'\D'), '');
@@ -75,7 +65,6 @@ class _MobileVerificationScreenState
       if (!mounted) {
         return;
       }
-      setState(() => _sending = false);
       unawaited(
         context.push(
           RiderRoutes.otpVerification,
@@ -89,10 +78,16 @@ class _MobileVerificationScreenState
       if (!mounted) {
         return;
       }
-      setState(() {
-        _sending = false;
-        _error = error.message;
-      });
+      setState(() => _error = error.message);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _error = 'Could not send OTP. Try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _sending = false);
+      }
     }
   }
 
@@ -139,8 +134,12 @@ class _MobileVerificationScreenState
                         const SizedBox(width: RiderSpacing.md),
                         Expanded(
                           child: Text(
-                            _displayMobile,
-                            style: RiderTextStyles.title,
+                            _displayMobile.isEmpty
+                                ? 'Enter your mobile number'
+                                : _displayMobile,
+                            style: _displayMobile.isEmpty
+                                ? RiderTextStyles.hint
+                                : RiderTextStyles.title,
                           ),
                         ),
                         TextButton(
@@ -181,6 +180,15 @@ class _MobileVerificationScreenState
                             color: RiderColors.primary,
                           ),
                         ),
+                      ),
+                    ),
+                  ],
+                  if (_error != null && !_editing) ...[
+                    const SizedBox(height: RiderSpacing.sm),
+                    Text(
+                      _error!,
+                      style: RiderTextStyles.caption.copyWith(
+                        color: RiderColors.error,
                       ),
                     ),
                   ],

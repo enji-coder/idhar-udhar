@@ -18,7 +18,7 @@ class SessionState {
   const SessionState({
     this.user,
     this.isAuthenticated = false,
-    this.walletBalance = 420,
+    this.walletBalance = 0,
     this.orders = const [],
     this.isHydrated = false,
     this.notices = const [],
@@ -92,20 +92,45 @@ class SessionNotifier extends StateNotifier<SessionState> {
   final ProfilesApi? _profilesApi;
   final TokenStore? _tokenStore;
 
+  /// Loopback capture only. Never persisted. Null in release / live hosts.
+  String? debugCapturedOtp;
+
   /// Returning-user names keyed by phone (demo; persisted locally).
   final Map<String, String> _knownNames = <String, String>{};
 
   /// Invoicing emails keyed by phone (demo; persisted locally).
   final Map<String, String> _knownEmails = <String, String>{};
 
+  /// Invalidates in-flight hydrate work so a late API result cannot
+  /// re-authenticate after timeout/fallback.
+  int _hydrateEpoch = 0;
+
   /// Restore backend session when tokens are still valid.
-  Future<void> hydrate() async {
+  ///
+  /// Always finishes: unauthenticated, authenticated, or timeout/error
+  /// fallback. Splash must never wait on this indefinitely.
+  Future<void> hydrate({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     if (state.isHydrated) {
       return;
     }
+    final int epoch = ++_hydrateEpoch;
+    try {
+      await _restoreSession(epoch).timeout(timeout);
+    } on TimeoutException {
+      _finishHydrateUnauthenticated(epoch);
+    } catch (_) {
+      _finishHydrateUnauthenticated(epoch);
+    }
+  }
 
+  Future<void> _restoreSession(int epoch) async {
     final Map<String, String> names = await _storage.loadKnownNames();
     final Map<String, String> emails = await _storage.loadKnownEmails();
+    if (!_hydrateActive(epoch)) {
+      return;
+    }
     _knownNames
       ..clear()
       ..addAll(names);
@@ -116,28 +141,40 @@ class SessionNotifier extends StateNotifier<SessionState> {
     final TokenStore? tokens = _tokenStore;
     final AuthApi? auth = _authApi;
     if (tokens == null || auth == null || !(await tokens.hasRefreshToken)) {
-      state = state.copyWith(
-        isHydrated: true,
-        isAuthenticated: false,
-        clearUser: true,
-        orders: const <MockOrder>[],
-      );
+      _finishHydrateUnauthenticated(epoch);
       return;
     }
 
     try {
       await auth.session();
+      if (!_hydrateActive(epoch)) {
+        return;
+      }
       final String phone = (await tokens.phone) ?? '';
-      await _loadAuthenticated(phone);
-    } on ApiException {
-      await tokens.clear();
-      await _storage.clearSession();
-      state = const SessionState(isHydrated: true);
+      await _loadAuthenticated(phone, loadFeeds: false, hydrateEpoch: epoch);
+    } on ApiException catch (error) {
+      if (!_hydrateActive(epoch)) {
+        return;
+      }
+      if (error.isUnauthenticated) {
+        await tokens.clear();
+        await _storage.clearSession();
+      }
+      _finishHydrateUnauthenticated(epoch);
     } catch (_) {
-      await tokens.clear();
-      await _storage.clearSession();
-      state = const SessionState(isHydrated: true);
+      _finishHydrateUnauthenticated(epoch);
     }
+  }
+
+  bool _hydrateActive(int epoch) =>
+      epoch == _hydrateEpoch && !state.isHydrated;
+
+  void _finishHydrateUnauthenticated(int epoch) {
+    if (!_hydrateActive(epoch)) {
+      return;
+    }
+    _hydrateEpoch++;
+    state = const SessionState(isHydrated: true);
   }
 
   void startLogin(String phone) {
@@ -159,10 +196,14 @@ class SessionNotifier extends StateNotifier<SessionState> {
     if (user == null || auth == null) {
       return;
     }
-    await auth.requestOtp(
+    final OtpRequestResult result = await auth.requestOtp(
       phone: user.phone,
       actor: MarketplaceActor.customer,
     );
+    debugCapturedOtp = null;
+    if (result.delivery == 'capture') {
+      debugCapturedOtp = await auth.peekCapturedOtp(user.phone);
+    }
   }
 
   /// Backend OTP verify. Dummy 4-digit path remains only when APIs are absent.
@@ -185,23 +226,67 @@ class SessionNotifier extends StateNotifier<SessionState> {
       actor: MarketplaceActor.customer,
       code: code,
     );
-    await _loadAuthenticated(user.phone);
+    await _loadAuthenticated(user.phone, loadFeeds: true);
     return true;
   }
 
-  bool get needsProfileSetup =>
-      state.isAuthenticated && !(state.user?.hasName ?? false);
+  bool get needsProfileSetup {
+    if (!state.isAuthenticated) {
+      return false;
+    }
+    final String name = state.user?.name.trim() ?? '';
+    return name.isEmpty || name == 'Customer';
+  }
 
-  void setName(String name) {
+  Future<void> persistProfile({
+    required String name,
+    String? email,
+  }) async {
     final MockUser? current = state.user;
     if (current == null) {
       return;
     }
     final String trimmed = name.trim();
-    _knownNames[current.phone] = trimmed;
-    state = state.copyWith(user: current.copyWith(name: trimmed));
+    final String? trimmedEmail = email?.trim();
+    final ProfilesApi? profiles = _profilesApi;
+    if (profiles != null) {
+      final CustomerProfile updated = await profiles.updateCustomer(
+        displayName: trimmed,
+        email: trimmedEmail,
+      );
+      final String savedName = updated.displayName?.trim().isNotEmpty == true
+          ? updated.displayName!.trim()
+          : trimmed;
+      final String savedEmail =
+          (updated.invoiceEmail ?? updated.email)?.trim() ??
+              trimmedEmail ??
+              current.email;
+      _knownNames[current.phone] = savedName;
+      if (savedEmail.isNotEmpty) {
+        _knownEmails[current.phone] = savedEmail;
+      }
+      state = state.copyWith(
+        user: current.copyWith(name: savedName, email: savedEmail),
+      );
+    } else {
+      _knownNames[current.phone] = trimmed;
+      if (trimmedEmail != null) {
+        _knownEmails[current.phone] = trimmedEmail;
+      }
+      state = state.copyWith(
+        user: current.copyWith(
+          name: trimmed,
+          email: trimmedEmail ?? current.email,
+        ),
+      );
+    }
     unawaited(_persistAuthenticatedUser());
     unawaited(_storage.saveKnownNames(_knownNames));
+    unawaited(_storage.saveKnownEmails(_knownEmails));
+  }
+
+  void setName(String name) {
+    unawaited(persistProfile(name: name));
   }
 
   void setEmail(String email) {
@@ -327,10 +412,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
       await _tokenStore?.clear();
     }
     await _storage.clearSession();
+    debugCapturedOtp = null;
     state = SessionState(isHydrated: true);
   }
 
-  Future<void> _loadAuthenticated(String phone) async {
+  Future<void> _loadAuthenticated(
+    String phone, {
+    required bool loadFeeds,
+    int? hydrateEpoch,
+  }) async {
     String name = _knownNames[phone] ?? _knownNames['+91$phone'] ?? '';
     String email = _knownEmails[phone] ?? _knownEmails['+91$phone'] ?? '';
     String id = 'u_${phone.hashCode.abs()}';
@@ -339,9 +429,13 @@ class SessionNotifier extends StateNotifier<SessionState> {
       if (profiles != null) {
         final profile = await profiles.customer();
         id = profile.customerProfileId;
-        final String? remoteName = profile.displayName?.trim();
-        if (remoteName != null && remoteName.isNotEmpty) {
-          name = remoteName;
+        if (profile.needsProfileSetup) {
+          name = '';
+        } else {
+          final String? remoteName = profile.displayName?.trim();
+          if (remoteName != null && remoteName.isNotEmpty) {
+            name = remoteName;
+          }
         }
         final String? remoteEmail =
             (profile.invoiceEmail ?? profile.email)?.trim();
@@ -352,6 +446,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
     } catch (_) {
       // Local name overlay still applies when profile GET fails.
     }
+    if (hydrateEpoch != null && !_hydrateActive(hydrateEpoch)) {
+      return;
+    }
     final MockUser user = MockUser(
       id: id,
       phone: phone.startsWith('+') ? phone : '+91$phone',
@@ -359,39 +456,43 @@ class SessionNotifier extends StateNotifier<SessionState> {
       email: email,
     );
     List<MockOrder> orders = const <MockOrder>[];
-    try {
-      final OrdersApi? api = _ordersApi;
-      if (api != null) {
-        orders = (await api.list())
-            .map(OrderMapper.toMockOrder)
-            .toList(growable: false);
-      }
-    } catch (_) {
-      orders = const <MockOrder>[];
-    }
     List<CustomerNotice> notices = const <CustomerNotice>[];
-    try {
-      final NotificationsApi? api = _notificationsApi;
-      if (api != null) {
-        notices = (await api.list())
-            .map(
-              (item) => CustomerNotice(
-                id: item.id,
-                title: item.title,
-                body: item.body,
-                orderId: item.orderId,
-                read: item.isRead,
-              ),
-            )
-            .toList(growable: false);
+    if (loadFeeds) {
+      try {
+        final OrdersApi? api = _ordersApi;
+        if (api != null) {
+          orders = (await api.list())
+              .map(OrderMapper.toMockOrder)
+              .toList(growable: false);
+        }
+      } catch (_) {
+        orders = const <MockOrder>[];
       }
-    } catch (_) {
-      notices = const <CustomerNotice>[];
+      try {
+        final NotificationsApi? api = _notificationsApi;
+        if (api != null) {
+          notices = (await api.list())
+              .map(
+                (item) => CustomerNotice(
+                  id: item.id,
+                  title: item.title,
+                  body: item.body,
+                  orderId: item.orderId,
+                  read: item.isRead,
+                ),
+              )
+              .toList(growable: false);
+        }
+      } catch (_) {
+        notices = const <CustomerNotice>[];
+      }
+    }
+    if (hydrateEpoch != null && !_hydrateActive(hydrateEpoch)) {
+      return;
     }
     state = SessionState(
       user: user,
       isAuthenticated: true,
-      walletBalance: 420,
       orders: orders,
       isHydrated: true,
       notices: notices,

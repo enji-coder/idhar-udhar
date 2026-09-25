@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../state/rider_session.dart';
 import '../data/dummy/dummy_rider_repository.dart';
 import '../routing/rider_routes.dart';
 import '../screens/profile/rider_profile_screen.dart';
+import '../state/rider_session.dart';
 import '../theme/rider_colors.dart';
 import '../theme/rider_spacing.dart';
 import '../theme/rider_text_styles.dart';
@@ -17,6 +17,14 @@ class RiderDrawer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(riderProfileStateProvider);
+    final String sessionPhone = formatRiderPhone(
+      ref.watch(riderSessionProvider).phone,
+    );
+    final String name =
+        profile.name.trim().isEmpty ? 'Rider' : profile.name;
+    final String mobile = profile.mobile.trim().isNotEmpty
+        ? profile.mobile
+        : (sessionPhone.isEmpty ? '—' : sessionPhone);
 
     return Drawer(
       backgroundColor: RiderColors.background,
@@ -38,8 +46,8 @@ class RiderDrawer extends ConsumerWidget {
                   const SizedBox(height: RiderSpacing.md),
                   RiderProfileAvatar(photoUrl: profile.photoUrl, radius: 28),
                   const SizedBox(height: RiderSpacing.md),
-                  Text(profile.name, style: RiderTextStyles.title),
-                  Text(profile.mobile, style: RiderTextStyles.caption),
+                  Text(name, style: RiderTextStyles.title),
+                  Text(mobile, style: RiderTextStyles.caption),
                 ],
               ),
             ),
@@ -53,6 +61,12 @@ class RiderDrawer extends ConsumerWidget {
                     Icons.person_outline_rounded,
                     'Profile',
                     RiderRoutes.profile,
+                  ),
+                  _item(
+                    context,
+                    Icons.verified_outlined,
+                    'Verification',
+                    RiderRoutes.verificationStatus,
                   ),
                   _item(
                     context,

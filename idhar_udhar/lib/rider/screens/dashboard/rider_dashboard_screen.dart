@@ -13,6 +13,7 @@ import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../data/models/recent_activity.dart';
 import '../../data/models/rider_announcement.dart';
+import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
@@ -57,6 +58,7 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(riderSessionProvider.notifier).refreshProfile());
       unawaited(ref.read(riderSessionProvider.notifier).refreshWallet());
       unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       unawaited(ref.read(riderSessionProvider.notifier).refreshNotices());
@@ -146,17 +148,30 @@ class _HomeTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final repo = ref.watch(dummyRiderRepositoryProvider);
     final profile = ref.watch(riderProfileStateProvider);
+    final bool approved = ref.watch(riderSessionProvider).isApproved;
+    final String approval =
+        ref.watch(riderSessionProvider).approvalStatus ?? 'PENDING';
+    final String greetingName =
+        profile.name.trim().isEmpty ? 'Rider' : profile.firstName;
     final earnings =
-        ref.watch(riderApiEarningsProvider).value ?? repo.getEarnings();
-    final activity = repo.getRecentActivity();
-    final announcements = repo.getAnnouncements();
+        ref.watch(riderApiEarningsProvider).value ?? RiderEarnings.empty;
+    final activity = ref.watch(riderDeliveryHistoryProvider);
     final offers = ref.watch(riderSessionProvider).offers;
     final RiderOrder? order = offers.isEmpty
         ? null
         : OrderMapper.toRiderOrder(offer: offers.first);
     final notices = ref.watch(riderSessionProvider).notices;
+    final announcements = <RiderAnnouncement>[
+      for (final notice in notices)
+        RiderAnnouncement(
+          kind: RiderAnnouncementKind.update,
+          title: notice.title,
+          body: notice.body,
+          dateLabel:
+              DateFormat('d MMM, h:mm a').format(notice.createdAt.toLocal()),
+        ),
+    ];
     final online = ref.watch(riderOnlineProvider);
     final wallet = ref.watch(riderWalletBalanceProvider);
     final codDue = ref.watch(riderCodDueProvider);
@@ -183,7 +198,7 @@ class _HomeTab extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _DashboardHeader(
-                greeting: '${_greeting()}, ${profile.firstName} 👋',
+                greeting: '${_greeting()}, $greetingName 👋',
                 online: online,
                 onNotifications: () {
                   final unread =
@@ -206,13 +221,46 @@ class _HomeTab extends ConsumerWidget {
                 },
               ),
               const SizedBox(height: RiderSpacing.lg),
+              if (!approved) ...[
+                RiderGlassCard(
+                  elevation: _dashElevation,
+                  padding: _dashCardPad,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Verification $approval',
+                        style: _d(RiderTextStyles.title),
+                      ),
+                      const SizedBox(height: RiderSpacing.sm),
+                      Text(
+                        'Go Online and accepting deliveries stay locked until approval.',
+                        style: _d(RiderTextStyles.caption),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            context.push(RiderRoutes.verificationStatus),
+                        child: Text(
+                          'View verification status',
+                          style: _d(RiderTextStyles.bodyMedium).copyWith(
+                            color: RiderColors.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: RiderSpacing.lg),
+              ],
               _DutyStatusCard(
-                online: online,
+                online: approved && online,
+                enabled: approved,
                 onToggle: () {
+                  if (!approved) return;
                   ref.read(riderOnlineProvider.notifier).state = !online;
                 },
               ),
-              if (online && !suspended && order != null) ...[
+              if (approved && online && !suspended && order != null) ...[
                 const SizedBox(height: RiderSpacing.md),
                 _IncomingOrderCard(
                   order: order,
@@ -232,6 +280,7 @@ class _HomeTab extends ConsumerWidget {
                     );
                   },
                   onAccept: () {
+                    if (!ref.read(riderSessionProvider).isApproved) return;
                     if (riderIsSuspended(ref)) return;
                     ref.read(activeOrderProvider.notifier).state = order;
                     ref.read(deliveryStatusProvider.notifier).state =
@@ -359,11 +408,17 @@ class _HomeTab extends ConsumerWidget {
                   children: [
                     const RiderSectionHeader(title: 'Recent activity'),
                     const SizedBox(height: RiderSpacing.md),
-                    for (var i = 0; i < activity.length; i++) ...[
-                      _ActivityRow(item: activity[i], currency: currency),
-                      if (i < activity.length - 1)
-                        const Divider(height: RiderSpacing.xl),
-                    ],
+                    if (activity.isEmpty)
+                      Text(
+                        'No recent activity yet',
+                        style: _d(RiderTextStyles.caption),
+                      )
+                    else
+                      for (var i = 0; i < activity.length; i++) ...[
+                        _ActivityRow(item: activity[i], currency: currency),
+                        if (i < activity.length - 1)
+                          const Divider(height: RiderSpacing.xl),
+                      ],
                   ],
                 ),
               ),
@@ -440,10 +495,12 @@ class _DutyStatusCard extends StatelessWidget {
   const _DutyStatusCard({
     required this.online,
     required this.onToggle,
+    required this.enabled,
   });
 
   final bool online;
   final VoidCallback onToggle;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -470,9 +527,11 @@ class _DutyStatusCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      online
-                          ? 'Looking for new orders...'
-                          : 'Go Online to receive new orders.',
+                      !enabled
+                          ? 'Locked until verification is approved.'
+                          : online
+                              ? 'Looking for new orders...'
+                              : 'Go Online to receive new orders.',
                       style: _d(RiderTextStyles.caption),
                     ),
                   ],
@@ -488,9 +547,9 @@ class _DutyStatusCard extends StatelessWidget {
                     ),
                   ),
                   Switch(
-                    value: online,
+                    value: enabled && online,
                     activeTrackColor: RiderColors.success,
-                    onChanged: (_) => onToggle(),
+                    onChanged: enabled ? (_) => onToggle() : null,
                   ),
                 ],
               ),
@@ -690,7 +749,7 @@ class _OrdersTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activity = ref.watch(dummyRiderRepositoryProvider).getRecentActivity();
+    final activity = ref.watch(riderDeliveryHistoryProvider);
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -706,14 +765,20 @@ class _OrdersTab extends ConsumerWidget {
             style: _d(RiderTextStyles.caption),
           ),
           const SizedBox(height: RiderSpacing.xl),
-          for (final item in activity) ...[
-            RiderGlassCard(
-              elevation: _dashElevation,
-              padding: _dashCardPad,
-              child: _ActivityRow(item: item, currency: currency),
-            ),
-            const SizedBox(height: RiderSpacing.md),
-          ],
+          if (activity.isEmpty)
+            Text(
+              'No completed deliveries yet',
+              style: _d(RiderTextStyles.caption),
+            )
+          else
+            for (final item in activity) ...[
+              RiderGlassCard(
+                elevation: _dashElevation,
+                padding: _dashCardPad,
+                child: _ActivityRow(item: item, currency: currency),
+              ),
+              const SizedBox(height: RiderSpacing.md),
+            ],
         ],
       ),
     );

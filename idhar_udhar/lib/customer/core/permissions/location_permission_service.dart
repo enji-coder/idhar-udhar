@@ -2,7 +2,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../routing/app_routes.dart';
 
-/// Thin wrapper around OS location permission for the dummy-data phase.
+/// Thin wrapper around OS location permission. Map GPS reads reuse this grant.
 abstract final class LocationPermissionService {
   static Future<PermissionStatus> status() =>
       Permission.locationWhenInUse.status;

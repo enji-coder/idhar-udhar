@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/data/mock/mock_models.dart';
@@ -14,9 +16,14 @@ import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 import '../cancel_trip_flow.dart';
 
-class TrackingScreen extends ConsumerWidget {
+class TrackingScreen extends ConsumerStatefulWidget {
   const TrackingScreen({super.key});
 
+  @override
+  ConsumerState<TrackingScreen> createState() => _TrackingScreenState();
+}
+
+class _TrackingScreenState extends ConsumerState<TrackingScreen> {
   static const List<OrderStatus> _timeline = <OrderStatus>[
     OrderStatus.accepted,
     OrderStatus.arriving,
@@ -25,6 +32,9 @@ class TrackingScreen extends ConsumerWidget {
     OrderStatus.nearDestination,
     OrderStatus.delivered,
   ];
+
+  DisplayRoute? _route;
+  String? _routeKey;
 
   static String _labelFor(OrderStatus status) {
     switch (status) {
@@ -55,11 +65,11 @@ class TrackingScreen extends ConsumerWidget {
     }
   }
 
-  void _sync(WidgetRef ref, MockOrder order) {
+  void _sync(MockOrder order) {
     ref.read(sessionProvider.notifier).updateOrder(order);
   }
 
-  MockOrder? _viewedOrder(BuildContext context, WidgetRef ref) {
+  MockOrder? _viewedOrder() {
     final String? id = GoRouterState.of(context).uri.queryParameters['id'];
     if (id != null && id.isNotEmpty) {
       final MockOrder? fromSession =
@@ -71,8 +81,8 @@ class TrackingScreen extends ConsumerWidget {
     return ref.read(bookingDraftProvider).activeOrder;
   }
 
-  void _advance(BuildContext context, WidgetRef ref) {
-    final MockOrder? order = _viewedOrder(context, ref);
+  void _advance() {
+    final MockOrder? order = _viewedOrder();
     if (order == null) {
       return;
     }
@@ -82,7 +92,7 @@ class TrackingScreen extends ConsumerWidget {
           .read(bookingDraftProvider.notifier)
           .advanceDemoStatus(order: order);
       if (updated != null) {
-        _sync(ref, updated);
+        _sync(updated);
         return;
       }
     }
@@ -94,7 +104,7 @@ class TrackingScreen extends ConsumerWidget {
               order: order,
             );
     if (delivered != null) {
-      _sync(ref, delivered);
+      _sync(delivered);
     }
     context.go(AppRoutes.bookCompleted);
   }
@@ -116,8 +126,42 @@ class TrackingScreen extends ConsumerWidget {
     return _timeline.indexOf(status);
   }
 
+  Future<void> _loadRoute(MockOrder? order) async {
+    final GeoPoint? pickup = _pointOf(order?.pickup);
+    final GeoPoint? drop = _pointOf(order?.drop);
+    if (pickup == null || drop == null) {
+      return;
+    }
+    final String key =
+        '${pickup.latitude},${pickup.longitude}>${drop.latitude},${drop.longitude}';
+    if (key == _routeKey) {
+      return;
+    }
+    _routeKey = key;
+    final DisplayRoute? route = await ref.read(routesServiceProvider).compute(
+          origin: pickup,
+          destination: drop,
+          intermediates: order?.extraDrops
+                  .map(_pointOf)
+                  .whereType<GeoPoint>()
+                  .toList(growable: false) ??
+              const <GeoPoint>[],
+        );
+    if (!mounted) {
+      return;
+    }
+    setState(() => _route = route);
+  }
+
+  GeoPoint? _pointOf(MockLocation? loc) {
+    if (loc?.latitude == null || loc?.longitude == null) {
+      return null;
+    }
+    return GeoPoint(latitude: loc!.latitude!, longitude: loc.longitude!);
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final String? id = GoRouterState.of(context).uri.queryParameters['id'];
     MockOrder? order = ref.watch(bookingDraftProvider).activeOrder;
     if (id != null) {
@@ -131,6 +175,30 @@ class TrackingScreen extends ConsumerWidget {
     final canCancel = order != null &&
         order.status != OrderStatus.delivered &&
         order.status != OrderStatus.cancelled;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadRoute(order);
+    });
+
+    final GeoPoint? pickup = _pointOf(order?.pickup);
+    final GeoPoint? drop = _pointOf(order?.drop);
+    final List<MapMarkerSpec> markers = <MapMarkerSpec>[
+      if (pickup != null)
+        MapMarkerSpec(
+          id: 'pickup',
+          point: pickup,
+          hue: BitmapDescriptor.hueOrange,
+          title: 'Pickup',
+          snippet: order?.pickup.address ?? '',
+        ),
+      if (drop != null)
+        MapMarkerSpec(
+          id: 'drop',
+          point: drop,
+          hue: BitmapDescriptor.hueAzure,
+          title: 'Drop',
+          snippet: order?.drop.address ?? '',
+        ),
+    ];
 
     return GlassPageScaffold(
       bottom: Column(
@@ -138,14 +206,14 @@ class TrackingScreen extends ConsumerWidget {
         children: [
           AnimatedPrimaryButton(
             label: _demoLabel(order?.status),
-            onPressed: () => _advance(context, ref),
+            onPressed: _advance,
           ),
           if (canCancel) ...[
             const SizedBox(height: AppSpacing.sm),
             SecondaryButton(
               label: 'Cancel Booking',
               onPressed: () async {
-                final MockOrder? current = _viewedOrder(context, ref);
+                final MockOrder? current = _viewedOrder();
                 if (current == null) return;
                 final bool ok = await confirmCustomerCancellation(
                   context: context,
@@ -181,40 +249,43 @@ class TrackingScreen extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          GlassContainer(
-            hero: true,
-            showAmbientGlow: true,
-            ambientColor: AppColors.orange,
-            child: Column(
-              children: [
-                AmbientGlow(
-                  diameter: 220,
-                  opacity: 0.3,
-                  child: const SafeAssetImage(
-                    path: AssetPaths.deliveryProgress,
-                    height: 180,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                Text(
-                  order?.statusLabel ?? 'In transit',
-                  style: AppTextStyles.headingS.copyWith(
-                    color: AppColors.orange,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  'ETA ${order?.etaMinutes ?? 18} min',
-                  style: AppTextStyles.body,
-                ),
-                if (order?.id != null) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(order!.id, style: AppTextStyles.caption),
-                ],
-              ],
+          EmbeddedGoogleMap(
+            height: 200,
+            initial: pickup ?? drop ?? MapsDefaults.cityCenter,
+            markers: markers,
+            route: _route?.points ?? const <GeoPoint>[],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            order?.statusLabel ?? 'In transit',
+            style: AppTextStyles.headingS.copyWith(
+              color: AppColors.orange,
             ),
           ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'ETA ${order?.etaMinutes ?? 18} min',
+            style: AppTextStyles.body,
+          ),
+          if (_route != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Road ${_route!.distanceLabel} · ${_route!.etaLabel}',
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
+          Text(
+            'Live rider GPS is not provided by the current backend.',
+            style: AppTextStyles.caption.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
+          if (order?.id != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(order!.id, style: AppTextStyles.caption),
+          ],
           const SizedBox(height: AppSpacing.lg),
           GlassContainer(
             child: Column(
@@ -280,7 +351,7 @@ class TrackingScreen extends ConsumerWidget {
                   child: Container(
                     width: 2,
                     height: 28,
-                    color: AppColors.orange.withOpacity(0.35),
+                    color: AppColors.orange.withValues(alpha: 0.35),
                   ),
                 ),
                 _point(

@@ -1,4 +1,5 @@
 import 'api_client.dart';
+import 'api_config.dart';
 import 'json_codec.dart';
 import 'token_store.dart';
 
@@ -63,23 +64,63 @@ class AuthSession {
   }
 }
 
+class OtpRequestResult {
+  const OtpRequestResult({
+    required this.requested,
+    required this.expiresInSeconds,
+    required this.cooldownSeconds,
+    required this.delivery,
+  });
+
+  final bool requested;
+  final int expiresInSeconds;
+  final int cooldownSeconds;
+  final String delivery;
+
+  factory OtpRequestResult.fromJson(Map<String, Object?> json) {
+    return OtpRequestResult(
+      requested: json['requested'] == true,
+      expiresInSeconds: jsonInt(json['expires_in_seconds']),
+      cooldownSeconds: jsonInt(json['cooldown_seconds']),
+      delivery: jsonString(json['delivery']) ?? '',
+    );
+  }
+}
+
 class AuthApi {
   AuthApi(this._client, this._tokens);
 
   final ApiClient _client;
   final TokenStore _tokens;
 
-  Future<void> requestOtp({
+  Future<OtpRequestResult> requestOtp({
     required String phone,
     required MarketplaceActor actor,
   }) async {
-    await _client.post(
+    final Map<String, Object?> body = await _client.post(
       '/v1/auth/otp/request',
       data: <String, String>{
         'phone': _digits(phone),
         'actor_type': actor.apiValue,
       },
     );
+    return OtpRequestResult.fromJson(body);
+  }
+
+  /// DEVELOPMENT ONLY. Hits loopback capture peek. Never call in release.
+  Future<String?> peekCapturedOtp(String phone) async {
+    if (!ApiConfig.canPeekCapturedOtp) {
+      return null;
+    }
+    try {
+      final Map<String, Object?> body = await _client.get(
+        '/v1/auth/dev/otp-capture',
+        query: <String, dynamic>{'phone': _digits(phone)},
+      );
+      return jsonString(body['code']);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<TokenPair> verifyOtp({

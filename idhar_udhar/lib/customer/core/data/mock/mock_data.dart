@@ -1,5 +1,4 @@
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
-import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../constants/asset_paths.dart';
 import 'mock_models.dart';
 
@@ -230,7 +229,7 @@ abstract final class MockData {
     ServiceFamily? family, {
     List<VehicleCategory>? catalog,
   }) {
-    final rows = catalog ?? VehicleCategoryCatalog.active;
+    final rows = catalog ?? const <VehicleCategory>[];
     final existing = <MockVehicle>[
       ...vehicles,
       ...legacyVehicles,
@@ -400,37 +399,6 @@ abstract final class MockData {
       label: 'Extra Large',
       subtitle: 'Above 90 cm',
       imagePath: AssetPaths.movingItems,
-    ),
-  ];
-
-  static final List<MockWalletTxn> walletTxns = [
-    MockWalletTxn(
-      id: 'w1',
-      title: 'Added money',
-      amount: 500,
-      date: DateTime.now().subtract(const Duration(days: 1)),
-      isCredit: true,
-    ),
-    MockWalletTxn(
-      id: 'w2',
-      title: 'Delivery IU-1024',
-      amount: 149,
-      date: DateTime.now().subtract(const Duration(days: 2)),
-      isCredit: false,
-    ),
-    MockWalletTxn(
-      id: 'w3',
-      title: 'Promotional credit',
-      amount: 50,
-      date: DateTime.now().subtract(const Duration(days: 5)),
-      isCredit: true,
-    ),
-    MockWalletTxn(
-      id: 'w4',
-      title: 'Delivery IU-0988',
-      amount: 249,
-      date: DateTime.now().subtract(const Duration(days: 8)),
-      isCredit: false,
     ),
   ];
 

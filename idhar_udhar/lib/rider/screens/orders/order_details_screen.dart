@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -18,9 +19,8 @@ class AcceptConfirmationScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final order =
-        ref.watch(activeOrderProvider) ??
-        ref.watch(dummyRiderRepositoryProvider).getIncomingOrder();
+    final RiderOrder? order = ref.watch(activeOrderProvider);
+    if (order == null) return const _NoActiveOrder();
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -89,9 +89,8 @@ class OrderDetailsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final order =
-        ref.watch(activeOrderProvider) ??
-        ref.watch(dummyRiderRepositoryProvider).getIncomingOrder();
+    final RiderOrder? order = ref.watch(activeOrderProvider);
+    if (order == null) return const _NoActiveOrder();
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -250,6 +249,31 @@ class OrderDetailsScreen extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoActiveOrder extends StatelessWidget {
+  const _NoActiveOrder();
+
+  @override
+  Widget build(BuildContext context) {
+    return RiderScaffold(
+      appBar: AppBar(
+        title: const Text('Order'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.canPop()
+              ? context.pop()
+              : context.go(RiderRoutes.dashboard),
+        ),
+      ),
+      body: Center(
+        child: Text(
+          'No active order.',
+          style: RiderTextStyles.caption,
         ),
       ),
     );

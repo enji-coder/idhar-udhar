@@ -119,20 +119,29 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (!mounted) {
       return;
     }
-    // Restore persisted login while splash exit plays — avoid flashing Login.
-    await ref.read(sessionProvider.notifier).hydrate();
+    var authenticated = false;
+    var needsName = false;
+    try {
+      await ref.read(sessionProvider.notifier).hydrate();
+      if (mounted) {
+        authenticated = ref.read(sessionProvider).isAuthenticated;
+        needsName = ref.read(sessionProvider.notifier).needsProfileSetup;
+      }
+    } catch (_) {
+      authenticated = false;
+    }
     if (!mounted) {
       return;
     }
-    await _exit.forward();
+    try {
+      await _exit.forward();
+    } catch (_) {
+      // Navigation must still run if the exit animation fails.
+    }
     if (!mounted) {
       return;
     }
-
-    final SessionState session = ref.read(sessionProvider);
-    if (session.isAuthenticated) {
-      final bool needsName =
-          ref.read(sessionProvider.notifier).needsProfileSetup;
+    if (authenticated) {
       context.go(needsName ? AppRoutes.profileSetup : AppRoutes.home);
       return;
     }

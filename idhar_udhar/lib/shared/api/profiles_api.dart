@@ -10,6 +10,7 @@ class CustomerProfile {
     this.invoiceEmail,
     this.status,
     this.phoneNormalized,
+    this.needsProfileSetup = false,
   });
 
   final String identityId;
@@ -19,16 +20,20 @@ class CustomerProfile {
   final String? invoiceEmail;
   final String? status;
   final String? phoneNormalized;
+  final bool needsProfileSetup;
 
   factory CustomerProfile.fromJson(Map<String, Object?> json) {
+    final String displayName = jsonString(json['display_name']) ?? '';
+    final bool flagged = json['needs_profile_setup'] == true;
     return CustomerProfile(
       identityId: jsonString(json['identity_id']) ?? '',
       customerProfileId: jsonString(json['customer_profile_id']) ?? '',
-      displayName: jsonString(json['display_name']),
+      displayName: displayName.isEmpty ? null : displayName,
       email: jsonString(json['email']),
       invoiceEmail: jsonString(json['invoice_email']),
       status: jsonString(json['status']),
       phoneNormalized: jsonString(json['phone_normalized']),
+      needsProfileSetup: flagged || displayName.isEmpty || displayName == 'Customer',
     );
   }
 }
@@ -72,6 +77,21 @@ class ProfilesApi {
 
   Future<CustomerProfile> customer() async {
     return CustomerProfile.fromJson(await _client.get('/v1/customer/profile'));
+  }
+
+  Future<CustomerProfile> updateCustomer({
+    required String displayName,
+    String? email,
+  }) async {
+    return CustomerProfile.fromJson(
+      await _client.put(
+        '/v1/customer/profile',
+        data: <String, Object?>{
+          'display_name': displayName.trim(),
+          if (email != null) 'email': email.trim(),
+        },
+      ),
+    );
   }
 
   Future<RiderApiProfile> rider() async {

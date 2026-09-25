@@ -30,6 +30,7 @@ class BookingDraft {
     this.deliveryMode = DeliveryMode.single,
     this.dropCount = 1,
     this.extraDrops = const [],
+    this.quotedNetPayable,
   });
 
   final MockLocation? pickup;
@@ -55,6 +56,7 @@ class BookingDraft {
   final DeliveryMode deliveryMode;
   final int dropCount;
   final List<MockLocation> extraDrops;
+  final double? quotedNetPayable;
 
   String get categoryLabel {
     return MockData.parcelCategories
@@ -199,7 +201,8 @@ class BookingDraft {
 
   double get estimatedFare => fareBreakdown.total;
 
-  double get payableTotal => FareEngine.round2(fareQuote.netTotal);
+  double get payableTotal =>
+      quotedNetPayable == null ? 0 : FareEngine.round2(quotedNetPayable!);
 
   double get customerResponsibility {
     switch (whoPays) {
@@ -315,6 +318,8 @@ class BookingDraft {
     DeliveryMode? deliveryMode,
     int? dropCount,
     List<MockLocation>? extraDrops,
+    double? quotedNetPayable,
+    bool clearQuotedNetPayable = false,
   }) {
     return BookingDraft(
       pickup: pickup ?? this.pickup,
@@ -343,6 +348,9 @@ class BookingDraft {
       deliveryMode: deliveryMode ?? this.deliveryMode,
       dropCount: dropCount ?? this.dropCount,
       extraDrops: extraDrops ?? this.extraDrops,
+      quotedNetPayable: clearQuotedNetPayable
+          ? null
+          : (quotedNetPayable ?? this.quotedNetPayable),
     );
   }
 }
@@ -358,11 +366,15 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
       'draft_${DateTime.now().microsecondsSinceEpoch}';
 
   void setPickup(MockLocation location) {
-    state = state.copyWith(pickup: location);
+    state = state.copyWith(pickup: location, clearQuotedNetPayable: true);
   }
 
   void setDrop(MockLocation location) {
-    state = state.copyWith(drop: location);
+    state = state.copyWith(drop: location, clearQuotedNetPayable: true);
+  }
+
+  void applyQuotedPayable(double amount) {
+    state = state.copyWith(quotedNetPayable: amount);
   }
 
   void beginNewBooking() {
@@ -413,7 +425,7 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
     if (extra.length > extraSlots) {
       extra.removeRange(extraSlots, extra.length);
     }
-    state = state.copyWith(extraDrops: extra);
+    state = state.copyWith(extraDrops: extra, clearQuotedNetPayable: true);
   }
 
   void clearDropAt(int index) {
@@ -421,22 +433,14 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
   }
 
   void setVehicle(MockVehicle vehicle) {
-    state = state.copyWith(vehicle: vehicle);
+    state = state.copyWith(vehicle: vehicle, clearQuotedNetPayable: true);
   }
 
   void setServiceFamily(ServiceFamily family) {
-    final List<MockVehicle> options = MockData.vehiclesForFamily(family);
-    if (options.length == 1) {
-      state = state.copyWith(
-        serviceFamily: family,
-        vehicle: options.first,
-      );
-    } else {
-      state = state.copyWith(
-        serviceFamily: family,
-        clearVehicle: true,
-      );
-    }
+    state = state.copyWith(
+      serviceFamily: family,
+      clearVehicle: true,
+    );
   }
 
   void clearServiceFamily() {

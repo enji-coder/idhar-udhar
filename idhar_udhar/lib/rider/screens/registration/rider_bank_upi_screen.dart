@@ -134,7 +134,7 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
             ),
             const SizedBox(height: RiderSpacing.sm),
             Text(
-              'Dummy local data only — no real bank transfer in this build.',
+              'Add the account or UPI ID for your earnings.',
               style: RiderTextStyles.caption,
             ),
             const SizedBox(height: RiderSpacing.xl),
@@ -144,7 +144,7 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
                   RiderTextField(
                     controller: _bankName,
                     label: 'Bank name',
-                    hint: 'HDFC Bank',
+                    hint: 'Bank name',
                     prefixIcon: Icons.account_balance_outlined,
                     errorText: _bankError,
                     textInputAction: TextInputAction.next,
@@ -175,7 +175,7 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
                   RiderTextField(
                     controller: _ifsc,
                     label: 'IFSC',
-                    hint: 'HDFC0001234',
+                    hint: 'IFSC code',
                     prefixIcon: Icons.qr_code_rounded,
                     errorText: _ifscError,
                     textInputAction: TextInputAction.next,
@@ -184,7 +184,7 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
                   RiderTextField(
                     controller: _upi,
                     label: 'UPI ID',
-                    hint: 'name@okhdfc',
+                    hint: 'name@upi',
                     prefixIcon: Icons.currency_rupee_rounded,
                     errorText: _upiError,
                   ),

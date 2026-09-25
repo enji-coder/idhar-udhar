@@ -1,14 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:idhar_udhar/shared/api/wallet_api.dart';
 
 import '../../../../core/constants/app_copy.dart';
 import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
-import '../../../../core/state/session_provider.dart';
+import '../../../../core/state/customer_wallet_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/custom_snack_bar.dart';
+import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/glass_container.dart';
 
 class WalletScreen extends ConsumerStatefulWidget {
@@ -21,6 +25,14 @@ class WalletScreen extends ConsumerStatefulWidget {
 class _WalletScreenState extends ConsumerState<WalletScreen> {
   String? _selectedPaymentId;
   bool _showMethods = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ref.read(customerWalletProvider.notifier).load());
+    });
+  }
 
   IconData _iconFor(WalletPaymentMethodKind kind) {
     switch (kind) {
@@ -38,7 +50,10 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final balance = ref.watch(sessionProvider).walletBalance;
+    final CustomerWalletState wallet = ref.watch(customerWalletProvider);
+    final String balanceLabel = wallet.hasBalance
+        ? '₹${wallet.balance!.toStringAsFixed(0)}'
+        : '—';
     final Map<String, List<WalletPaymentOption>> grouped = {};
     for (final option in MockData.walletPaymentOptions) {
       grouped.putIfAbsent(option.group, () => <WalletPaymentOption>[]).add(option);
@@ -73,12 +88,41 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                       color: AppColors.textSecondary,
                     ),
                   ),
-                  Text(
-                    '₹${balance.toStringAsFixed(0)}',
-                    style: AppTextStyles.headingXL.copyWith(
-                      color: AppColors.orange,
+                  if (wallet.loading)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.4),
+                      ),
+                    )
+                  else
+                    Text(
+                      balanceLabel,
+                      style: AppTextStyles.headingXL.copyWith(
+                        color: AppColors.orange,
+                      ),
                     ),
-                  ),
+                  if (wallet.error != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      wallet.error!,
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    AnimatedPrimaryButton(
+                      label: 'Retry',
+                      height: 44,
+                      onPressed: () {
+                        unawaited(
+                          ref.read(customerWalletProvider.notifier).load(),
+                        );
+                      },
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   AnimatedPrimaryButton(
                     label: _showMethods ? 'Close payment options' : 'Add Money',
@@ -180,56 +224,67 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
             const SizedBox(height: AppSpacing.xl),
             Text('Transactions', style: AppTextStyles.headingS),
             const SizedBox(height: AppSpacing.md),
-            ...MockData.walletTxns.map((txn) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                child: GlassContainer(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: txn.isCredit
-                            ? AppColors.success.withValues(alpha: 0.15)
-                            : AppColors.orange.withValues(alpha: 0.15),
-                        child: Icon(
-                          txn.isCredit
-                              ? Icons.arrow_downward_rounded
-                              : Icons.arrow_upward_rounded,
-                          color: txn.isCredit
-                              ? AppColors.success
-                              : AppColors.orange,
-                          size: 18,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(txn.title, style: AppTextStyles.bodyMedium),
-                            Text(
-                              '${txn.date.day}/${txn.date.month}/${txn.date.year}',
-                              style: AppTextStyles.caption.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        '${txn.isCredit ? '+' : '-'}₹${txn.amount.toStringAsFixed(0)}',
-                        style: AppTextStyles.bodyMedium.copyWith(
-                          color: txn.isCredit
-                              ? AppColors.success
-                              : AppColors.navy,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+            if (wallet.error == null && !wallet.loading && wallet.entries.isEmpty)
+              const GlassContainer(
+                padding: EdgeInsets.all(AppSpacing.lg),
+                child: EmptyState(
+                  title: 'No transactions yet',
+                  subtitle: 'Wallet activity will show up here.',
                 ),
-              );
-            }),
+              )
+            else
+              ...wallet.entries.map((CustomerWalletEntry txn) {
+                final DateTime? date = txn.date;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                  child: GlassContainer(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: txn.isCredit
+                              ? AppColors.success.withValues(alpha: 0.15)
+                              : AppColors.orange.withValues(alpha: 0.15),
+                          child: Icon(
+                            txn.isCredit
+                                ? Icons.arrow_downward_rounded
+                                : Icons.arrow_upward_rounded,
+                            color: txn.isCredit
+                                ? AppColors.success
+                                : AppColors.orange,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(txn.title, style: AppTextStyles.bodyMedium),
+                              if (date != null)
+                                Text(
+                                  '${date.day}/${date.month}/${date.year}',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '${txn.isCredit ? '+' : '-'}₹${txn.amount.toStringAsFixed(0)}',
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: txn.isCredit
+                                ? AppColors.success
+                                : AppColors.navy,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
             if (!_showMethods)
               GlassContainer(
                 depth: GlassDepthLevel.subtle,

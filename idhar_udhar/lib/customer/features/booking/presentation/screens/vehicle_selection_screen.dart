@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/customer/core/constants/asset_paths.dart';
+import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../../../core/constants/app_copy.dart';
 import '../../../../core/data/mock/mock_data.dart';
@@ -14,6 +16,36 @@ import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 
+MockVehicle _vehicleFromCategory(VehicleCategory category) {
+  final String lower = category.name.toLowerCase();
+  final VehicleType type = lower.contains('scoot')
+      ? VehicleType.scooty
+      : lower.contains('bike')
+          ? VehicleType.bike
+          : (lower.contains('auto') || lower.contains('3w'))
+              ? VehicleType.auto
+              : VehicleType.truck;
+  final String image = type == VehicleType.bike || type == VehicleType.scooty
+      ? AssetPaths.bike
+      : type == VehicleType.auto
+          ? AssetPaths.auto
+          : AssetPaths.truck;
+  return MockVehicle(
+    id: category.id,
+    type: type,
+    name: category.name,
+    description: (category.size ?? '').trim().isEmpty
+        ? 'Available for deliveries'
+        : category.size!.trim(),
+    capacity: (category.weightCapacity ?? '').trim().isEmpty
+        ? 'Capacity set by admin'
+        : category.weightCapacity!.trim(),
+    etaMinutes: 0,
+    baseFare: category.baseFare,
+    imagePath: image,
+  );
+}
+
 class VehicleSelectionScreen extends ConsumerWidget {
   const VehicleSelectionScreen({super.key});
 
@@ -21,9 +53,9 @@ class VehicleSelectionScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final catalog = ref.watch(vehicleCategoryCatalogProvider);
     final draft = ref.watch(bookingDraftProvider);
-    final List<MockVehicle> options = MockData.vehiclesForFamily(
-      draft.serviceFamily,
-      catalog: catalog.valueOrNull ?? VehicleCategoryCatalog.active,
+    final List<MockVehicle> options = catalog.maybeWhen(
+      data: (rows) => rows.map(_vehicleFromCategory).toList(growable: false),
+      orElse: () => const <MockVehicle>[],
     );
     final bool showTwoWheelerNote = options.any(MockData.isTwoWheeler) &&
         (draft.serviceFamily == ServiceFamily.twoWheeler ||
@@ -104,7 +136,25 @@ class VehicleSelectionScreen extends ConsumerWidget {
           ],
           const SizedBox(height: AppSpacing.lg),
           Expanded(
-            child: ListView.separated(
+            child: catalog.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : catalog.hasError
+                    ? Center(
+                        child: Text(
+                          'Vehicle categories could not be loaded.',
+                          style: AppTextStyles.bodyMedium,
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : options.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No vehicle categories are available.',
+                              style: AppTextStyles.bodyMedium,
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : ListView.separated(
               itemCount: options.length,
               separatorBuilder: (_, __) =>
                   const SizedBox(height: AppSpacing.md),
@@ -152,7 +202,9 @@ class VehicleSelectionScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: AppSpacing.xs),
                                 Text(
-                                  '${v.capacity} · ${v.etaMinutes} min',
+                                  v.etaMinutes > 0
+                                      ? '${v.capacity} · ${v.etaMinutes} min'
+                                      : v.capacity,
                                   style: AppTextStyles.caption.copyWith(
                                     color: AppColors.navy,
                                     fontWeight: FontWeight.w600,
@@ -176,7 +228,7 @@ class VehicleSelectionScreen extends ConsumerWidget {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                v.fareLabel,
+                                v.baseFare > 0 ? 'Base ${v.fareLabel}' : '',
                                 style: AppTextStyles.headingS.copyWith(
                                   color: AppColors.orange,
                                 ),

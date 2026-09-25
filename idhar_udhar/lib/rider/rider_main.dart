@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:idhar_udhar/shared/api/api_config.dart';
 
 import 'routing/rider_router.dart';
 import 'theme/rider_colors.dart';
@@ -15,6 +16,7 @@ import 'theme/rider_theme.dart';
 /// Isolated from Customer entry / router / theme.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ApiConfig.useProductionDefault();
 
   await SystemChrome.setPreferredOrientations(const [
     DeviceOrientation.portraitUp,

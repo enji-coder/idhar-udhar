@@ -103,14 +103,14 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Estimated Price',
+                        'Fare',
                         style: AppTextStyles.caption.copyWith(
                           color: AppColors.textSecondary,
                         ),
                       ),
                       Text(
-                        '₹${draft.estimatedFare.toStringAsFixed(0)}',
-                        style: AppTextStyles.headingL.copyWith(
+                        'Calculated at summary',
+                        style: AppTextStyles.headingS.copyWith(
                           color: AppColors.orange,
                         ),
                       ),

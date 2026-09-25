@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Release Customer builds do not merge debug/profile manifests.
+         Without INTERNET, session restore DNS/HTTP never completes and Splash waits forever. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <!-- Customer Android Maps key (package-restricted). Do not reuse for Rider. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${mapsApiKey}"
+            tools:replace="android:value" />
+    </application>
+</manifest>

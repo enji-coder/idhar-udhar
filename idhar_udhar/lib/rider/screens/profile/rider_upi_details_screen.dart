@@ -62,7 +62,7 @@ class _RiderUpiDetailsScreenState extends ConsumerState<RiderUpiDetailsScreen> {
     final hasExisting = current.upiId.trim().isNotEmpty;
     ref.read(riderBankProvider.notifier).state = current.copyWith(
       upiId: _upi.text.trim(),
-      upiVerified: true,
+      upiVerified: false,
     );
     setState(() => _editing = false);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -70,9 +70,7 @@ class _RiderUpiDetailsScreenState extends ConsumerState<RiderUpiDetailsScreen> {
         behavior: SnackBarBehavior.floating,
         backgroundColor: RiderColors.secondary,
         content: Text(
-          hasExisting
-              ? 'UPI ID updated successfully'
-              : 'UPI ID added successfully',
+          hasExisting ? 'UPI ID updated' : 'UPI ID added',
           style: RiderTextStyles.bodyMedium.copyWith(
             color: RiderColors.textOnPrimary,
           ),

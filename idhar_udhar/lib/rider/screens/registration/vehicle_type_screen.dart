@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_spacing.dart';
@@ -38,10 +39,10 @@ class _VehicleTypeScreenState extends ConsumerState<VehicleTypeScreen> {
     final catalog = ref.watch(vehicleCategoryCatalogProvider);
     final options = catalog.maybeWhen(
       data: (rows) => rows.where((row) => row.isActive).toList(),
-      orElse: () => VehicleCategoryCatalog.active,
+      orElse: () => const <VehicleCategory>[],
     );
-    final selected = _selected ??
-        (options.isNotEmpty ? options.first.name : 'Bike');
+    final String? selected = _selected ??
+        (options.isNotEmpty ? options.first.name : null);
 
     return RiderScaffold(
       appBar: AppBar(
@@ -53,10 +54,12 @@ class _VehicleTypeScreenState extends ConsumerState<VehicleTypeScreen> {
       ),
       bottom: RiderPrimaryButton(
         label: 'Continue',
-        onPressed: () => context.push(
-          RiderRoutes.vehicleDetails,
-          extra: selected,
-        ),
+        onPressed: selected == null
+            ? null
+            : () => context.push(
+                  RiderRoutes.vehicleDetails,
+                  extra: selected,
+                ),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -69,6 +72,16 @@ class _VehicleTypeScreenState extends ConsumerState<VehicleTypeScreen> {
               style: RiderTextStyles.caption,
             ),
             const SizedBox(height: RiderSpacing.xl),
+            if (catalog.hasError)
+              Text(
+                'Vehicle categories could not be loaded.',
+                style: RiderTextStyles.caption,
+              )
+            else if (!catalog.isLoading && options.isEmpty)
+              Text(
+                'No vehicle categories are available.',
+                style: RiderTextStyles.caption,
+              ),
             for (final category in options) ...[
               RiderVehicleOptionCard(
                 label: category.name,

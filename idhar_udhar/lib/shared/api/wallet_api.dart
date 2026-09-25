@@ -69,6 +69,33 @@ class RiderEarningRow {
   }
 }
 
+class CustomerWalletEntry {
+  const CustomerWalletEntry({
+    required this.id,
+    required this.title,
+    required this.amount,
+    required this.isCredit,
+    this.date,
+  });
+
+  final String id;
+  final String title;
+  final double amount;
+  final bool isCredit;
+  final DateTime? date;
+
+  factory CustomerWalletEntry.fromJson(Map<String, Object?> json) {
+    final String type = jsonString(json['entry_type']) ?? '';
+    return CustomerWalletEntry(
+      id: jsonString(json['wallet_ledger_id']) ?? '',
+      title: type.isEmpty ? 'Wallet' : type,
+      amount: jsonDouble(json['amount']),
+      isCredit: (jsonString(json['direction']) ?? '').toUpperCase() == 'CREDIT',
+      date: jsonDate(json['created_at']),
+    );
+  }
+}
+
 class WalletApi {
   WalletApi(this._client);
 
@@ -108,6 +135,20 @@ class WalletApi {
       data: <String, String>{'amount': amount.toStringAsFixed(2)},
       headers: <String, String>{'Idempotency-Key': _uuid.v4()},
     );
+  }
+
+  Future<RiderWallet> customerWallet() async {
+    return RiderWallet.fromJson(await _client.get('/v1/customer/wallet'));
+  }
+
+  Future<List<CustomerWalletEntry>> customerLedger() async {
+    final Map<String, Object?> body =
+        await _client.get('/v1/customer/wallet/ledger');
+    return jsonList(body['entries'])
+        .map(
+          (Object? item) => CustomerWalletEntry.fromJson(jsonObject(item)),
+        )
+        .toList(growable: false);
   }
 
   Future<List<RiderEarningRow>> earnings() async {

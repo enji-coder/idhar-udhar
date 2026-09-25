@@ -5,7 +5,7 @@ class RiderBankDetails {
     required this.accountNumber,
     required this.ifsc,
     required this.upiId,
-    this.upiVerified = true,
+    this.upiVerified = false,
     this.proofUploaded = false,
   });
 
@@ -16,6 +16,14 @@ class RiderBankDetails {
   final String upiId;
   final bool upiVerified;
   final bool proofUploaded;
+
+  static const RiderBankDetails empty = RiderBankDetails(
+    bankName: '',
+    accountHolder: '',
+    accountNumber: '',
+    ifsc: '',
+    upiId: '',
+  );
 
   String get maskedAccount {
     final String n = accountNumber.replaceAll(RegExp(r'\s'), '');
@@ -60,6 +68,13 @@ class RiderDriverDetails {
   final String mobile;
   final String dateOfBirthLabel;
   final String licenseNumber;
+
+  static const RiderDriverDetails empty = RiderDriverDetails(
+    fullName: '',
+    mobile: '',
+    dateOfBirthLabel: '',
+    licenseNumber: '',
+  );
 
   RiderDriverDetails copyWith({
     String? fullName,

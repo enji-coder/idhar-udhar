@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/state/saved_addresses_provider.dart';
@@ -208,7 +209,7 @@ class _AddressEditorSheetState extends State<_AddressEditorSheet> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
     final String address = _address.text.trim();
     if (address.length < 5) {
       setState(() => _error = 'Enter a valid address');
@@ -216,18 +217,41 @@ class _AddressEditorSheetState extends State<_AddressEditorSheet> {
     }
     final DateTime now = DateTime.now();
     final MockLocation? existing = widget.existing;
+    double? latitude = existing?.latitude;
+    double? longitude = existing?.longitude;
+    String resolvedAddress = address;
+    String city = _city.text.trim();
+    if (latitude == null || longitude == null) {
+      final MapsPlatform platform = MapsPlatform();
+      final ResolvedAddress? resolved = await platform.forwardGeocode(
+        [address, city].where((String part) => part.isNotEmpty).join(', '),
+      );
+      if (resolved != null) {
+        latitude = resolved.latitude;
+        longitude = resolved.longitude;
+        if (resolved.address.isNotEmpty) {
+          resolvedAddress = resolved.address;
+        }
+        if (city.isEmpty && resolved.city.isNotEmpty) {
+          city = resolved.city;
+        }
+      }
+    }
+    if (!mounted) {
+      return;
+    }
     Navigator.of(context).pop(
       MockLocation(
         id: existing?.id ?? 'loc_${now.millisecondsSinceEpoch}',
         label: _label.title,
-        address: address,
-        city: _city.text.trim(),
+        address: resolvedAddress,
+        city: city,
         landmark: _landmark.text.trim(),
         isSaved: true,
         iconName: _label.iconName,
         addressLabel: _label,
-        latitude: existing?.latitude,
-        longitude: existing?.longitude,
+        latitude: latitude,
+        longitude: longitude,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       ),

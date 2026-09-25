@@ -1,0 +1,23 @@
+| #  | Module / Area                              | Status                                                                  |       Completion |
+| -- | ------------------------------------------ | ----------------------------------------------------------------------- | ---------------: |
+| 1  | Customer Mobile Application                | Completed – UI and core customer flows implemented                      |             ~90% |
+| 2  | Rider Mobile Application                   | Completed – UI and core rider flows implemented                         |             ~90% |
+| 3  | Admin Panel                                | Completed and Live                                                      |             ~95% |
+| 4  | Backend / REST APIs                        | Implemented and deployed on AWS                                         |             ~90% |
+| 5  | Production Database                        | PostgreSQL RDS configured and connected                                 |             ~95% |
+| 6  | AWS Production Infrastructure              | ECS, RDS, ALB, Secrets Manager and deployment automation                |             ~90% |
+| 7  | Authentication & Security                  | JWT, sessions, OTP security, rate limiting implemented                  |             ~85% |
+| 8  | Google Maps – Customer                     | Maps, GPS, Places, Geocoding and Routes integrated                      |             ~90% |
+| 9  | Google Maps – Rider                        | Maps, GPS, Places, Geocoding and Routes integrated                      |             ~90% |
+| 10 | Order & Booking Management                 | Core booking, order and fare flows implemented                          |             ~90% |
+| 11 | Fare & Business Rules                      | Fare, rider commission, GST, wallet/COD rules implemented               |             ~95% |
+| 12 | Real SMS OTP                               | MSG91 + DLT integration                                                 |      **Pending** |
+| 13 | Payment Gateway                            | Production integration & end-to-end verification                        |      **Pending** |
+| 14 | Push Notifications                         | Firebase/FCM integration                                                |      **Pending** |
+| 15 | Rider Documents & Proof of Delivery        | S3 storage and production workflow                                      |      **Pending** |
+| 16 | Live Rider Tracking                        | Rider location publishing done; customer-side live location API pending |             ~60% |
+| 17 | Production Monitoring & Security Hardening | Final production audit, alerts and hardening                            |             ~70% |
+| 18 | Complete End-to-End Testing                | Customer + Rider + Admin real-world testing                             |      **Pending** |
+| 19 | Android Production Release                 | Release signing, Play Console and production AAB                        |      **Pending** |
+| 20 | iOS Application / Maps                     | Planned for later phase                                                 | **Future Phase** |
+| 21 | Admin/Web Maps                             | Planned for later phase                                                 | **Future Phase** |

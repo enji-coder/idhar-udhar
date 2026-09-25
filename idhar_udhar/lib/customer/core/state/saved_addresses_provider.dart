@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../config/app_constants.dart';
-import '../data/mock/mock_data.dart';
 import '../data/mock/mock_models.dart';
 
 class SavedAddressesState {
@@ -42,17 +41,21 @@ class SavedAddressesNotifier extends StateNotifier<SavedAddressesState> {
 
   static const String _key = '${AppConstants.prefsPrefix}saved_addresses_v1';
 
+  /// Catalog rows previously written into prefs on first launch.
+  static const Set<String> _catalogSeedIds = <String>{
+    'loc_home',
+    'loc_office',
+    'loc_friend',
+    'loc_other',
+  };
+
   Future<void> load() async {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final String? raw = prefs.getString(_key);
       if (raw == null || raw.isEmpty) {
-        final List<MockLocation> seeded = MockData.locations
-            .where((l) => l.isSaved)
-            .toList(growable: false);
-        await _persist(seeded);
-        state = SavedAddressesState(addresses: seeded);
+        state = const SavedAddressesState();
         return;
       }
       final Object? decoded = jsonDecode(raw);
@@ -62,7 +65,7 @@ class SavedAddressesNotifier extends StateNotifier<SavedAddressesState> {
         );
         return;
       }
-      final List<MockLocation> items = decoded
+      final List<MockLocation> stored = decoded
           .whereType<Map<dynamic, dynamic>>()
           .map(
             (Map<dynamic, dynamic> e) =>
@@ -70,6 +73,12 @@ class SavedAddressesNotifier extends StateNotifier<SavedAddressesState> {
           )
           .where((e) => e.id.isNotEmpty && e.address.trim().isNotEmpty)
           .toList();
+      final List<MockLocation> items = stored
+          .where((MockLocation item) => !_catalogSeedIds.contains(item.id))
+          .toList(growable: false);
+      if (items.length != stored.length) {
+        await _persist(items);
+      }
       state = SavedAddressesState(addresses: items);
     } catch (_) {
       state = const SavedAddressesState(

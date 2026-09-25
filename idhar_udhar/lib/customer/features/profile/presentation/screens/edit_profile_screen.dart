@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -75,9 +77,31 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
       return;
     }
     _saving = true;
-    ref.read(sessionProvider.notifier).setName(_name.text);
-    ref.read(sessionProvider.notifier).setEmail(_email.text.trim());
-    context.pop();
+    unawaited(_persist());
+  }
+
+  Future<void> _persist() async {
+    try {
+      await ref.read(sessionProvider.notifier).persistProfile(
+            name: _name.text,
+            email: _email.text.trim(),
+          );
+      if (!mounted) {
+        return;
+      }
+      context.pop();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save your profile. Try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override

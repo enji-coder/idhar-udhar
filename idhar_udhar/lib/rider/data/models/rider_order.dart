@@ -92,8 +92,8 @@ class RiderOrder {
     this.tripAmount = 0,
     this.riderAmount = 0,
     this.companyShare = 0,
-    this.officeDistanceKm = 5,
-    this.officeCompensation = 40,
+    this.officeDistanceKm = 0,
+    this.officeCompensation = 0,
     this.customerResponsibility = 0,
     this.receiverResponsibility = 0,
     this.customerPaid = 0,
@@ -103,6 +103,10 @@ class RiderOrder {
     this.receiverOnline = 0,
     this.receiverCash = 0,
     this.paymentStatusLabel = 'UNPAID',
+    this.pickupLatitude,
+    this.pickupLongitude,
+    this.dropLatitude,
+    this.dropLongitude,
   });
 
   final String id;
@@ -131,6 +135,15 @@ class RiderOrder {
   final double receiverOnline;
   final double receiverCash;
   final String paymentStatusLabel;
+  final double? pickupLatitude;
+  final double? pickupLongitude;
+  final double? dropLatitude;
+  final double? dropLongitude;
+
+  bool get hasPickupCoords =>
+      pickupLatitude != null && pickupLongitude != null;
+
+  bool get hasDropCoords => dropLatitude != null && dropLongitude != null;
 
   double get cashCollected => customerCash + receiverCash;
 

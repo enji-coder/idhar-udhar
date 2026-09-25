@@ -59,6 +59,7 @@ class ApiOrder {
     this.riderProfileId,
     this.stops = const <ApiStop>[],
     this.tripFare,
+    this.riderAmount,
     this.distanceKm,
     this.fareQuoteId,
   });
@@ -73,6 +74,7 @@ class ApiOrder {
   final String? riderProfileId;
   final List<ApiStop> stops;
   final double? tripFare;
+  final double? riderAmount;
   final double? distanceKm;
   final String? fareQuoteId;
 
@@ -93,6 +95,9 @@ class ApiOrder {
       stops: jsonList(json['stops'])
           .map((Object? item) => ApiStop.fromJson(jsonObject(item)))
           .toList(growable: false),
+      riderAmount: json['rider_amount'] == null
+          ? null
+          : jsonDouble(json['rider_amount']),
       tripFare: json['trip_fare'] != null
           ? jsonDouble(json['trip_fare'])
           : (snapshot['trip_fare'] != null

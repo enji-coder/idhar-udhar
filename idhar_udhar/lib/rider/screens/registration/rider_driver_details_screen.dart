@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
-import '../../data/dummy/dummy_rider_data.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/models/rider_bank_details.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 import '../../widgets/rider_glass_card.dart';
@@ -35,13 +36,19 @@ class _RiderDriverDetailsScreenState
   @override
   void initState() {
     super.initState();
-    const d = DummyRiderData.driver;
-    _name = TextEditingController(text: d.fullName);
-    _mobile = TextEditingController(
-      text: DummyRiderData.defaultMobileDigits,
+    final stored = ref.read(riderDriverProvider);
+    final String sessionDigits = riderPhoneDigits(
+      ref.read(riderSessionProvider).phone,
     );
-    _dob = TextEditingController(text: d.dateOfBirthLabel);
-    _license = TextEditingController(text: d.licenseNumber);
+    final String storedDigits = riderPhoneDigits(stored.mobile);
+    _name = TextEditingController(text: stored.fullName);
+    _mobile = TextEditingController(
+      text: storedDigits.length == 10
+          ? storedDigits
+          : (sessionDigits.length == 10 ? sessionDigits : ''),
+    );
+    _dob = TextEditingController(text: stored.dateOfBirthLabel);
+    _license = TextEditingController(text: stored.licenseNumber);
   }
 
   @override
@@ -73,6 +80,20 @@ class _RiderDriverDetailsScreenState
       _licenseError = licenseError;
     });
     return nameError == null && mobileError == null && licenseError == null;
+  }
+
+  Future<void> _pickDob() async {
+    final DateTime now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year - 25, 1, 1),
+      firstDate: DateTime(1950),
+      lastDate: DateTime(now.year - 18, now.month, now.day),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _dob.text = DateFormat('dd MMM yyyy').format(picked);
+    });
   }
 
   void _continue() {
@@ -141,14 +162,16 @@ class _RiderDriverDetailsScreenState
                   RiderTextField(
                     controller: _dob,
                     label: 'Date of birth',
+                    hint: 'Select date of birth',
                     prefixIcon: Icons.calendar_month_rounded,
                     readOnly: true,
+                    onTap: _pickDob,
                   ),
                   const SizedBox(height: RiderSpacing.lg),
                   RiderTextField(
                     controller: _license,
                     label: 'Driving licence number',
-                    hint: 'GJ05 20190012345',
+                    hint: 'Driving licence number',
                     prefixIcon: Icons.credit_card_rounded,
                     errorText: _licenseError,
                   ),

@@ -112,6 +112,9 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
     if (_expired || order == null) {
       return;
     }
+    if (!ref.read(riderSessionProvider).isApproved) {
+      return;
+    }
     if (riderIsSuspended(ref)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -170,6 +173,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       );
     }
     final RiderOrder order = _order!;
+    final bool approved = ref.watch(riderSessionProvider).isApproved;
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -203,7 +207,8 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                   flex: 2,
                   child: RiderPrimaryButton(
                     label: 'Accept',
-                    onPressed: _accept,
+                    enabled: approved,
+                    onPressed: approved ? _accept : null,
                   ),
                 ),
               ],

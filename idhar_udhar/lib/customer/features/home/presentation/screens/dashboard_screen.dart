@@ -30,9 +30,35 @@ class DashboardScreen extends ConsumerWidget {
     return 'Good Evening,';
   }
 
+  /// Selected pickup from the booking draft. The untouched catalog seed is
+  /// not a customer choice, so the header asks them to pick a location.
+  String _selectedLocationLabel(BookingDraft draft) {
+    final MockLocation? pickup = draft.pickup;
+    if (pickup == null) {
+      return 'Select location';
+    }
+    final MockLocation seeded = MockData.locations[4];
+    final bool untouchedSeed = pickup.id == seeded.id &&
+        pickup.address.trim() == seeded.address.trim();
+    if (untouchedSeed) {
+      return 'Select location';
+    }
+    final String address = pickup.address.trim();
+    if (address.isNotEmpty) {
+      return address;
+    }
+    final String label = pickup.label.trim();
+    if (label.isNotEmpty) {
+      return label;
+    }
+    return 'Select location';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(sessionProvider);
+    final BookingDraft draft = ref.watch(bookingDraftProvider);
+    final String locationLabel = _selectedLocationLabel(draft);
     final String name = session.user?.name.trim().isNotEmpty == true
         ? session.user!.name.trim().split(' ').first
         : 'there';
@@ -78,31 +104,35 @@ class DashboardScreen extends ConsumerWidget {
                             ),
                           ),
                           const SizedBox(height: AppSpacing.xs),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.location_on_rounded,
-                                color: AppColors.orange,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  MockData.locations[3].label,
-                                  style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.navy,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                          GestureDetector(
+                            onTap: () => context.push(AppRoutes.bookPickup),
+                            behavior: HitTestBehavior.opaque,
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.location_on_rounded,
+                                  color: AppColors.orange,
+                                  size: 16,
                                 ),
-                              ),
-                              Icon(
-                                Icons.keyboard_arrow_down_rounded,
-                                color: AppColors.navy.withValues(alpha: 0.55),
-                                size: 18,
-                              ),
-                            ],
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    locationLabel,
+                                    style: AppTextStyles.caption.copyWith(
+                                      color: AppColors.navy,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.keyboard_arrow_down_rounded,
+                                  color: AppColors.navy.withValues(alpha: 0.55),
+                                  size: 18,
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -162,64 +192,71 @@ class DashboardScreen extends ConsumerWidget {
                   padding: EdgeInsets.all(
                     compact ? AppSpacing.lg : AppSpacing.xl,
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const TopLogo(height: 36),
-                            const SizedBox(height: AppSpacing.md),
-                            Text.rich(
-                              TextSpan(
-                                style: AppTextStyles.headingM.copyWith(
-                                  color: AppColors.navy,
-                                  fontSize: compact ? 20 : 22,
-                                  height: 1.2,
-                                ),
-                                children: const [
-                                  TextSpan(text: 'Need to send '),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const TopLogo(height: 36),
+                                const SizedBox(height: AppSpacing.md),
+                                Text.rich(
                                   TextSpan(
-                                    text: 'anything?',
-                                    style: TextStyle(color: AppColors.orange),
+                                    style: AppTextStyles.headingM.copyWith(
+                                      color: AppColors.navy,
+                                      fontSize: compact ? 20 : 22,
+                                      height: 1.2,
+                                    ),
+                                    children: const [
+                                      TextSpan(text: 'Need to send '),
+                                      TextSpan(
+                                        text: 'anything?',
+                                        style: TextStyle(
+                                          color: AppColors.orange,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                                Text(
+                                  'From documents to furniture, IDHAR UDHAR delivers it safely.',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: AppSpacing.sm),
-                            Text(
-                              'From documents to furniture, IDHAR UDHAR delivers it safely.',
-                              style: AppTextStyles.caption.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(height: AppSpacing.lg),
-                            AnimatedPrimaryButton(
-                              label: 'Book a Delivery',
-                              height: compact ? 48 : 52,
-                              onPressed: () {
-                                ref
-                                    .read(bookingDraftProvider.notifier)
-                                    .beginNewBooking();
-                                ref
-                                    .read(bookingDraftProvider.notifier)
-                                    .clearServiceFamily();
-                                context.push(AppRoutes.bookPickup);
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      SizedBox(
-                        width: (size.width * 0.28).clamp(96.0, 130.0),
-                        child: FloatingAnimation(
-                          child: SafeAssetImage(
-                            path: AssetPaths.truck,
-                            fit: BoxFit.contain,
-                            height: compact ? 110 : 130,
                           ),
-                        ),
+                          const SizedBox(width: AppSpacing.sm),
+                          SizedBox(
+                            width: (size.width * 0.28).clamp(96.0, 130.0),
+                            child: FloatingAnimation(
+                              child: SafeAssetImage(
+                                path: AssetPaths.truck,
+                                fit: BoxFit.contain,
+                                height: compact ? 110 : 130,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      AnimatedPrimaryButton(
+                        label: 'Book a Delivery',
+                        height: compact ? 48 : 52,
+                        onPressed: () {
+                          ref
+                              .read(bookingDraftProvider.notifier)
+                              .beginNewBooking();
+                          ref
+                              .read(bookingDraftProvider.notifier)
+                              .clearServiceFamily();
+                          context.push(AppRoutes.bookPickup);
+                        },
                       ),
                     ],
                   ),

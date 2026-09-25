@@ -50,7 +50,8 @@ abstract final class RiderPermissions {
   }
 }
 
-/// Persist dummy login, then Dashboard or permission gate. Never logs out.
+/// Authenticated riders go to the dashboard or the permission gate.
+/// Pending verification and empty profile fields do not restart registration.
 Future<void> riderEnterAfterAuth(BuildContext context) async {
   await RiderPrefs.setLoggedIn();
   if (!context.mounted) return;

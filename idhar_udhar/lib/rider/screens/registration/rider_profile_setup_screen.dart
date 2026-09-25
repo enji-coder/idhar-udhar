@@ -1,32 +1,43 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
-import '../../data/dummy/dummy_rider_data.dart';
+import '../../data/dummy/dummy_rider_repository.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
+import '../../widgets/rider_bottom_sheet.dart';
 import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_text_field.dart';
 
-class RiderProfileSetupScreen extends StatefulWidget {
+const List<String> _languages = <String>['English', 'Hindi', 'Gujarati'];
+
+class RiderProfileSetupScreen extends ConsumerStatefulWidget {
   const RiderProfileSetupScreen({super.key});
 
   @override
-  State<RiderProfileSetupScreen> createState() =>
+  ConsumerState<RiderProfileSetupScreen> createState() =>
       _RiderProfileSetupScreenState();
 }
 
-class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
+class _RiderProfileSetupScreenState
+    extends ConsumerState<RiderProfileSetupScreen> {
   late final TextEditingController _name;
   late final TextEditingController _mobile;
   late final TextEditingController _email;
   late final TextEditingController _dob;
-  late String _language;
-  bool _photoAdded = false;
+  String? _language;
+  DateTime? _dobDate;
+  String? _photoPath;
   String? _nameError;
   String? _emailError;
   String? _dobError;
@@ -34,14 +45,23 @@ class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
   @override
   void initState() {
     super.initState();
-    final p = DummyRiderData.profile;
-    _name = TextEditingController(text: p.name);
-    _mobile = TextEditingController(text: DummyRiderData.defaultMobile);
-    _email = TextEditingController(text: p.email);
-    _dob = TextEditingController(
-      text: DateFormat('dd MMM yyyy').format(p.dateOfBirth),
+    final profile = ref.read(riderProfileStateProvider);
+    final String phone = formatRiderPhone(
+      profile.mobile.isNotEmpty
+          ? profile.mobile
+          : ref.read(riderSessionProvider).phone,
     );
-    _language = p.language;
+    _name = TextEditingController(text: profile.name);
+    _mobile = TextEditingController(text: phone);
+    _email = TextEditingController(text: profile.email);
+    _dobDate = profile.dateOfBirth;
+    _dob = TextEditingController(
+      text: _dobDate == null
+          ? ''
+          : DateFormat('dd MMM yyyy').format(_dobDate!),
+    );
+    _language = profile.language.trim().isEmpty ? null : profile.language;
+    _photoPath = profile.photoUrl;
   }
 
   @override
@@ -76,10 +96,11 @@ class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
   }
 
   Future<void> _pickDob() async {
-    final now = DateTime.now();
+    final DateTime now = DateTime.now();
+    final DateTime adultDefault = DateTime(now.year - 25, 1, 1);
     final picked = await showDatePicker(
       context: context,
-      initialDate: DummyRiderData.profile.dateOfBirth,
+      initialDate: _dobDate ?? adultDefault,
       firstDate: DateTime(1950),
       lastDate: DateTime(now.year - 18, now.month, now.day),
       builder: (context, child) {
@@ -95,14 +116,50 @@ class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
     );
     if (picked != null) {
       setState(() {
+        _dobDate = picked;
         _dob.text = DateFormat('dd MMM yyyy').format(picked);
         _dobError = null;
       });
     }
   }
 
+  Future<void> _pickPhoto() async {
+    final ImageSource? source = await showRiderBottomSheet<ImageSource>(
+      context: context,
+      title: 'Profile picture',
+      actions: const <RiderSheetAction<ImageSource>>[
+        RiderSheetAction<ImageSource>(
+          label: 'Camera',
+          icon: Icons.photo_camera_outlined,
+          value: ImageSource.camera,
+        ),
+        RiderSheetAction<ImageSource>(
+          label: 'Gallery',
+          icon: Icons.photo_library_outlined,
+          value: ImageSource.gallery,
+        ),
+      ],
+    );
+    if (source == null || !mounted) return;
+    final XFile? photo = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+    if (photo == null || !mounted) return;
+    setState(() => _photoPath = photo.path);
+  }
+
   void _continue() {
     if (!_validate()) return;
+    final current = ref.read(riderProfileStateProvider);
+    ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
+      name: _name.text.trim(),
+      mobile: _mobile.text.trim(),
+      email: _email.text.trim(),
+      dateOfBirth: _dobDate,
+      language: _language ?? '',
+      photoUrl: _photoPath,
+    );
     context.push(RiderRoutes.vehicleType);
   }
 
@@ -124,28 +181,30 @@ class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
         child: Column(
           children: [
             GestureDetector(
-              onTap: () => setState(() => _photoAdded = true),
+              onTap: _pickPhoto,
               child: Column(
                 children: [
                   CircleAvatar(
                     radius: 48,
                     backgroundColor:
                         RiderColors.primary.withValues(alpha: 0.15),
-                    child: _photoAdded
+                    backgroundImage: _photoPath != null &&
+                            _photoPath!.isNotEmpty &&
+                            !kIsWeb &&
+                            File(_photoPath!).existsSync()
+                        ? FileImage(File(_photoPath!))
+                        : null,
+                    child: _photoPath == null
                         ? const Icon(
-                            Icons.person_rounded,
-                            size: 52,
-                            color: RiderColors.primary,
-                          )
-                        : const Icon(
                             Icons.add_a_photo_rounded,
                             size: 32,
                             color: RiderColors.primary,
-                          ),
+                          )
+                        : null,
                   ),
                   const SizedBox(height: RiderSpacing.sm),
                   Text(
-                    _photoAdded ? 'Photo added (demo)' : 'Add profile photo',
+                    'Add profile photo',
                     style: RiderTextStyles.caption.copyWith(
                       color: RiderColors.primary,
                       fontWeight: FontWeight.w600,
@@ -211,6 +270,7 @@ class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
                   const SizedBox(height: RiderSpacing.sm),
                   DropdownButtonFormField<String>(
                     initialValue: _language,
+                    hint: Text('Select language', style: RiderTextStyles.hint),
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: RiderColors.surface.withValues(alpha: 0.92),
@@ -236,7 +296,7 @@ class _RiderProfileSetupScreenState extends State<RiderProfileSetupScreen> {
                         ),
                       ),
                     ),
-                    items: DummyRiderData.languages
+                    items: _languages
                         .map(
                           (l) => DropdownMenuItem<String>(
                             value: l,

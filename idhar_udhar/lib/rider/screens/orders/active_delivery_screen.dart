@@ -5,25 +5,34 @@ import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 import 'package:intl/intl.dart';
 
-import '../../state/rider_session.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
+import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
+import '../../widgets/rider_delivery_map.dart';
 import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_primary_button.dart';
-import '../../widgets/rider_secondary_button.dart';
 import '../../widgets/rider_scaffold.dart';
+import '../../widgets/rider_secondary_button.dart';
 import '../../widgets/rider_verification_timeline.dart';
 
-class ActiveDeliveryScreen extends ConsumerWidget {
+class ActiveDeliveryScreen extends ConsumerStatefulWidget {
   const ActiveDeliveryScreen({super.key});
 
+  @override
+  ConsumerState<ActiveDeliveryScreen> createState() =>
+      _ActiveDeliveryScreenState();
+}
+
+class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen> {
   static const List<DeliveryLifecycleStatus> _happyPath = [
     DeliveryLifecycleStatus.accepted,
     DeliveryLifecycleStatus.goingToPickup,
@@ -33,11 +42,48 @@ class ActiveDeliveryScreen extends ConsumerWidget {
     DeliveryLifecycleStatus.delivered,
   ];
 
+  RiderLocationPublisher? _publisher;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final order =
-        ref.watch(activeOrderProvider) ??
-        ref.watch(dummyRiderRepositoryProvider).getIncomingOrder();
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _publisher = RiderLocationPublisher(
+        location: ref.read(deviceLocationServiceProvider),
+        api: ref.read(riderApiProvider),
+      )..start();
+    });
+  }
+
+  @override
+  void dispose() {
+    _publisher?.stop();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final RiderOrder? order = ref.watch(activeOrderProvider);
+    if (order == null) {
+      return RiderScaffold(
+        appBar: AppBar(
+          title: const Text('Delivery'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.go(RiderRoutes.dashboard),
+          ),
+        ),
+        body: Center(
+          child: Text(
+            'No active order.',
+            style: RiderTextStyles.caption,
+          ),
+        ),
+      );
+    }
     final status = ref.watch(deliveryStatusProvider);
     final statuses = _happyPath.map((e) => e.label).toList();
     final int currentIndex = status ==
@@ -176,6 +222,8 @@ class ActiveDeliveryScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            RiderDeliveryMap(order: order, status: status),
+            const SizedBox(height: RiderSpacing.lg),
             RiderGlassCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

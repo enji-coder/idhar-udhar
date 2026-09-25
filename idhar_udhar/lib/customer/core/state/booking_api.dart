@@ -12,28 +12,36 @@ class BackendQuoteHold {
   const BackendQuoteHold({
     required this.orderId,
     required this.quote,
+    required this.vehicleCategoryId,
   });
 
   final String orderId;
   final ApiQuote quote;
+  final String vehicleCategoryId;
 }
 
 final backendQuoteHoldProvider =
     StateProvider<BackendQuoteHold?>((ref) => null);
 
 Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
-  final BackendQuoteHold? existing = ref.read(backendQuoteHoldProvider);
-  if (existing != null) {
-    return existing;
-  }
-  if (!ApiConfig.hasCatalogIds) {
+  final BookingDraft draft = ref.read(bookingDraftProvider);
+  final String? vehicleCategoryId = draft.vehicle?.id;
+  if (vehicleCategoryId == null || vehicleCategoryId.isEmpty) {
     throw const ApiException(
-      code: 'CITY_INVALID',
-      message:
-          'Delivery catalog is not configured for this build. Set IU_CITY_ID and IU_VEHICLE_CATEGORY_ID.',
+      code: 'VALIDATION_ERROR',
+      message: 'Select a vehicle category before booking.',
     );
   }
-  final BookingDraft draft = ref.read(bookingDraftProvider);
+  final BackendQuoteHold? existing = ref.read(backendQuoteHoldProvider);
+  if (existing != null && existing.vehicleCategoryId == vehicleCategoryId) {
+    return existing;
+  }
+  if (ApiConfig.cityId.trim().isEmpty) {
+    throw const ApiException(
+      code: 'CITY_INVALID',
+      message: 'Delivery city is not configured for this build. Set IU_CITY_ID.',
+    );
+  }
   final String? blocked = draft.incompleteStopMessage;
   if (blocked != null) {
     throw ApiException(code: 'INVALID_STOPS', message: blocked);
@@ -76,7 +84,7 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
   final OrdersApi api = ref.read(ordersApiProvider);
   final ApiOrder created = await api.create(
     cityId: ApiConfig.cityId,
-    vehicleCategoryId: ApiConfig.vehicleCategoryId,
+    vehicleCategoryId: vehicleCategoryId,
     stops: stops,
     idempotencyKey: const Uuid().v4(),
   );
@@ -84,8 +92,10 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
   final BackendQuoteHold hold = BackendQuoteHold(
     orderId: created.orderId,
     quote: quote,
+    vehicleCategoryId: vehicleCategoryId,
   );
   ref.read(backendQuoteHoldProvider.notifier).state = hold;
+  ref.read(bookingDraftProvider.notifier).applyQuotedPayable(quote.netPayable);
   return hold;
 }
 

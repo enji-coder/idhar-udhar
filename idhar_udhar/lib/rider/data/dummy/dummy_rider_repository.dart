@@ -1,53 +1,38 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/recent_activity.dart';
-import '../models/rider_announcement.dart';
 import '../models/rider_bank_details.dart';
 import '../models/rider_document.dart';
 import '../models/rider_earnings.dart';
 import '../models/rider_order.dart';
 import '../models/rider_profile.dart';
 import '../models/vehicle_info.dart';
-import 'dummy_rider_data.dart';
 
 /// Local dummy repository — swap implementation later for API clients.
 class DummyRiderRepository {
-  RiderProfile getProfile() => DummyRiderData.profile;
+  RiderProfile getProfile() => RiderProfile.empty;
 
-  VehicleInfo getVehicle() => DummyRiderData.vehicle;
+  VehicleInfo getVehicle() => VehicleInfo.empty;
 
-  RiderBankDetails getBank() => DummyRiderData.bank;
+  RiderBankDetails getBank() => RiderBankDetails.empty;
 
-  RiderDriverDetails getDriver() => DummyRiderData.driver;
+  RiderDriverDetails getDriver() => RiderDriverDetails.empty;
 
-  List<RiderDocument> getDocuments() =>
-      List<RiderDocument>.from(DummyRiderData.documents);
+  List<RiderDocument> getDocuments() => _blankDocuments();
 
-  List<RiderDocument> getRegistrationDocuments() =>
-      List<RiderDocument>.from(DummyRiderData.registrationDocuments);
+  List<RiderDocument> getRegistrationDocuments() => _blankDocuments();
 
-  List<RiderAnnouncement> getAnnouncements() =>
-      List<RiderAnnouncement>.from(DummyRiderData.announcements);
-
-  RiderOrder getIncomingOrder() => DummyRiderData.incomingOrder;
-
-  RiderEarnings getEarnings() => DummyRiderData.earnings;
-
-  double getWalletBalance() => DummyRiderData.walletBalance;
-
-  List<RecentActivityItem> getRecentActivity() =>
-      List<RecentActivityItem>.from(DummyRiderData.recentActivity);
-
-  List<RecentActivityItem> getDeliveryHistory() =>
-      List<RecentActivityItem>.from(DummyRiderData.deliveryHistory);
-
-  List<VerificationStep> getVerificationSteps({required bool complete}) =>
-      complete
-          ? DummyRiderData.verificationComplete
-          : DummyRiderData.verificationInProgress;
-
-  bool validateOtp(String otp) =>
-      otp.replaceAll(RegExp(r'\D'), '') == DummyRiderData.otp;
+  List<VerificationStep> getVerificationSteps({required bool complete}) {
+    return const <VerificationStep>[
+      VerificationStep(
+        title: 'Waiting for review',
+        state: VerificationStepState.active,
+      ),
+      VerificationStep(
+        title: 'Account activation',
+        state: VerificationStepState.pending,
+      ),
+    ];
+  }
 
   Future<void> simulateLatency({
     Duration delay = const Duration(milliseconds: 450),
@@ -61,27 +46,30 @@ final dummyRiderRepositoryProvider = Provider<DummyRiderRepository>(
 
 final riderOnlineProvider = StateProvider<bool>((ref) => false);
 
-final riderWalletBalanceProvider =
-    StateProvider<double>((ref) => DummyRiderData.walletBalance);
+final riderWalletBalanceProvider = StateProvider<double>((ref) => 0);
 
 final riderVehicleProvider =
-    StateProvider<VehicleInfo>((ref) => DummyRiderData.vehicle);
+    StateProvider<VehicleInfo>((ref) => VehicleInfo.empty);
 
 final riderBankProvider =
-    StateProvider<RiderBankDetails>((ref) => DummyRiderData.bank);
+    StateProvider<RiderBankDetails>((ref) => RiderBankDetails.empty);
 
 final riderProfileStateProvider =
-    StateProvider<RiderProfile>((ref) => DummyRiderData.profile);
+    StateProvider<RiderProfile>((ref) => RiderProfile.empty);
 
 final riderDriverProvider =
-    StateProvider<RiderDriverDetails>((ref) => DummyRiderData.driver);
+    StateProvider<RiderDriverDetails>((ref) => RiderDriverDetails.empty);
+
+List<RiderDocument> _blankDocuments() => <RiderDocument>[
+      for (final RiderDocumentKind kind in RiderDocumentKind.values)
+        RiderDocument(
+          kind: kind,
+          status: RiderDocumentStatus.uploadRequired,
+        ),
+    ];
 
 final riderDocumentsProvider = StateProvider<List<RiderDocument>>(
-  (ref) => List<RiderDocument>.from(DummyRiderData.documents),
-);
-
-final riderDeliveryHistoryProvider = StateProvider<List<RecentActivityItem>>(
-  (ref) => List<RecentActivityItem>.from(DummyRiderData.deliveryHistory),
+  (ref) => _blankDocuments(),
 );
 
 final deliveryStatusProvider =

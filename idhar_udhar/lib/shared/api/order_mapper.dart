@@ -166,11 +166,15 @@ abstract final class OrderMapper {
       pickup: mapped?.pickup.address ?? 'Pickup',
       drop: mapped?.drop.address ?? 'Drop',
       distanceKm: order?.distanceKm ?? 0,
-      estimatedEarnings: order?.tripFare ?? 0,
-      estimatedMinutes: 25,
+      estimatedEarnings: order?.riderAmount ?? offer.riderAmount ?? 0,
+      estimatedMinutes: 0,
       customerMaskedName: 'Customer',
       customerMaskedPhone: '••••',
-      tripAmount: order?.tripFare ?? 0,
+      tripAmount: order?.riderAmount ?? offer.riderAmount ?? 0,
+      pickupLatitude: mapped?.pickup.latitude,
+      pickupLongitude: mapped?.pickup.longitude,
+      dropLatitude: mapped?.drop.latitude,
+      dropLongitude: mapped?.drop.longitude,
     );
   }
 

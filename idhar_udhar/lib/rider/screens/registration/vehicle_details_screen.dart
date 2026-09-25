@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../data/dummy/dummy_rider_data.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/models/vehicle_info.dart';
 import '../../routing/rider_routes.dart';
@@ -46,18 +45,22 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    final v = widget.editMode
-        ? ref.read(riderVehicleProvider)
-        : DummyRiderData.vehicle;
+    final VehicleInfo stored = ref.read(riderVehicleProvider);
+    final bool useStored = stored.hasDetails;
     _type = widget.vehicleType ??
         (widget.categoryName != null
             ? RiderVehicleTypeX.fromLabel(widget.categoryName)
-            : v.type);
-    _categoryName = widget.categoryName ?? v.categoryName ?? _type.label;
-    _number = TextEditingController(text: v.number);
-    _model = TextEditingController(text: v.model);
-    _color = TextEditingController(text: v.color);
-    _year = TextEditingController(text: '${v.manufacturingYear}');
+            : (useStored ? stored.type : RiderVehicleType.bike));
+    _categoryName = widget.categoryName ??
+        (useStored ? (stored.categoryName ?? '') : '');
+    _number = TextEditingController(text: useStored ? stored.number : '');
+    _model = TextEditingController(text: useStored ? stored.model : '');
+    _color = TextEditingController(text: useStored ? stored.color : '');
+    _year = TextEditingController(
+      text: useStored && stored.manufacturingYear > 0
+          ? '${stored.manufacturingYear}'
+          : '',
+    );
   }
 
   @override
@@ -135,7 +138,12 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('$_categoryName details', style: RiderTextStyles.heading),
+            Text(
+              _categoryName.trim().isEmpty
+                  ? 'Vehicle details'
+                  : '$_categoryName details',
+              style: RiderTextStyles.heading,
+            ),
             const SizedBox(height: RiderSpacing.sm),
             Text(
               'Enter accurate details matching your RC document.',
@@ -148,7 +156,7 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
                   RiderTextField(
                     controller: _number,
                     label: 'Vehicle number',
-                    hint: 'GJ 05 AB 1234',
+                    hint: 'Vehicle number',
                     prefixIcon: Icons.pin_outlined,
                     errorText: _numberError,
                     textInputAction: TextInputAction.next,
@@ -157,7 +165,7 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
                   RiderTextField(
                     controller: _model,
                     label: 'Vehicle model',
-                    hint: 'Honda Shine',
+                    hint: 'Vehicle model',
                     prefixIcon: Icons.two_wheeler_rounded,
                     errorText: _modelError,
                     textInputAction: TextInputAction.next,
@@ -166,7 +174,7 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
                   RiderTextField(
                     controller: _color,
                     label: 'Vehicle color',
-                    hint: 'Black',
+                    hint: 'Vehicle color',
                     prefixIcon: Icons.palette_outlined,
                     errorText: _colorError,
                     textInputAction: TextInputAction.next,
@@ -175,7 +183,7 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
                   RiderTextField(
                     controller: _year,
                     label: 'Manufacturing year',
-                    hint: '2023',
+                    hint: 'Year',
                     prefixIcon: Icons.calendar_today_outlined,
                     keyboardType: TextInputType.number,
                     maxLength: 4,

@@ -1,12 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 
-import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_draft_provider.dart';
+import '../../../../core/state/recent_locations_provider.dart';
 import '../../../../core/state/saved_addresses_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
@@ -14,6 +17,9 @@ import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
+import '../widgets/location_source_actions.dart';
+import '../widgets/saved_address_picker_sheet.dart';
+import 'map_location_picker_screen.dart';
 
 class DropLocationScreen extends ConsumerStatefulWidget {
   const DropLocationScreen({super.key});
@@ -24,6 +30,8 @@ class DropLocationScreen extends ConsumerStatefulWidget {
 
 class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   final TextEditingController _search = TextEditingController();
+  final FocusNode _singleFocus = FocusNode();
+  final GlobalKey _singleSearchKey = GlobalKey();
   final List<TextEditingController> _dropFields = List<TextEditingController>.generate(
     BookingLimits.maxDeliveryStops,
     (_) => TextEditingController(),
@@ -42,6 +50,10 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   /// Active slot for suggestions. Kept after unfocus so a tap on a place
   /// is not lost when the IME dismisses and rebuilds the sliver away.
   int? _activeDropIndex;
+  PlacesSearchSession? _places;
+  List<PlaceSuggestion> _placeSuggestions = const <PlaceSuggestion>[];
+  Timer? _geocodeDebounce;
+  bool _resolvingPlace = false;
 
   @override
   void initState() {
@@ -49,11 +61,25 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     for (int i = 0; i < _dropFocus.length; i++) {
       _dropFocus[i].addListener(() => _onDropFocusChanged(i));
     }
+    _singleFocus.addListener(() {
+      if (_singleFocus.hasFocus) {
+        _ensureSingleSearchVisible();
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _places = PlacesSearchSession(ref.read(placesServiceProvider));
+    });
   }
 
   @override
   void dispose() {
+    _places?.dispose();
+    _geocodeDebounce?.cancel();
     _search.dispose();
+    _singleFocus.dispose();
     for (final TextEditingController controller in _dropFields) {
       controller.dispose();
     }
@@ -71,7 +97,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   }
 
   void _ensureDropVisible(int index) {
-    Future<void>.delayed(const Duration(milliseconds: 320), () {
+    void reveal() {
       if (!mounted) {
         return;
       }
@@ -81,10 +107,33 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
           fieldContext,
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
-          alignment: 0.12,
+          alignment: 0.05,
         );
       }
-    });
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => reveal());
+    Future<void>.delayed(const Duration(milliseconds: 320), reveal);
+  }
+
+  void _ensureSingleSearchVisible() {
+    void reveal() {
+      if (!mounted) {
+        return;
+      }
+      final BuildContext? fieldContext = _singleSearchKey.currentContext;
+      if (fieldContext != null && fieldContext.mounted) {
+        Scrollable.ensureVisible(
+          fieldContext,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+          alignment: 0.05,
+        );
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => reveal());
+    Future<void>.delayed(const Duration(milliseconds: 320), reveal);
   }
 
   @override
@@ -170,63 +219,105 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   }
 
   Widget _buildSingleBody(BookingDraft draft) {
-    final List<MockLocation> places = _filteredPlaces(draft, _search.text);
+    final List<MockLocation> recents = ref.watch(recentLocationsProvider);
+    final bool showSuggestions =
+        _search.text.trim().length >= 2 && _placeSuggestions.isNotEmpty;
+    final double keyboard = MediaQuery.viewInsetsOf(context).bottom;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildHeader(draft),
-        const SizedBox(height: AppSpacing.md),
-        if (draft.pickup != null) _pickupChip(draft),
-        const SizedBox(height: AppSpacing.md),
-        GlassTextField(
-          controller: _search,
-          hint: 'Search drop location',
-          leadingIcon: Icons.search_rounded,
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: () => context.push(AppRoutes.savedAddresses),
-            child: Text(
-              'Manage saved addresses',
-              style: AppTextStyles.caption.copyWith(
-                color: AppColors.orange,
-                fontWeight: FontWeight.w700,
-              ),
+    return CustomScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
+      slivers: [
+        SliverToBoxAdapter(child: _buildHeader(draft)),
+        if (draft.pickup != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.md),
+              child: _pickupChip(draft),
+            ),
+          ),
+        SliverToBoxAdapter(
+          child: Padding(
+            key: _singleSearchKey,
+            padding: const EdgeInsets.only(top: AppSpacing.md),
+            child: GlassTextField(
+              controller: _search,
+              focusNode: _singleFocus,
+              hint: 'Search drop location',
+              leadingIcon: Icons.search_rounded,
+              onTap: _ensureSingleSearchVisible,
+              onChanged: _onSingleSearchChanged,
             ),
           ),
         ),
-        Expanded(
-          child: places.isEmpty
-              ? GlassContainer(
-                  child: Text(
-                    'No matching places',
-                    style: AppTextStyles.body.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              : ListView.separated(
-                  itemCount: places.length,
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  separatorBuilder: (_, __) =>
-                      const SizedBox(height: AppSpacing.sm),
-                  itemBuilder: (context, index) {
-                    final MockLocation loc = places[index];
-                    final bool selected = draft.drop?.id == loc.id;
-                    return _placeTile(
-                      loc: loc,
-                      selected: selected,
-                      onTap: () =>
-                          ref.read(bookingDraftProvider.notifier).setDrop(loc),
-                    );
-                  },
+        SliverToBoxAdapter(
+          child: LocationSourceActions(
+            onMap: () => _openMap(),
+            onSaved: () => _openSaved(),
+          ),
+        ),
+        if (draft.drop != null)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: GlassContainer(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Text(
+                  draft.drop!.address.isNotEmpty
+                      ? draft.drop!.address
+                      : draft.drop!.label,
+                  style: AppTextStyles.bodyMedium,
                 ),
+              ),
+            ),
+          ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.md),
+            child: Text('Recent', style: AppTextStyles.headingS),
+          ),
+        ),
+        if (showSuggestions)
+          SliverList.separated(
+            itemCount: _placeSuggestions.length,
+            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+            itemBuilder: (context, index) =>
+                _suggestionTile(_placeSuggestions[index]),
+          )
+        else if (recents.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.md),
+              child: GlassContainer(
+                child: Text(
+                  _search.text.trim().length >= 2
+                      ? 'No matching places'
+                      : 'No recent searches',
+                  style: AppTextStyles.body.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          )
+        else
+          SliverList.separated(
+            itemCount: recents.length,
+            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+            itemBuilder: (context, index) {
+              final MockLocation loc = recents[index];
+              return _placeTile(
+                loc: loc,
+                selected: draft.drop?.id == loc.id,
+                onTap: () => _selectDrop(0, loc),
+              );
+            },
+          ),
+        SliverToBoxAdapter(
+          child: SizedBox(height: keyboard > 0 ? keyboard : AppSpacing.lg),
         ),
       ],
     );
@@ -280,18 +371,9 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
             ),
           ),
         SliverToBoxAdapter(
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () => context.push(AppRoutes.savedAddresses),
-              child: Text(
-                'Manage saved addresses',
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.orange,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
+          child: LocationSourceActions(
+            onMap: () => _openMap(_activeDropIndex ?? 0),
+            onSaved: () => _openSaved(_activeDropIndex ?? 0),
           ),
         ),
         SliverToBoxAdapter(
@@ -306,7 +388,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
         SliverToBoxAdapter(
           child: SizedBox(
             height: MediaQuery.viewInsetsOf(context).bottom > 0
-                ? AppSpacing.xxxl
+                ? MediaQuery.viewInsetsOf(context).bottom + AppSpacing.xxxl
                 : AppSpacing.lg,
           ),
         ),
@@ -356,9 +438,11 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                 padding: const EdgeInsets.only(top: AppSpacing.sm),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxHeight: places.isEmpty ? 88 : 240,
+                    maxHeight: (places.isEmpty && _placeSuggestions.isEmpty)
+                        ? 88
+                        : 240,
                   ),
-                  child: places.isEmpty
+                  child: places.isEmpty && _placeSuggestions.isEmpty
                       ? GlassContainer(
                           child: Text(
                             'No matching places',
@@ -371,20 +455,26 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                       : ListView.separated(
                           padding: EdgeInsets.zero,
                           primary: false,
-                          shrinkWrap: places.length <= 3,
+                          shrinkWrap: (places.length + _placeSuggestions.length) <= 3,
                           keyboardDismissBehavior:
                               ScrollViewKeyboardDismissBehavior.onDrag,
-                          itemCount: places.length,
+                          itemCount: places.length + _placeSuggestions.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: AppSpacing.sm),
                           itemBuilder: (context, placeIndex) {
-                            final MockLocation loc = places[placeIndex];
-                            final bool selected =
-                                draft.dropAt(index)?.id == loc.id;
-                            return _placeTile(
-                              loc: loc,
-                              selected: selected,
-                              onTap: () => _selectDrop(index, loc),
+                            if (placeIndex < places.length) {
+                              final MockLocation loc = places[placeIndex];
+                              final bool selected =
+                                  draft.dropAt(index)?.id == loc.id;
+                              return _placeTile(
+                                loc: loc,
+                                selected: selected,
+                                onTap: () => _selectDrop(index, loc),
+                              );
+                            }
+                            return _suggestionTile(
+                              _placeSuggestions[placeIndex - places.length],
+                              dropIndex: index,
                             );
                           },
                         ),
@@ -463,18 +553,17 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   List<MockLocation> _filteredPlaces(BookingDraft draft, String rawQuery) {
     final String query = rawQuery.trim().toLowerCase();
     final List<MockLocation> saved = ref.read(savedAddressesProvider).addresses;
-    final List<MockLocation> catalog = <MockLocation>[
+    final List<MockLocation> recents = ref.read(recentLocationsProvider);
+    final List<MockLocation> known = <MockLocation>[
       ...saved,
-      ...MockData.locations.where(
-        (l) => !saved.any((s) => s.id == l.id),
-      ),
+      ...recents.where((MockLocation loc) => !saved.any((s) => s.id == loc.id)),
     ];
-    return catalog.where((MockLocation loc) {
+    return known.where((MockLocation loc) {
       if (loc.id == draft.pickup?.id) {
         return false;
       }
       if (query.isEmpty) {
-        return true;
+        return false;
       }
       return loc.label.toLowerCase().contains(query) ||
           loc.address.toLowerCase().contains(query) ||
@@ -512,6 +601,148 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     setState(() {});
   }
 
+  void _onSingleSearchChanged(String value) {
+    setState(() {});
+    _places?.query(
+      text: value,
+      bias: _bias(),
+      onResult: (List<PlaceSuggestion> suggestions) {
+        if (!mounted) {
+          return;
+        }
+        setState(() => _placeSuggestions = suggestions);
+      },
+    );
+    _scheduleGeocode(null, value);
+  }
+
+  GeoPoint? _bias() {
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    final MockLocation? loc = draft.drop ?? draft.pickup;
+    if (loc?.latitude != null && loc?.longitude != null) {
+      return GeoPoint(latitude: loc!.latitude!, longitude: loc.longitude!);
+    }
+    return MapsDefaults.cityCenter;
+  }
+
+  Widget _suggestionTile(PlaceSuggestion suggestion, {int? dropIndex}) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: AppRadius.lgAll,
+        onTap: _resolvingPlace
+            ? null
+            : () => _selectPlaceSuggestion(suggestion, dropIndex: dropIndex),
+        child: GlassContainer(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          borderRadius: AppRadius.lgAll,
+          child: Row(
+            children: [
+              const Icon(Icons.search_rounded, color: AppColors.navy),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(suggestion.primaryText, style: AppTextStyles.bodyMedium),
+                    if (suggestion.subtitle.isNotEmpty)
+                      Text(
+                        suggestion.subtitle,
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectPlaceSuggestion(
+    PlaceSuggestion suggestion, {
+    int? dropIndex,
+  }) async {
+    if (_resolvingPlace) {
+      return;
+    }
+    setState(() => _resolvingPlace = true);
+    try {
+      final ResolvedAddress? details =
+          await ref.read(placesServiceProvider).placeDetails(suggestion.placeId);
+      if (!mounted || details == null) {
+        return;
+      }
+      final MockLocation loc = MockLocation(
+        id: 'place_${suggestion.placeId}',
+        label: suggestion.primaryText,
+        address: details.address,
+        city: details.city,
+        iconName: 'place',
+        latitude: details.latitude,
+        longitude: details.longitude,
+      );
+      if (dropIndex == null) {
+        ref.read(bookingDraftProvider.notifier).setDrop(loc);
+        _search.text = suggestion.primaryText;
+      } else {
+        _selectDrop(dropIndex, loc);
+      }
+      await ref.read(recentLocationsProvider.notifier).remember(loc);
+      setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+    } finally {
+      if (mounted) {
+        setState(() => _resolvingPlace = false);
+      }
+    }
+  }
+
+  void _scheduleGeocode(int? index, String query) {
+    _geocodeDebounce?.cancel();
+    final String trimmed = query.trim();
+    if (trimmed.length < 5) {
+      return;
+    }
+    _geocodeDebounce = Timer(const Duration(milliseconds: 550), () async {
+      final ResolvedAddress? resolved =
+          await ref.read(deviceLocationServiceProvider).forward(trimmed);
+      if (!mounted || resolved == null) {
+        return;
+      }
+      final MockLocation loc = MockLocation(
+        id: index == null ? 'geocode_drop' : 'geocode_drop_$index',
+        label: trimmed,
+        address: resolved.address,
+        city: resolved.city,
+        iconName: 'place',
+        latitude: resolved.latitude,
+        longitude: resolved.longitude,
+      );
+      if (index == null) {
+        final MockLocation? current = ref.read(bookingDraftProvider).drop;
+        if (current != null &&
+            current.latitude != null &&
+            current.id.startsWith('place_')) {
+          return;
+        }
+        ref.read(bookingDraftProvider.notifier).setDrop(loc);
+      } else {
+        final MockLocation? current = ref.read(bookingDraftProvider).dropAt(index);
+        if (current != null &&
+            current.latitude != null &&
+            !current.id.startsWith('custom_drop_')) {
+          return;
+        }
+        ref.read(bookingDraftProvider.notifier).setDropAt(index, loc);
+      }
+    });
+  }
+
   void _onDropTextChanged(int index, String value) {
     if (_dropErrors[index] != null) {
       _dropErrors[index] = null;
@@ -544,6 +775,53 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                 address: trimmed,
               ),
         );
+    _places?.query(
+      text: trimmed,
+      bias: _bias(),
+      onResult: (List<PlaceSuggestion> suggestions) {
+        if (!mounted) {
+          return;
+        }
+        setState(() => _placeSuggestions = suggestions);
+      },
+    );
+    if (exact == null || exact.latitude == null) {
+      _scheduleGeocode(index, trimmed);
+    }
+  }
+
+  Future<void> _openMap([int? dropIndex]) async {
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    final MockLocation? current =
+        dropIndex == null ? draft.drop : draft.dropAt(dropIndex);
+    final MockLocation? picked = await MapLocationPickerScreen.open(
+      context,
+      initial: current,
+    );
+    if (!mounted || picked == null) {
+      return;
+    }
+    if (dropIndex == null) {
+      ref.read(bookingDraftProvider.notifier).setDrop(picked);
+      _search.text = picked.address.isNotEmpty ? picked.address : picked.label;
+    } else {
+      _selectDrop(dropIndex, picked);
+    }
+    await ref.read(recentLocationsProvider.notifier).remember(picked);
+  }
+
+  Future<void> _openSaved([int? dropIndex]) async {
+    final MockLocation? picked = await showSavedAddressPicker(context);
+    if (!mounted || picked == null) {
+      return;
+    }
+    if (dropIndex == null) {
+      ref.read(bookingDraftProvider.notifier).setDrop(picked);
+      _search.text = picked.address.isNotEmpty ? picked.address : picked.label;
+    } else {
+      _selectDrop(dropIndex, picked);
+    }
+    await ref.read(recentLocationsProvider.notifier).remember(picked);
   }
 
   void _selectDrop(int index, MockLocation loc) {

@@ -11,11 +11,25 @@ class RiderEarnings {
     required this.incentiveProgress,
     required this.incentiveGoal,
     required this.recentEarnings,
-    this.weeklyDeliveries = 42,
-    this.weeklyEarnings = 8450,
-    this.monthlyDeliveries = 168,
-    this.monthlyEarnings = 32100,
+    this.weeklyDeliveries = 0,
+    this.weeklyEarnings = 0,
+    this.monthlyDeliveries = 0,
+    this.monthlyEarnings = 0,
   });
+
+  static const RiderEarnings empty = RiderEarnings(
+    todayAmount: 0,
+    yesterdayChangePercent: 0,
+    completedOrders: 0,
+    onlineDuration: Duration.zero,
+    targetOrders: 0,
+    targetOrdersGoal: 0,
+    targetAmount: 0,
+    targetAmountGoal: 0,
+    incentiveProgress: 0,
+    incentiveGoal: 0,
+    recentEarnings: <RecentEarningItem>[],
+  );
 
   final double todayAmount;
   final double yesterdayChangePercent;

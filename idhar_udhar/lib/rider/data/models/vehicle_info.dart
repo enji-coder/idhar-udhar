@@ -62,6 +62,16 @@ class VehicleInfo {
   final int manufacturingYear;
   final String? categoryName;
 
+  static const VehicleInfo empty = VehicleInfo(
+    type: RiderVehicleType.bike,
+    number: '',
+    model: '',
+    color: '',
+    manufacturingYear: 0,
+  );
+
+  bool get hasDetails => number.trim().isNotEmpty;
+
   String get displayType =>
       (categoryName != null && categoryName!.trim().isNotEmpty)
           ? categoryName!.trim()

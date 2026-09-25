@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/api_config.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 
-import '../../data/dummy/dummy_rider_data.dart';
 import '../../data/local/rider_permissions.dart';
 import '../../routing/rider_otp_args.dart';
 import '../../routing/rider_routes.dart';
@@ -143,12 +143,19 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error.message)),
       );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not send OTP. Try again.')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final mobile = widget.mobile ?? DummyRiderData.defaultMobile;
+    final String mobile = formatRiderPhone(widget.mobile ?? '');
     final isLogin = widget.flow == RiderAuthFlow.login;
 
     return RiderScaffold(
@@ -163,7 +170,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
         label: _verifying
             ? 'Verifying…'
             : (isLogin ? 'Verify & Open Dashboard' : 'Verify & Continue'),
-        enabled: !_verifying && _otp.length == 6,
+        enabled: !_verifying && _otp.length == ApiConfig.otpLength,
         onPressed: _verify,
       ),
       body: LayoutBuilder(
@@ -184,7 +191,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                   Text('Enter OTP', style: RiderTextStyles.heading),
                   const SizedBox(height: RiderSpacing.sm),
                   Text(
-                    'Sent to $mobile',
+                    mobile.isEmpty
+                        ? 'Enter the code sent to your mobile number.'
+                        : 'Sent to $mobile',
                     style: RiderTextStyles.caption,
                   ),
                   const SizedBox(height: RiderSpacing.xl),
@@ -192,6 +201,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                     child: Column(
                       children: [
                         RiderOtpInput(
+                          length: ApiConfig.otpLength,
                           errorText: _error,
                           onChanged: (v) => setState(() {
                             _otp = v;

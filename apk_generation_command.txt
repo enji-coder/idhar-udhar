@@ -1,0 +1,4 @@
+cd 
+flutter clean
+flutter pub get
+flutter build apk --release --flavor rider -t lib/rider/rider_main.dart

@@ -1,0 +1,61 @@
+Stage 1 — AWS account
+
+AWS account create
+Billing/payment setup
+MFA/security
+Budget alerts
+
+Stage 2 — Production architecture
+
+AWS region
+networking
+database
+backend
+storage
+Redis
+
+Stage 3 — Database
+
+Local PostgreSQL → Production RDS
+migrations
+backup
+no dummy data
+no production data loss
+
+Stage 4 — Backend
+
+NestJS Docker image
+ECR
+ECS/Fargate
+environment variables/secrets
+API domain + HTTPS
+
+Stage 5 — Admin Panel
+
+production build
+S3/CloudFront
+custom domain
+HTTPS
+
+Stage 6 — Supporting services
+
+Redis
+SQS/workers
+S3 document storage
+CloudWatch
+WAF
+
+Stage 7 — Third-party services
+
+Google Maps
+MSG91
+FCM
+payment gateway
+
+Stage 8 — Apps
+
+production API configuration
+Android build
+Play Store
+iOS build
+App Store

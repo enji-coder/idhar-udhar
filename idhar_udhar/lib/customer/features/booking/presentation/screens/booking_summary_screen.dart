@@ -91,13 +91,13 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
     final draft = ref.watch(bookingDraftProvider);
     final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
     final ApiQuote? quote = hold?.quote;
-    final double displayedFare = quote?.tripFare ?? draft.estimatedFare;
+    final double? displayedFare = quote?.tripFare;
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Confirm Booking',
         isLoading: _busy,
-        onPressed: _busy ? null : _confirm,
+        onPressed: _busy || quote == null ? null : _confirm,
       ),
       child: ListView(
         children: [
@@ -170,7 +170,9 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                     ),
                   ),
                   Text(
-                    '₹${displayedFare.toStringAsFixed(0)}',
+                    displayedFare == null
+                        ? 'Calculating'
+                        : '₹${displayedFare.toStringAsFixed(0)}',
                     style: AppTextStyles.headingM.copyWith(
                       color: AppColors.orange,
                     ),
@@ -185,22 +187,21 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
               children: [
                 Text('Fare breakdown', style: AppTextStyles.headingS),
                 const SizedBox(height: AppSpacing.md),
-                _fareLine('Trip Fare', quote?.tripFare ?? draft.fareQuote.tripFare),
-                if ((quote?.distanceCharge ?? draft.fareBreakdown.distanceCharge) > 0)
-                  _fareLine(
-                    'Distance',
-                    quote?.distanceCharge ?? draft.fareBreakdown.distanceCharge,
-                  ),
-                if ((quote?.waiting ?? draft.fareBreakdown.waitingCharge) > 0)
-                  _fareLine(
-                    'Waiting',
-                    quote?.waiting ?? draft.fareBreakdown.waitingCharge,
-                  ),
-                if ((quote?.discount ?? draft.fareBreakdown.discount) > 0)
-                  _fareLine(
-                    'Discount',
-                    quote?.discount ?? draft.fareBreakdown.discount,
-                  ),
+                if (quote == null)
+                  Text(
+                    'Fare is calculated by the server from this route and vehicle.',
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  )
+                else
+                  _fareLine('Trip Fare', quote.tripFare),
+                if ((quote?.distanceCharge ?? 0) > 0)
+                  _fareLine('Distance', quote!.distanceCharge),
+                if ((quote?.waiting ?? 0) > 0)
+                  _fareLine('Waiting', quote!.waiting),
+                if ((quote?.discount ?? 0) > 0)
+                  _fareLine('Discount', quote!.discount),
                 const Divider(height: 24),
                 Row(
                   children: [
@@ -211,7 +212,9 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                       ),
                     ),
                     Text(
-                      '₹${draft.fareBreakdown.total.toStringAsFixed(0)}',
+                      quote == null
+                          ? '—'
+                          : '₹${quote.netPayable.toStringAsFixed(0)}',
                       style: AppTextStyles.headingS.copyWith(
                         color: AppColors.orange,
                       ),
@@ -350,7 +353,9 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 const Divider(height: 28),
                 _row(
                   'Trip / Fare',
-                  '₹${displayedFare.toStringAsFixed(0)}',
+                  displayedFare == null
+                      ? 'Calculating'
+                      : '₹${displayedFare.toStringAsFixed(0)}',
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(

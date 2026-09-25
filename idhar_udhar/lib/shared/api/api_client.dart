@@ -22,7 +22,8 @@ class ApiClient {
               BaseOptions(
                 baseUrl: ApiConfig.baseUrl,
                 connectTimeout: const Duration(seconds: 10),
-                receiveTimeout: const Duration(seconds: 30),
+                sendTimeout: const Duration(seconds: 15),
+                receiveTimeout: const Duration(seconds: 15),
                 headers: const <String, dynamic>{
                   'Accept': 'application/json',
                   'Content-Type': 'application/json',
@@ -86,6 +87,20 @@ class ApiClient {
     return _send(() => _dio.put<dynamic>(path, data: data));
   }
 
+  /// Multipart POST. Used by rider document upload. Does not change JSON calls.
+  Future<Map<String, Object?>> postForm(
+    String path, {
+    required FormData data,
+  }) {
+    return _send(
+      () => _dio.post<dynamic>(
+        path,
+        data: data,
+        options: Options(contentType: 'multipart/form-data'),
+      ),
+    );
+  }
+
   Future<Map<String, Object?>> _send(
     Future<Response<dynamic>> Function() request,
   ) async {
@@ -115,7 +130,10 @@ class ApiClient {
     ErrorInterceptorHandler handler,
   ) async {
     final int? status = error.response?.statusCode;
-    if (status != 401 || _isAuthPath(error.requestOptions.path)) {
+    final RequestOptions failed = error.requestOptions;
+    if (status != 401 ||
+        _isAuthPath(failed.path) ||
+        failed.extra['iu_auth_retried'] == true) {
       handler.next(error);
       return;
     }
@@ -128,9 +146,9 @@ class ApiClient {
           message: 'Please sign in again.',
         );
       }
-      final RequestOptions request = error.requestOptions;
-      request.headers['Authorization'] = 'Bearer $token';
-      final Response<dynamic> retry = await _dio.fetch<dynamic>(request);
+      failed.headers['Authorization'] = 'Bearer $token';
+      failed.extra['iu_auth_retried'] = true;
+      final Response<dynamic> retry = await _dio.fetch<dynamic>(failed);
       handler.resolve(retry);
     } catch (_) {
       await _tokenStore.clear();
@@ -213,12 +231,14 @@ class ApiClient {
   bool _isPublic(String path) {
     return path.contains('/v1/auth/otp/') ||
         path.contains('/v1/auth/token/refresh') ||
+        path.contains('/v1/auth/dev/otp-capture') ||
         path.endsWith('/health') ||
         path.contains('/health/');
   }
 
   bool _isAuthPath(String path) {
     return path.contains('/v1/auth/otp/') ||
-        path.contains('/v1/auth/token/refresh');
+        path.contains('/v1/auth/token/refresh') ||
+        path.contains('/v1/auth/dev/otp-capture');
   }
 }

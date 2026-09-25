@@ -30,7 +30,12 @@ class RiderProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(riderProfileStateProvider);
-    final dob = DateFormat('dd MMM yyyy').format(profile.dateOfBirth);
+    final String displayName =
+        profile.name.trim().isEmpty ? 'Rider' : profile.name;
+    final String dob = profile.dateOfBirth == null
+        ? '—'
+        : DateFormat('dd MMM yyyy').format(profile.dateOfBirth!);
+    String show(String value) => value.trim().isEmpty ? '—' : value;
 
     final body = SingleChildScrollView(
       padding: showAppBar
@@ -49,16 +54,18 @@ class RiderProfileScreen extends ConsumerWidget {
                 const _RiderPersonaVisual(),
                 const SizedBox(height: RiderSpacing.md),
                 Text(
-                  profile.name,
+                  displayName,
                   style: RiderTextStyles.title,
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: RiderSpacing.xs),
-                RiderStatusChip(
-                  label: '${profile.rating.toStringAsFixed(1)} ★',
-                  tone: RiderChipTone.success,
-                  icon: Icons.star_rounded,
-                ),
+                if (profile.rating > 0) ...[
+                  const SizedBox(height: RiderSpacing.xs),
+                  RiderStatusChip(
+                    label: '${profile.rating.toStringAsFixed(1)} ★',
+                    tone: RiderChipTone.success,
+                    icon: Icons.star_rounded,
+                  ),
+                ],
                 const SizedBox(height: RiderSpacing.md),
                 TextButton(
                   onPressed: () => _showEditProfileSheet(context, ref),
@@ -77,11 +84,11 @@ class RiderProfileScreen extends ConsumerWidget {
           _SectionCard(
             title: 'Personal details',
             rows: [
-              _RowData('Name', profile.name),
-              _RowData('Mobile', profile.mobile),
-              _RowData('Email', profile.email),
+              _RowData('Name', show(profile.name)),
+              _RowData('Mobile', show(profile.mobile)),
+              _RowData('Email', show(profile.email)),
               _RowData('Date of birth', dob),
-              _RowData('Language', profile.language),
+              _RowData('Language', show(profile.language)),
             ],
           ),
           const SizedBox(height: RiderSpacing.xl),
@@ -313,7 +320,7 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
         behavior: SnackBarBehavior.floating,
         backgroundColor: RiderColors.secondary,
         content: Text(
-          'Profile updated',
+          'Name updated',
           style: RiderTextStyles.bodyMedium.copyWith(
             color: RiderColors.textOnPrimary,
           ),

@@ -3,11 +3,13 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/rider_documents_api.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../data/dummy/dummy_rider_data.dart';
 import '../../data/models/rider_document.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
@@ -77,7 +79,7 @@ const List<_DocType> _docTypes = <_DocType>[
   ),
 ];
 
-class DocumentsScreen extends StatefulWidget {
+class DocumentsScreen extends ConsumerStatefulWidget {
   const DocumentsScreen({
     super.key,
     this.reviewMode = false,
@@ -87,24 +89,87 @@ class DocumentsScreen extends StatefulWidget {
   final bool reviewMode;
 
   @override
-  State<DocumentsScreen> createState() => _DocumentsScreenState();
+  ConsumerState<DocumentsScreen> createState() => _DocumentsScreenState();
 }
 
-class _DocumentsScreenState extends State<DocumentsScreen> {
+class _DocumentsScreenState extends ConsumerState<DocumentsScreen> {
   late List<RiderDocument> _docs;
   bool _permissionPrimed = false;
 
   @override
   void initState() {
     super.initState();
-    _docs = List<RiderDocument>.from(
-      widget.reviewMode
-          ? DummyRiderData.documents
-          : DummyRiderData.registrationDocuments,
-    );
+    _docs = <RiderDocument>[
+      for (final RiderDocumentKind kind in RiderDocumentKind.values)
+        RiderDocument(
+          kind: kind,
+          status: RiderDocumentStatus.uploadRequired,
+        ),
+    ];
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _primeDocumentPermissions();
+      _loadServerDocuments();
     });
+  }
+
+  RiderDocumentStatus _statusFromServer(String status) {
+    switch (status) {
+      case 'APPROVED':
+        return RiderDocumentStatus.verified;
+      case 'UPLOADED':
+        return RiderDocumentStatus.pendingVerification;
+      default:
+        return RiderDocumentStatus.uploadRequired;
+    }
+  }
+
+  Future<void> _loadServerDocuments() async {
+    try {
+      final List<RiderDocumentRecord> rows =
+          await ref.read(riderDocumentsApiProvider).list();
+      if (!mounted) return;
+      final Map<RiderDocumentKind, RiderDocumentRecord> latest =
+          <RiderDocumentKind, RiderDocumentRecord>{};
+      for (final RiderDocumentRecord row in rows) {
+        final RiderDocumentKind? kind =
+            RiderDocumentKindX.fromApiType(row.documentType);
+        if (kind == null) continue;
+        final RiderDocumentRecord? existing = latest[kind];
+        if (existing == null ||
+            (row.createdAt != null &&
+                (existing.createdAt == null ||
+                    row.createdAt!.isAfter(existing.createdAt!)))) {
+          latest[kind] = row;
+        }
+      }
+      setState(() {
+        _docs = _docs.map((RiderDocument doc) {
+          final RiderDocumentRecord? row = latest[doc.kind];
+          if (row == null) return doc;
+          return doc.copyWith(status: _statusFromServer(row.status));
+        }).toList();
+      });
+    } on ApiException catch (error) {
+      _snack(error.message);
+    }
+  }
+
+  Future<RiderDocumentStatus?> _uploadDocument(
+    RiderDocumentKind kind,
+    String path,
+    String name,
+  ) async {
+    try {
+      final RiderDocumentRecord saved =
+          await ref.read(riderDocumentsApiProvider).upload(
+                documentType: kind.apiType,
+                filePath: path,
+              );
+      return _statusFromServer(saved.status);
+    } on ApiException catch (error) {
+      _snack(error.message);
+      return null;
+    }
   }
 
   Future<void> _primeDocumentPermissions() async {
@@ -243,6 +308,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           kinds: type.kinds,
           docs: _docs,
           onPick: _pickFile,
+          onPersist: _uploadDocument,
         );
       },
     );
@@ -284,7 +350,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             Text('Document verification', style: RiderTextStyles.heading),
             const SizedBox(height: RiderSpacing.sm),
             Text(
-              'Select a document type to upload. Files stay on this device (dummy flow).',
+              'Upload a clear photo or PDF. Status comes from the server.',
               style: RiderTextStyles.caption,
             ),
             const SizedBox(height: RiderSpacing.xl),
@@ -382,6 +448,7 @@ class _DocumentSidesSheet extends StatefulWidget {
     required this.kinds,
     required this.docs,
     required this.onPick,
+    required this.onPersist,
   });
 
   final String title;
@@ -389,6 +456,11 @@ class _DocumentSidesSheet extends StatefulWidget {
   final List<RiderDocument> docs;
   final Future<({String path, String name})?> Function(RiderDocument doc)
       onPick;
+  final Future<RiderDocumentStatus?> Function(
+    RiderDocumentKind kind,
+    String path,
+    String name,
+  ) onPersist;
 
   @override
   State<_DocumentSidesSheet> createState() => _DocumentSidesSheetState();
@@ -417,11 +489,17 @@ class _DocumentSidesSheetState extends State<_DocumentSidesSheet> {
     final current = _doc(kind);
     final picked = await widget.onPick(current);
     if (picked == null || !mounted) return;
+    final RiderDocumentStatus? status = await widget.onPersist(
+      kind,
+      picked.path,
+      picked.name,
+    );
+    if (status == null || !mounted) return;
     setState(() {
       _local = _local.map((d) {
         if (d.kind != kind) return d;
         return d.copyWith(
-          status: RiderDocumentStatus.uploaded,
+          status: status,
           fileName: picked.name,
           localPath: picked.path,
         );

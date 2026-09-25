@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../assets/rider_assets.dart';
 import '../../data/local/rider_permissions.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -9,11 +11,12 @@ import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_scaffold.dart';
 
-class RegistrationCompleteScreen extends StatelessWidget {
+class RegistrationCompleteScreen extends ConsumerWidget {
   const RegistrationCompleteScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool approved = ref.watch(riderSessionProvider).isApproved;
     return RiderScaffold(
       bottom: RiderPrimaryButton(
         label: 'Go to Dashboard',
@@ -35,13 +38,15 @@ class RegistrationCompleteScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: RiderSpacing.md),
                   Text(
-                    "You're Ready to Ride!",
+                    approved ? "You're Ready to Ride!" : 'Registration submitted',
                     style: RiderTextStyles.display.copyWith(fontSize: 26),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: RiderSpacing.sm),
                   Text(
-                    'Your rider account is fully set up.',
+                    approved
+                        ? 'Your rider account is approved.'
+                        : 'Verification is still pending. Deliveries stay locked until approval.',
                     style: RiderTextStyles.caption,
                     textAlign: TextAlign.center,
                   ),
@@ -52,16 +57,15 @@ class RegistrationCompleteScreen extends StatelessWidget {
                     fit: BoxFit.contain,
                   ),
                   const SizedBox(height: RiderSpacing.xl),
-                  const RiderGlassCard(
+                  RiderGlassCard(
                     child: Column(
                       children: [
-                        _ReadyRow(label: 'Profile completed'),
-                        SizedBox(height: RiderSpacing.md),
-                        _ReadyRow(label: 'Vehicle verified'),
-                        SizedBox(height: RiderSpacing.md),
-                        _ReadyRow(label: 'Documents verified'),
-                        SizedBox(height: RiderSpacing.md),
-                        _ReadyRow(label: 'Account activated'),
+                        _ReadyRow(
+                          label: approved
+                              ? 'Account approved'
+                              : 'Waiting for approval',
+                          done: approved,
+                        ),
                       ],
                     ),
                   ),
@@ -76,15 +80,19 @@ class RegistrationCompleteScreen extends StatelessWidget {
 }
 
 class _ReadyRow extends StatelessWidget {
-  const _ReadyRow({required this.label});
+  const _ReadyRow({required this.label, required this.done});
 
   final String label;
+  final bool done;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.check_circle_rounded, color: RiderColors.success),
+        Icon(
+          done ? Icons.check_circle_rounded : Icons.hourglass_top_rounded,
+          color: done ? RiderColors.success : RiderColors.primary,
+        ),
         const SizedBox(width: RiderSpacing.md),
         Expanded(child: Text(label, style: RiderTextStyles.bodyMedium)),
       ],

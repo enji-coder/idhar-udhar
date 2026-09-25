@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
 
 import '../../../../core/animations/animations.dart';
 import '../../../../core/constants/asset_paths.dart';
@@ -119,8 +120,27 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       _loading = true;
       _error = null;
     });
-    ref.read(sessionProvider.notifier).setName(name);
-    await Future<void>.delayed(const Duration(milliseconds: 250));
+    try {
+      await ref.read(sessionProvider.notifier).persistProfile(name: name);
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = error.message;
+      });
+      return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _error = 'Could not save your profile. Try again.';
+      });
+      return;
+    }
     final String nextRoute = await LocationPermissionService.routeAfterAuth(
       needsProfileSetup: false,
     );

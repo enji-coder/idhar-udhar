@@ -56,6 +56,34 @@ extension RiderDocumentKindX on RiderDocumentKind {
     }
   }
 
+  String get apiType {
+    switch (this) {
+      case RiderDocumentKind.aadhaarFront:
+        return 'AADHAAR_FRONT';
+      case RiderDocumentKind.aadhaarBack:
+        return 'AADHAAR_BACK';
+      case RiderDocumentKind.panFront:
+        return 'PAN_FRONT';
+      case RiderDocumentKind.drivingLicenseFront:
+        return 'DRIVING_LICENSE_FRONT';
+      case RiderDocumentKind.drivingLicenseBack:
+        return 'DRIVING_LICENSE_BACK';
+      case RiderDocumentKind.vehicleRcFront:
+        return 'VEHICLE_RC_FRONT';
+      case RiderDocumentKind.vehicleRcBack:
+        return 'VEHICLE_RC_BACK';
+      case RiderDocumentKind.bankProof:
+        return 'BANK_PROOF';
+    }
+  }
+
+  static RiderDocumentKind? fromApiType(String value) {
+    for (final RiderDocumentKind kind in RiderDocumentKind.values) {
+      if (kind.apiType == value) return kind;
+    }
+    return null;
+  }
+
   String get description {
     switch (this) {
       case RiderDocumentKind.aadhaarFront:

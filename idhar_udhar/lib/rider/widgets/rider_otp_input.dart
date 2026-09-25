@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:idhar_udhar/shared/api/api_config.dart';
 
 import '../theme/rider_colors.dart';
 import '../theme/rider_spacing.dart';
 import '../theme/rider_text_styles.dart';
 
-/// Six-digit OTP entry with focus-friendly boxes.
+/// OTP entry with focus-friendly boxes. Length follows [ApiConfig.otpLength].
 class RiderOtpInput extends StatefulWidget {
   const RiderOtpInput({
     required this.onCompleted,
     super.key,
-    this.length = 6,
+    this.length = ApiConfig.otpLength,
     this.onChanged,
     this.errorText,
   });

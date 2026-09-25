@@ -1,8 +1,5 @@
 import 'customer/customer_main.dart' as customer;
 
-/// Default entry launches the Customer App.
-///
-/// ```bash
-/// flutter run --flavor customer -t lib/main.dart
-/// ```
+/// Default / Customer flavor entry.
+/// Rider flavor compiles [lib/rider/rider_main.dart] as the Dart target.
 Future<void> main() => customer.main();

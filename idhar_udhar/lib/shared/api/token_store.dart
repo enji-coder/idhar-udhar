@@ -64,7 +64,7 @@ class TokenStore {
 
   Future<String?> _read(String key) async {
     try {
-      return await _storage.read(key: key);
+      return await _storage.read(key: key).timeout(const Duration(seconds: 5));
     } catch (_) {
       return null;
     }

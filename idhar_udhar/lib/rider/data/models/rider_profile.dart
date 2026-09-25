@@ -5,18 +5,27 @@ class RiderProfile {
     required this.name,
     required this.mobile,
     required this.email,
-    required this.dateOfBirth,
     required this.language,
+    this.dateOfBirth,
     this.photoUrl,
-    this.rating = 4.9,
+    this.rating = 0,
   });
 
   final String id;
   final String name;
   final String mobile;
   final String email;
-  final DateTime dateOfBirth;
+  final DateTime? dateOfBirth;
   final String language;
+
+  static const RiderProfile empty = RiderProfile(
+    id: '',
+    name: '',
+    mobile: '',
+    email: '',
+    language: '',
+    rating: 0,
+  );
   final String? photoUrl;
   final double rating;
 

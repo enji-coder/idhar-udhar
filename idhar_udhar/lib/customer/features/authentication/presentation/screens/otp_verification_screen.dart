@@ -49,6 +49,26 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   void initState() {
     super.initState();
     _startTimer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showCapturedOtpIfAvailable();
+    });
+  }
+
+  void _showCapturedOtpIfAvailable() {
+    if (!mounted || !ApiConfig.canPeekCapturedOtp) {
+      return;
+    }
+    final String? code = ref.read(sessionProvider.notifier).debugCapturedOtp;
+    if (code == null || code.isEmpty) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Testing code: $code'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 8),
+      ),
+    );
   }
 
   void _startTimer() {
@@ -162,10 +182,14 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       if (!mounted) {
         return;
       }
+      final String? captured =
+          ref.read(sessionProvider.notifier).debugCapturedOtp;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'A new $_otpLength-digit code was sent.',
+            captured != null && ApiConfig.canPeekCapturedOtp
+                ? 'A new $_otpLength-digit code was sent. Testing code: $captured'
+                : 'A new $_otpLength-digit code was sent.',
             style: AppTextStyles.bodyMedium.copyWith(color: AppColors.white),
           ),
           behavior: SnackBarBehavior.floating,

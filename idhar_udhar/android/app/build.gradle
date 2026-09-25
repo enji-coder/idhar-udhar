@@ -22,6 +22,29 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def isReleaseBuild = gradle.startParameter.taskNames.any { String name ->
+    name.toLowerCase().contains('release')
+}
+if (isReleaseBuild) {
+    def storeFileValue = keystoreProperties['storeFile']
+    def missingReleaseSigning = !keystorePropertiesFile.exists() ||
+        storeFileValue == null || storeFileValue.toString().trim().isEmpty() ||
+        keystoreProperties['storePassword'] == null ||
+        keystoreProperties['keyPassword'] == null ||
+        keystoreProperties['keyAlias'] == null
+    if (missingReleaseSigning) {
+        throw new GradleException(
+            'Release signing requires android/key.properties with storePassword, keyPassword, keyAlias, and storeFile. Release does not use the debug keystore.'
+        )
+    }
+}
+
 android {
     namespace "com.idharudhar.idhar_udhar"
     compileSdk 36
@@ -48,11 +71,15 @@ android {
             // Preserve existing Customer applicationId (Play identity).
             applicationId "com.idharudhar.idhar_udhar"
             resValue "string", "app_name", "IDHAR UDHAR"
+            // Customer-restricted key. Set MAPS_API_KEY_CUSTOMER in local.properties.
+            manifestPlaceholders += [mapsApiKey: (localProperties.getProperty("MAPS_API_KEY_CUSTOMER") ?: "")]
         }
         rider {
             dimension "app"
             applicationId "com.idharudhar.rider"
             resValue "string", "app_name", "IDHAR UDHAR PARTNER"
+            // Rider must use a key restricted to com.idharudhar.rider. Set in local.properties.
+            manifestPlaceholders += [mapsApiKey: (localProperties.getProperty("MAPS_API_KEY_RIDER") ?: "")]
         }
     }
 
@@ -62,12 +89,24 @@ android {
         targetSdk flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        manifestPlaceholders += [mapsApiKey: ""]
+    }
+
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+            storePassword keystoreProperties['storePassword']
+        }
     }
 
     buildTypes {
-        release {
-            // Debug signing for local release runs until store keys are configured.
+        debug {
             signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.release
         }
     }
 }
@@ -76,4 +115,17 @@ flutter {
     source '../..'
 }
 
-dependencies {}
+// Flutter CLI always passes -Ptarget=lib/main.dart unless -t is set.
+// That property wins over flutter { target }, so Rider compile tasks must
+// be pointed at rider_main.dart after configuration, immediately before run.
+gradle.taskGraph.whenReady { graph ->
+    graph.allTasks.each { task ->
+        if (task.name.startsWith("compileFlutterBuildRider")) {
+            task.targetPath = "lib/rider/rider_main.dart"
+        }
+    }
+}
+
+dependencies {
+    implementation "com.google.android.gms:play-services-location:21.3.0"
+}

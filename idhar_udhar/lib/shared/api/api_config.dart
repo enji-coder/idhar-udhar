@@ -12,13 +12,34 @@ abstract final class ApiConfig {
   static const String vehicleCategoryId =
       String.fromEnvironment('IU_VEHICLE_CATEGORY_ID');
 
-  /// Backend development default (`OTP_LENGTH`). Still a business decision.
-  static const int otpLength = 6;
+  /// Live production API. Rider entry uses this when `API_BASE_URL` is unset.
+  static const String productionBaseUrl = 'https://api.idharudhar.co.in';
+
+  /// Temporary testing default. Must match backend `OTP_LENGTH`.
+  static const int otpLength = 4;
+
+  static bool _useProductionDefault = false;
+
+  /// Rider startup. Keeps Customer debug on the local default unless
+  /// `--dart-define=API_BASE_URL` is passed.
+  static void useProductionDefault() {
+    if (_definedBaseUrl.trim().isEmpty) {
+      _useProductionDefault = true;
+    }
+  }
+
+  @visibleForTesting
+  static void debugResetBaseUrl() {
+    _useProductionDefault = false;
+  }
 
   static String get baseUrl {
     final String defined = _definedBaseUrl.trim();
     if (defined.isNotEmpty) {
       return _stripTrailingSlash(defined);
+    }
+    if (_useProductionDefault) {
+      return productionBaseUrl;
     }
     if (kReleaseMode) {
       throw StateError(
@@ -33,6 +54,17 @@ abstract final class ApiConfig {
 
   static bool get hasCatalogIds =>
       cityId.trim().isNotEmpty && vehicleCategoryId.trim().isNotEmpty;
+
+  /// Capture peek is loopback-only on the API. Never used in release builds.
+  static bool get canPeekCapturedOtp {
+    if (kReleaseMode) {
+      return false;
+    }
+    final Uri uri = Uri.parse(baseUrl);
+    return uri.host == 'localhost' ||
+        uri.host == '127.0.0.1' ||
+        uri.host == '10.0.2.2';
+  }
 
   static bool get enableRequestLogging => !kReleaseMode;
 
