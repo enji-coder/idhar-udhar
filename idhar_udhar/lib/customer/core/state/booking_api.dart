@@ -57,7 +57,9 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
     ApiStop(
       sequence: 0,
       stopType: 'PICKUP',
-      addressText: pickup.address.isEmpty ? pickup.label : pickup.address,
+      addressText: draft.pickupAddressText.isEmpty
+          ? (pickup.address.isEmpty ? pickup.label : pickup.address)
+          : draft.pickupAddressText,
       latitude: pickup.latitude!,
       longitude: pickup.longitude!,
     ),
@@ -75,7 +77,7 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
       ApiStop(
         sequence: i + 1,
         stopType: 'DROP',
-        addressText: drop.address.isEmpty ? drop.label : drop.address,
+        addressText: draft.locationAddress(drop),
         latitude: drop.latitude!,
         longitude: drop.longitude!,
       ),

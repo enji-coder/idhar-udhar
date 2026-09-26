@@ -24,6 +24,8 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { SetPlanDto } from './dto/set-plan.dto';
 import { SetResponsibilityDto } from './dto/set-responsibility.dto';
 import { PAYMENT_PROVIDER, PaymentProvider } from './payment-provider';
+import { PaymentGatewayRepository } from './payment-gateway.repository';
+import { merchantRefundId } from './cashfree-webhook.parse';
 import {
   deriveAggregateStatus,
   PaymentDirection,
@@ -49,6 +51,7 @@ export class PaymentsService {
     private readonly paymentNotifications: PaymentNotificationDispatcher,
     private readonly identities: IdentityRepository,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
+    private readonly gateway: PaymentGatewayRepository,
   ) {}
 
   async getPayment(auth: AuthContext, orderId: string) {
@@ -284,6 +287,20 @@ export class PaymentsService {
               409,
             );
           }
+          if (status === 'PENDING') {
+            const available = await this.payments.availableForPendingOnline(
+              order.order_id,
+              body.payer_type,
+              tx,
+            );
+            if (await this.payments.amountExceeds(amount, available, tx)) {
+              throw new ApiError(
+                ErrorCodes.PAYMENT_EXCEEDS_OWED,
+                'Charge exceeds remaining amount owed by this payer',
+                409,
+              );
+            }
+          }
         }
         if (direction === 'REFUND') {
           const remaining = await this.payments.remainingOwed(
@@ -305,14 +322,47 @@ export class PaymentsService {
           }
         }
 
+        if (
+          direction === 'REFUND' &&
+          body.method === 'ONLINE' &&
+          this.provider.initiateOnlineRefund
+        ) {
+          const payload = await this.refundCapturedOnline(
+            order,
+            body.payer_type,
+            amount,
+            scopedKey,
+            auth,
+            tx,
+          );
+          await this.idempotency.insert(
+            {
+              scope: 'payment',
+              key: scopedKey,
+              actorIdentityId: auth.identityId,
+              requestHash,
+              resultEntityId: payload.payment_gateway_refund_id,
+              resultPayload: payload,
+            },
+            tx,
+          );
+          return payload;
+        }
+
         const onlineRefs =
-          body.method === 'ONLINE' && direction === 'CHARGE'
-            ? this.provider.beginOnlineCharge({
+          body.method === 'ONLINE' && direction === 'CHARGE' && status === 'PENDING'
+            ? await this.provider.beginOnlineCharge({
                 orderId: order.order_id,
                 amount,
                 payerType: body.payer_type,
               })
-            : { providerTxnId: null, providerEventId: null };
+            : {
+                providerTxnId: null,
+                providerEventId: null,
+                paymentSessionId: null,
+                gatewayOrderId: null,
+                environment: null,
+              };
 
         const row = await this.payments.insertTransaction(
           {
@@ -330,6 +380,24 @@ export class PaymentsService {
           },
           tx,
         );
+        if (
+          onlineRefs.paymentSessionId &&
+          onlineRefs.gatewayOrderId &&
+          onlineRefs.providerTxnId &&
+          onlineRefs.environment
+        ) {
+          await this.gateway.insertAttempt(
+            {
+              paymentTransactionId: row.payment_transaction_id,
+              environment: onlineRefs.environment,
+              gatewayOrderId: onlineRefs.gatewayOrderId,
+              cfOrderId: onlineRefs.providerTxnId,
+              paymentSessionId: onlineRefs.paymentSessionId,
+              amount,
+            },
+            tx,
+          );
+        }
         if (body.method === 'CASH' && status === 'PAID') {
           await this.walletCod.syncOrderFinance(order, tx);
         }
@@ -345,7 +413,16 @@ export class PaymentsService {
           },
           tx,
         );
-        const payload = serializeTransaction(row);
+        const payload = {
+          ...serializeTransaction(row),
+          ...(onlineRefs.paymentSessionId
+            ? {
+                payment_session_id: onlineRefs.paymentSessionId,
+                cashfree_order_id: onlineRefs.gatewayOrderId,
+                cashfree_environment: onlineRefs.environment,
+              }
+            : {}),
+        };
         await this.idempotency.insert(
           {
             scope: 'payment',
@@ -412,6 +489,13 @@ export class PaymentsService {
       transactions: rows.map((row) => ({
         ...serializeTransaction(row),
         display_id: row.display_id,
+        cashfree_order_id: row.cashfree_order_id,
+        cf_order_id: row.cf_order_id,
+        cf_payment_id: row.cf_payment_id,
+        gateway_status: row.gateway_status,
+        gateway_environment: row.gateway_environment,
+        failure_reason: row.failure_reason,
+        refund_status: row.refund_status,
       })),
     };
   }
@@ -435,6 +519,142 @@ export class PaymentsService {
         403,
       );
     }
+  }
+
+  async verifyOnlinePayment(
+    auth: AuthContext,
+    orderId: string,
+    transactionId: string,
+  ) {
+    return this.postgres.transaction(async (tx) => {
+      const order = await this.requireReadableOrder(auth, orderId, tx);
+      const row = await this.payments.findTransaction(transactionId, tx);
+      if (!row || row.order_id !== order.order_id) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Payment was not found', 404);
+      }
+      const attempt = await this.gateway.findByTransaction(transactionId, tx);
+      const base = {
+        payment_transaction_id: row.payment_transaction_id,
+        transaction_status: row.transaction_status,
+        cashfree_order_id: attempt?.gateway_order_id ?? null,
+        gateway_status: attempt?.gateway_status ?? null,
+        authoritative: false as const,
+      };
+      if (!attempt || !this.provider.retrieveOnlineOrder) {
+        return base;
+      }
+      const remote = await this.provider.retrieveOnlineOrder(attempt.gateway_order_id);
+      const amountMatches =
+        remote.orderCurrency === 'INR' &&
+        (await this.payments.amountsEqual(remote.orderAmount, row.amount, tx));
+      if (amountMatches) {
+        await this.gateway.updateGatewayStatus(
+          attempt.payment_gateway_attempt_id,
+          remote.orderStatus,
+          tx,
+        );
+      }
+      return {
+        ...base,
+        gateway_status: amountMatches ? remote.orderStatus : attempt.gateway_status,
+        amount_matches: amountMatches,
+      };
+    });
+  }
+
+  private async refundCapturedOnline(
+    order: OrderRow,
+    payerType: PayerType,
+    amount: string,
+    scopedKey: string,
+    auth: AuthContext,
+    tx: Queryable,
+  ) {
+    if (!this.provider.initiateOnlineRefund) {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Online refunds require Cashfree sandbox',
+        503,
+      );
+    }
+    const charges = await this.gateway.listRefundableCharges(
+      order.order_id,
+      payerType,
+      tx,
+    );
+    let selected: (typeof charges)[number] | null = null;
+    for (const charge of charges) {
+      if (!(await this.payments.amountExceeds(amount, charge.refundable, tx))) {
+        selected = charge;
+        break;
+      }
+    }
+    if (!selected) {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_REFUND_INVALID,
+        'Online refund must fit one captured Cashfree payment',
+        409,
+      );
+    }
+    const refundId = merchantRefundId(scopedKey);
+    const remote = await this.provider.initiateOnlineRefund({
+      gatewayOrderId: selected.gateway_order_id,
+      merchantRefundId: refundId,
+      amount,
+    });
+    let refundTransactionId: string | null = null;
+    if (remote.refundStatus === 'SUCCESS') {
+      const refundTx = await this.payments.insertTransaction(
+        {
+          orderId: order.order_id,
+          payerType,
+          method: 'ONLINE',
+          amount,
+          direction: 'REFUND',
+          status: 'REFUNDED',
+          providerTxnId: remote.cfRefundId,
+          providerEventId: null,
+          idempotencyKey: `cf-refund:${refundId}`,
+          createdByType: auth.role,
+          createdByProfileId: auth.profileId,
+        },
+        tx,
+      );
+      refundTransactionId = refundTx.payment_transaction_id;
+      await this.paymentNotifications.onTransactionRecorded(
+        {
+          orderId: order.order_id,
+          displayId: order.display_id,
+          customerProfileId: order.customer_profile_id,
+          transactionId: refundTx.payment_transaction_id,
+          status: 'REFUNDED',
+          direction: 'REFUND',
+          amount,
+        },
+        tx,
+      );
+    }
+    const stored = await this.gateway.insertRefund(
+      {
+        paymentTransactionId: selected.payment_transaction_id,
+        refundTransactionId,
+        merchantRefundId: refundId,
+        cfRefundId: remote.cfRefundId,
+        amount,
+        refundStatus: remote.refundStatus,
+        failureReason: remote.failureReason,
+      },
+      tx,
+    );
+    return {
+      payment_gateway_refund_id: stored.payment_gateway_refund_id,
+      payment_transaction_id: refundTransactionId,
+      order_id: order.order_id,
+      amount,
+      refund_status: remote.refundStatus,
+      cashfree_refund_id: remote.cfRefundId,
+      transaction_status: refundTransactionId ? ('REFUNDED' as const) : null,
+    };
   }
 
   private async postgresPaid(

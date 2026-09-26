@@ -84,6 +84,17 @@ export class OrderPaymentsController {
   }
 
   @Roles('CUSTOMER', 'RIDER', 'ADMIN')
+  @Post(':id/payment/transactions/:transactionId/verify')
+  @HttpCode(HttpStatus.OK)
+  verifyOnlinePayment(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+    @Param('transactionId', UuidParamPipe) transactionId: string,
+  ) {
+    return this.payments.verifyOnlinePayment(auth, id, transactionId);
+  }
+
+  @Roles('CUSTOMER', 'RIDER', 'ADMIN')
   @Get(':id/finance')
   getFinance(
     @CurrentAuth() auth: AuthContext,

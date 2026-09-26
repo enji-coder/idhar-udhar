@@ -8,6 +8,7 @@ import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/recent_locations_provider.dart';
+import '../../../../core/state/saved_addresses_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/glass_container.dart';
@@ -15,6 +16,7 @@ import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 import '../widgets/location_source_actions.dart';
 import '../widgets/saved_address_picker_sheet.dart';
+import 'complete_address_screen.dart';
 import 'map_location_picker_screen.dart';
 
 class PickupLocationScreen extends ConsumerStatefulWidget {
@@ -27,6 +29,7 @@ class PickupLocationScreen extends ConsumerStatefulWidget {
 
 class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   final TextEditingController _search = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
   PlacesSearchSession? _places;
   List<PlaceSuggestion> _placeSuggestions = const <PlaceSuggestion>[];
   bool _resolvingPlace = false;
@@ -45,8 +48,26 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   @override
   void dispose() {
     _places?.dispose();
+    _searchFocus.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  Future<void> _finishPickup(MockLocation location) async {
+    final MockLocation? confirmed =
+        await CompleteAddressScreen.open(context, initial: location);
+    if (!mounted || confirmed == null) {
+      return;
+    }
+    ref.read(bookingDraftProvider.notifier).setPickup(confirmed);
+    ref.read(bookingDraftProvider.notifier).setPickupUnit(
+          house: confirmed.unit,
+          society: confirmed.premises,
+        );
+    _search.text =
+        confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
+    setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+    await ref.read(recentLocationsProvider.notifier).remember(confirmed);
   }
 
   IconData _iconFor(MockLocation loc) {
@@ -74,7 +95,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
         longitude: pickup.longitude!,
       );
     }
-    return MapsDefaults.cityCenter;
+    return null;
   }
 
   void _onSearchChanged(String value) {
@@ -105,30 +126,17 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
       if (details == null) {
         return;
       }
-      ref.read(bookingDraftProvider.notifier).setPickup(
-            MockLocation(
-              id: 'place_${suggestion.placeId}',
-              label: suggestion.primaryText,
-              address: details.address,
-              city: details.city,
-              iconName: 'place',
-              latitude: details.latitude,
-              longitude: details.longitude,
-            ),
-          );
-      _search.text = suggestion.primaryText;
-      setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
-      await ref.read(recentLocationsProvider.notifier).remember(
-            MockLocation(
-              id: 'place_${suggestion.placeId}',
-              label: suggestion.primaryText,
-              address: details.address,
-              city: details.city,
-              iconName: 'place',
-              latitude: details.latitude,
-              longitude: details.longitude,
-            ),
-          );
+      await _finishPickup(
+        MockLocation(
+          id: 'place_${suggestion.placeId}',
+          label: suggestion.primaryText,
+          address: details.address,
+          city: details.city,
+          iconName: 'place',
+          latitude: details.latitude,
+          longitude: details.longitude,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _resolvingPlace = false);
@@ -145,7 +153,9 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
         pickup.address.trim() == seeded.address.trim()) {
       return false;
     }
-    return pickup.address.trim().isNotEmpty || pickup.label.trim().isNotEmpty;
+    return pickup.latitude != null &&
+        pickup.longitude != null &&
+        (pickup.address.trim().isNotEmpty || pickup.label.trim().isNotEmpty);
   }
 
   Future<void> _openMap() async {
@@ -157,9 +167,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
     if (!mounted || picked == null) {
       return;
     }
-    ref.read(bookingDraftProvider.notifier).setPickup(picked);
-    _search.text = picked.address.isNotEmpty ? picked.address : picked.label;
-    await ref.read(recentLocationsProvider.notifier).remember(picked);
+    await _finishPickup(picked);
   }
 
   Future<void> _openSaved() async {
@@ -167,9 +175,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
     if (!mounted || picked == null) {
       return;
     }
-    ref.read(bookingDraftProvider.notifier).setPickup(picked);
-    _search.text = picked.address.isNotEmpty ? picked.address : picked.label;
-    await ref.read(recentLocationsProvider.notifier).remember(picked);
+    await _finishPickup(picked);
   }
 
   @override
@@ -177,8 +183,9 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
     final draft = ref.watch(bookingDraftProvider);
     final bool pickupChosen = _pickupChosen(draft.pickup);
     final List<MockLocation> recents = ref.watch(recentLocationsProvider);
-    final bool showSuggestions =
-        _search.text.trim().length >= 2 && _placeSuggestions.isNotEmpty;
+    final List<MockLocation> saved =
+        ref.watch(savedAddressesProvider).addresses;
+    final bool showSuggestions = _search.text.trim().length >= 2;
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
@@ -220,42 +227,45 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
           const SizedBox(height: AppSpacing.lg),
           GlassTextField(
             controller: _search,
-            hint: 'Search pickup area',
+            focusNode: _searchFocus,
+            hint: 'Search on map',
             leadingIcon: Icons.search_rounded,
             onChanged: _onSearchChanged,
           ),
           const SizedBox(height: AppSpacing.sm),
           LocationSourceActions(onMap: _openMap, onSaved: _openSaved),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _openMap,
+              icon: const Icon(Icons.my_location_rounded, color: AppColors.orange),
+              label: Text(
+                'Current location',
+                style: AppTextStyles.caption.copyWith(
+                  color: AppColors.navy,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
           if (pickupChosen) ...[
-            const SizedBox(height: AppSpacing.sm),
             GlassContainer(
               padding: const EdgeInsets.all(AppSpacing.md),
               child: Text(
-                draft.pickup!.address.isNotEmpty
-                    ? draft.pickup!.address
+                draft.pickupAddressText.isNotEmpty
+                    ? draft.pickupAddressText
                     : draft.pickup!.label,
                 style: AppTextStyles.bodyMedium,
               ),
             ),
+            const SizedBox(height: AppSpacing.sm),
           ],
-          const SizedBox(height: AppSpacing.md),
-          Text('Recent', style: AppTextStyles.headingS),
-          const SizedBox(height: AppSpacing.md),
           Expanded(
             child: showSuggestions
-                ? ListView.separated(
-                    itemCount: _placeSuggestions.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: AppSpacing.sm),
-                    itemBuilder: (context, index) =>
-                        _suggestionTile(_placeSuggestions[index]),
-                  )
-                : recents.isEmpty
+                ? (_placeSuggestions.isEmpty
                     ? GlassContainer(
                         child: Text(
-                          _search.text.trim().length >= 2
-                              ? 'No matching places'
-                              : 'No recent searches',
+                          'No matching places',
                           style: AppTextStyles.body.copyWith(
                             color: AppColors.textSecondary,
                           ),
@@ -263,29 +273,77 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
                         ),
                       )
                     : ListView.separated(
-                        itemCount: recents.length,
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        itemCount: _placeSuggestions.length,
                         separatorBuilder: (_, __) =>
                             const SizedBox(height: AppSpacing.sm),
-                        itemBuilder: (context, index) {
-                          final MockLocation loc = recents[index];
-                          return _catalogTile(
+                        itemBuilder: (context, index) =>
+                            _suggestionTile(_placeSuggestions[index]),
+                      ))
+                : ListView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    children: [
+                      Text('Recent searches', style: AppTextStyles.headingS),
+                      const SizedBox(height: AppSpacing.md),
+                      if (recents.isEmpty)
+                        GlassContainer(
+                          child: Text(
+                            'No recent searches',
+                            style: AppTextStyles.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      else
+                        for (final MockLocation loc in recents) ...[
+                          _catalogTile(
                             loc,
                             draft.pickup?.id == loc.id,
-                          );
-                        },
-                      ),
+                            onDelete: () => ref
+                                .read(recentLocationsProvider.notifier)
+                                .forget(loc.id),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                      const SizedBox(height: AppSpacing.md),
+                      Text('Saved addresses', style: AppTextStyles.headingS),
+                      const SizedBox(height: AppSpacing.md),
+                      if (saved.isEmpty)
+                        GlassContainer(
+                          child: Text(
+                            'No saved addresses',
+                            style: AppTextStyles.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      else
+                        for (final MockLocation loc in saved) ...[
+                          _catalogTile(loc, draft.pickup?.id == loc.id),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                    ],
+                  ),
           ),
         ],
       ),
     );
   }
 
-  Widget _catalogTile(MockLocation loc, bool selected) {
+  Widget _catalogTile(
+    MockLocation loc,
+    bool selected, {
+    VoidCallback? onDelete,
+  }) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: AppRadius.lgAll,
-        onTap: () => ref.read(bookingDraftProvider.notifier).setPickup(loc),
+        onTap: () => _finishPickup(loc),
         child: GlassContainer(
           padding: const EdgeInsets.all(AppSpacing.lg),
           borderRadius: AppRadius.lgAll,
@@ -310,7 +368,16 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
                   ],
                 ),
               ),
-              if (selected)
+              if (onDelete != null)
+                IconButton(
+                  tooltip: 'Delete recent search',
+                  onPressed: onDelete,
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: AppColors.orange,
+                  ),
+                )
+              else if (selected)
                 const Icon(Icons.check_circle, color: AppColors.orange),
             ],
           ),

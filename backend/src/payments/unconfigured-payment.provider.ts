@@ -12,6 +12,12 @@ import {
 @Injectable()
 export class UnconfiguredPaymentProvider implements PaymentProvider {
   beginOnlineCharge(_input: OnlineChargeIntent): OnlineChargeBeginResult {
-    return { providerTxnId: null, providerEventId: null };
+    return {
+      providerTxnId: null,
+      providerEventId: null,
+      paymentSessionId: null,
+      gatewayOrderId: null,
+      environment: null,
+    };
   }
 }

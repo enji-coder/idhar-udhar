@@ -1,6 +1,8 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { formatInr } from '../src/fare/money';
+import { CashfreeWebhookService } from '../src/payments/cashfree-webhook.service';
+import { parseCashfreeWebhook } from '../src/payments/cashfree-webhook.parse';
 import { PostgresService } from '../src/database/postgres.service';
 import { FinanceService } from '../src/payments/finance.service';
 import {
@@ -731,5 +733,213 @@ describe('Payments and finance (e2e)', () => {
       .get(`/v1/orders/${order.orderId}/payment`)
       .set(bearer(order.token));
     expect(payment.body.payment_status.overall.status).toBe('UNPAID');
+  });
+
+  it('does not require Cashfree for a cash collection', async () => {
+    const order = await createConfirmedOrder();
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/responsibility`)
+      .set(bearer(order.token))
+      .send({ who_pays: 'CUSTOMER' });
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/plan`)
+      .set(bearer(order.token))
+      .send({
+        customer_planned_online: '0.00',
+        customer_planned_cash: order.netPayable,
+        receiver_planned_online: '0.00',
+        receiver_planned_cash: '0.00',
+      });
+    const cash = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/transactions`)
+      .set(bearer(admin.tokens.accessToken))
+      .set('Idempotency-Key', uniqueIdempotencyKey())
+      .send({
+        payer_type: 'CUSTOMER',
+        method: 'CASH',
+        amount: order.netPayable,
+      });
+    expect(cash.status).toBe(201);
+    expect(cash.body.transaction_status).toBe('PAID');
+    expect(cash.body.payment_session_id).toBeUndefined();
+    const gateway = await postgres.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM payment_gateway_attempts WHERE payment_transaction_id = $1`,
+      [cash.body.payment_transaction_id],
+    );
+    expect(gateway.rows[0].n).toBe('0');
+  });
+
+  it('rejects an unsigned Cashfree webhook while the provider is unconfigured', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/v1/payments/cashfree/webhook')
+      .set('content-type', 'application/json')
+      .send({ type: 'PAYMENT_SUCCESS_WEBHOOK' });
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe('PAYMENT_PROVIDER_UNAVAILABLE');
+  });
+
+  it('marks a pending online charge PAID once from a verified webhook and does not post commission or wallet', async () => {
+    const order = await createConfirmedOrder();
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/responsibility`)
+      .set(bearer(order.token))
+      .send({ who_pays: 'CUSTOMER' });
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/plan`)
+      .set(bearer(order.token))
+      .send({
+        customer_planned_online: order.netPayable,
+        customer_planned_cash: '0.00',
+        receiver_planned_online: '0.00',
+        receiver_planned_cash: '0.00',
+      });
+    const pending = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/transactions`)
+      .set(bearer(order.token))
+      .set('Idempotency-Key', uniqueIdempotencyKey())
+      .send({
+        payer_type: 'CUSTOMER',
+        method: 'ONLINE',
+        amount: order.netPayable,
+      });
+    expect(pending.status).toBe(201);
+    expect(pending.body.transaction_status).toBe('PENDING');
+    const gatewayOrderId = `iu${pending.body.payment_transaction_id.replace(/-/g, '').slice(0, 32)}`;
+    await postgres.query(
+      `
+      INSERT INTO payment_gateway_attempts (
+        payment_transaction_id, provider, environment, gateway_order_id,
+        cf_order_id, payment_session_id, currency, amount, gateway_status
+      )
+      VALUES ($1, 'cashfree', 'sandbox', $2, 'cf-test', 'session-test', 'INR', $3::numeric(12,2), 'ACTIVE')
+      `,
+      [pending.body.payment_transaction_id, gatewayOrderId, pending.body.amount],
+    );
+    const verify = await request(app.getHttpServer())
+      .post(
+        `/v1/orders/${order.orderId}/payment/transactions/${pending.body.payment_transaction_id}/verify`,
+      )
+      .set(bearer(order.token))
+      .send({});
+    expect(verify.status).toBe(200);
+    expect(verify.body.transaction_status).toBe('PENDING');
+    expect(verify.body.authoritative).toBe(false);
+
+    const rawBody = JSON.stringify({
+      type: 'PAYMENT_SUCCESS_WEBHOOK',
+      data: {
+        order: {
+          order_id: gatewayOrderId,
+          order_amount: Number(pending.body.amount),
+          order_currency: 'INR',
+        },
+        payment: {
+          cf_payment_id: '5114933189368',
+          payment_status: 'SUCCESS',
+          payment_amount: Number(pending.body.amount),
+          payment_currency: 'INR',
+        },
+      },
+    });
+    const parsed = parseCashfreeWebhook(JSON.parse(rawBody));
+    const webhooks = app.get(CashfreeWebhookService);
+    const eventId = `evt-${pending.body.payment_transaction_id}`;
+    const [first, second] = await Promise.all([
+      webhooks.apply({ eventId, rawBody, parsed }),
+      webhooks.apply({ eventId, rawBody, parsed }),
+    ]);
+    expect([first, second].sort()).toEqual(['applied', 'duplicate']);
+    const again = await webhooks.apply({
+      eventId: `${eventId}-replay`,
+      rawBody,
+      parsed,
+    });
+    expect(again).toBe('ignored');
+
+    const stored = await postgres.query<{ transaction_status: string }>(
+      `SELECT transaction_status FROM payment_transactions WHERE payment_transaction_id = $1`,
+      [pending.body.payment_transaction_id],
+    );
+    expect(stored.rows[0].transaction_status).toBe('PAID');
+    const paid = await request(app.getHttpServer())
+      .get(`/v1/orders/${order.orderId}/payment`)
+      .set(bearer(order.token));
+    expect(paid.body.payment_status.overall.status).toBe('PAID');
+    const sideEffects = await postgres.query<{
+      finance_rows: string;
+      wallet_rows: string;
+      notices: string;
+    }>(
+      `
+      SELECT
+        (SELECT COUNT(*) FROM order_finance_snapshots WHERE order_id = $1)::text AS finance_rows,
+        (SELECT COUNT(*) FROM wallet_ledger_entries WHERE related_order_id = $1)::text AS wallet_rows,
+        (SELECT COUNT(*) FROM notifications WHERE order_id = $1 AND type = 'PAYMENT_SUCCESSFUL')::text AS notices
+      `,
+      [order.orderId],
+    );
+    expect(sideEffects.rows[0].finance_rows).toBe('0');
+    expect(sideEffects.rows[0].wallet_rows).toBe('0');
+    expect(sideEffects.rows[0].notices).toBe('1');
+  });
+
+  it('does not mark PAID when the webhook amount does not match the charge', async () => {
+    const order = await createConfirmedOrder();
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/responsibility`)
+      .set(bearer(order.token))
+      .send({ who_pays: 'CUSTOMER' });
+    await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/plan`)
+      .set(bearer(order.token))
+      .send({
+        customer_planned_online: order.netPayable,
+        customer_planned_cash: '0.00',
+        receiver_planned_online: '0.00',
+        receiver_planned_cash: '0.00',
+      });
+    const pending = await request(app.getHttpServer())
+      .post(`/v1/orders/${order.orderId}/payment/transactions`)
+      .set(bearer(order.token))
+      .set('Idempotency-Key', uniqueIdempotencyKey())
+      .send({
+        payer_type: 'CUSTOMER',
+        method: 'ONLINE',
+        amount: order.netPayable,
+      });
+    const gatewayOrderId = `iu${pending.body.payment_transaction_id.replace(/-/g, '').slice(0, 32)}`;
+    await postgres.query(
+      `
+      INSERT INTO payment_gateway_attempts (
+        payment_transaction_id, provider, environment, gateway_order_id,
+        cf_order_id, payment_session_id, currency, amount, gateway_status
+      )
+      VALUES ($1, 'cashfree', 'sandbox', $2, 'cf-mismatch', 'session-test', 'INR', $3::numeric(12,2), 'ACTIVE')
+      `,
+      [pending.body.payment_transaction_id, gatewayOrderId, pending.body.amount],
+    );
+    const rawBody = JSON.stringify({
+      type: 'PAYMENT_SUCCESS_WEBHOOK',
+      data: {
+        order: { order_id: gatewayOrderId, order_amount: 1, order_currency: 'INR' },
+        payment: {
+          cf_payment_id: '1',
+          payment_status: 'SUCCESS',
+          payment_amount: 1,
+          payment_currency: 'INR',
+        },
+      },
+    });
+    const result = await app.get(CashfreeWebhookService).apply({
+      eventId: `bad-${pending.body.payment_transaction_id}`,
+      rawBody,
+      parsed: parseCashfreeWebhook(JSON.parse(rawBody)),
+    });
+    expect(result).toBe('rejected');
+    const stored = await postgres.query<{ transaction_status: string }>(
+      `SELECT transaction_status FROM payment_transactions WHERE payment_transaction_id = $1`,
+      [pending.body.payment_transaction_id],
+    );
+    expect(stored.rows[0].transaction_status).toBe('PENDING');
   });
 });

@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/data/mock/mock_data.dart';
+import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/theme/theme.dart';
@@ -58,6 +58,22 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
   }
 
   String _presetLabel(double kg) => '${_formatWeight(kg)} kg';
+
+  String _vehicleArtwork(BookingDraft draft) {
+    final MockVehicle? vehicle = draft.vehicle;
+    if (vehicle != null && vehicle.imagePath.isNotEmpty) {
+      return vehicle.imagePath;
+    }
+    switch (draft.serviceFamily) {
+      case ServiceFamily.twoWheeler:
+        return MockData.artworkFor(VehicleType.bike);
+      case ServiceFamily.threeWheeler:
+        return MockData.artworkFor(VehicleType.auto);
+      case ServiceFamily.truck:
+      case null:
+        return MockData.artworkFor(VehicleType.truck);
+    }
+  }
 
   void _selectPreset(double kg) {
     setState(() => _useCustomWeight = false);
@@ -117,8 +133,8 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
                     ],
                   ),
                 ),
-                const SafeAssetImage(
-                  path: AssetPaths.truck,
+                SafeAssetImage(
+                  path: _vehicleArtwork(draft),
                   height: 56,
                   fit: BoxFit.contain,
                 ),

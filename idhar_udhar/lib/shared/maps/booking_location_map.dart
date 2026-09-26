@@ -18,6 +18,7 @@ class BookingLocationMap extends ConsumerStatefulWidget {
     this.statusPrefix = 'Map preview',
     this.height = 148,
     this.locateOnStart = false,
+    this.requestPermissionOnStart = false,
     this.showCaption = true,
   });
 
@@ -26,6 +27,7 @@ class BookingLocationMap extends ConsumerStatefulWidget {
   final String statusPrefix;
   final double height;
   final bool locateOnStart;
+  final bool requestPermissionOnStart;
   final bool showCaption;
 
   @override
@@ -39,15 +41,15 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
   bool _locating = false;
   GeoPoint? _lastGeocoded;
 
-  GeoPoint get _cameraTarget {
+  GeoPoint? get _cameraTarget {
     final MockLocation? selected = widget.selected;
-    if (selected?.latitude != null && selected?.longitude != null) {
-      return GeoPoint(
-        latitude: selected!.latitude!,
-        longitude: selected.longitude!,
-      );
+    if (selected?.latitude == null || selected?.longitude == null) {
+      return null;
     }
-    return MapsDefaults.cityCenter;
+    return GeoPoint(
+      latitude: selected!.latitude!,
+      longitude: selected.longitude!,
+    );
   }
 
   @override
@@ -57,7 +59,9 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     if (widget.locateOnStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _useCurrentLocation(requestPermission: false);
+          _useCurrentLocation(
+            requestPermission: widget.requestPermissionOnStart,
+          );
         }
       });
     }
@@ -91,7 +95,7 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     }
     setState(() {
       _locating = true;
-      _status = 'Locating…';
+      _status = 'Getting your current location...';
     });
     final LocationResult result = await ref
         .read(deviceLocationServiceProvider)
@@ -114,11 +118,12 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
       return;
     }
     _lastGeocoded = point;
+    final String address = resolved?.address.trim() ?? '';
     widget.onSelected(
       MockLocation(
         id: 'loc_current',
-        label: 'Current Location',
-        address: resolved?.address ?? 'Current location',
+        label: address.isEmpty ? 'Current Location' : _shortLabel(address),
+        address: address,
         city: resolved?.city ?? '',
         iconName: 'my_location',
         latitude: point.latitude,
@@ -127,7 +132,9 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     );
     setState(() {
       _locating = false;
-      _status = null;
+      _status = address.isEmpty
+          ? 'Current location found. Address could not be read — move the pin or search.'
+          : null;
     });
   }
 
@@ -158,11 +165,20 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     if (!mounted) {
       return;
     }
+    final String address = resolved?.address.trim() ?? '';
+    if (address.isEmpty) {
+      setState(() {
+        _status =
+            'Could not read this address. Move the pin or search again.';
+      });
+    } else if (_status != null) {
+      setState(() => _status = null);
+    }
     widget.onSelected(
       MockLocation(
         id: 'map_pin',
-        label: 'Pinned location',
-        address: resolved?.address ?? 'Pinned location',
+        label: address.isEmpty ? 'Pinned location' : _shortLabel(address),
+        address: address,
         city: resolved?.city ?? '',
         iconName: 'place',
         latitude: point.latitude,
@@ -171,23 +187,34 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     );
   }
 
+  String _shortLabel(String address) {
+    final String part = address.split(',').first.trim();
+    return part.isEmpty ? address : part;
+  }
+
   @override
   Widget build(BuildContext context) {
     final MockLocation? selected = widget.selected;
-    final String caption = selected?.address ?? 'Move the map to set a pin';
+    final GeoPoint? camera = _cameraTarget;
+    final String caption = (selected?.address.trim().isNotEmpty ?? false)
+        ? selected!.address
+        : (_status ?? 'Move the map to set a pin');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        EmbeddedGoogleMap(
-          height: widget.height,
-          initial: _cameraTarget,
-          follow: true,
-          showCenterPin: true,
-          myLocationEnabled: true,
-          onMyLocation: () => _useCurrentLocation(),
-          onCameraIdle: _onCameraIdle,
-          statusMessage: _status,
-        ),
+        if (camera == null)
+          _awaitingFix(height: widget.height)
+        else
+          EmbeddedGoogleMap(
+            height: widget.height,
+            initial: camera,
+            follow: true,
+            showCenterPin: true,
+            myLocationEnabled: true,
+            onMyLocation: () => _useCurrentLocation(),
+            onCameraIdle: _onCameraIdle,
+            statusMessage: _status,
+          ),
         if (widget.showCaption) ...[
           const SizedBox(height: AppSpacing.sm),
           Text(widget.statusPrefix, style: AppTextStyles.bodyMedium),
@@ -201,6 +228,65 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _awaitingFix({required double height}) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: AppRadius.xlAll,
+        border: Border.all(color: AppColors.borderGlass),
+        color: AppColors.navy.withValues(alpha: 0.06),
+      ),
+      child: SizedBox(
+        height: height,
+        width: double.infinity,
+        child: Stack(
+          children: [
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_locating) ...[
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
+                    Text(
+                      _status ??
+                          (_locating
+                              ? 'Getting your current location...'
+                              : 'Search for a place or use your current location.'),
+                      style: AppTextStyles.bodyMedium.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              right: AppSpacing.sm,
+              bottom: AppSpacing.sm,
+              child: Material(
+                color: AppColors.white,
+                shape: const CircleBorder(),
+                elevation: 2,
+                child: IconButton(
+                  tooltip: 'Use current location',
+                  onPressed: _locating ? null : () => _useCurrentLocation(),
+                  icon: const Icon(
+                    Icons.my_location_rounded,
+                    color: AppColors.orange,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

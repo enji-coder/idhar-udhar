@@ -125,7 +125,7 @@ abstract final class MockData {
       capacity: 'Up to 20 kg',
       etaMinutes: 14,
       baseFare: 89,
-      imagePath: AssetPaths.bike,
+      imagePath: AssetPaths.scooty,
     ),
     const MockVehicle(
       id: 'v_auto',
@@ -197,17 +197,39 @@ abstract final class MockData {
     return false;
   }
 
+  static String artworkFor(VehicleType type) {
+    switch (type) {
+      case VehicleType.bike:
+        return AssetPaths.bike;
+      case VehicleType.scooty:
+        return AssetPaths.scooty;
+      case VehicleType.auto:
+        return AssetPaths.auto;
+      case VehicleType.car:
+        return AssetPaths.car;
+      case VehicleType.pickup:
+        return AssetPaths.pickupTruck;
+      case VehicleType.truck:
+        return AssetPaths.truck;
+    }
+  }
+
   static MockVehicle _synthesized(VehicleCategory category) {
     final lower = category.name.toLowerCase();
-    final isTwo = lower.contains('bike') || lower.contains('scooter');
+    final bool isScooty = lower.contains('scoot');
+    final bool isBike = lower.contains('bike') && !isScooty;
+    final bool isTwo = isScooty || isBike;
     final isAuto = lower.contains('auto');
+    final VehicleType type = isScooty
+        ? VehicleType.scooty
+        : isBike
+            ? VehicleType.bike
+            : isAuto
+                ? VehicleType.auto
+                : VehicleType.truck;
     return MockVehicle(
       id: 'v_${category.id.toLowerCase()}',
-      type: isTwo
-          ? VehicleType.bike
-          : isAuto
-              ? VehicleType.auto
-              : VehicleType.truck,
+      type: type,
       name: category.name,
       description: 'Admin-managed vehicle type',
       capacity: isTwo
@@ -217,11 +239,7 @@ abstract final class MockData {
               : 'Up to 1000 kg',
       etaMinutes: isTwo ? 12 : isAuto ? 15 : 28,
       baseFare: isTwo ? 79 : isAuto ? 149 : 499,
-      imagePath: isTwo
-          ? AssetPaths.bike
-          : isAuto
-              ? AssetPaths.auto
-              : AssetPaths.truck,
+      imagePath: artworkFor(type),
     );
   }
 

@@ -23,9 +23,11 @@ const adminAuth: AuthContext = {
 
 function makeService(opts?: {
   remainingOwed?: string;
+  availableForPending?: string;
   beginOnlineCharge?: jest.Mock;
 }) {
   const remaining = opts?.remainingOwed ?? '100.00';
+  const available = opts?.availableForPending ?? remaining;
   const inserted: Record<string, unknown>[] = [];
   const tx = {
     query: jest.fn(),
@@ -57,6 +59,7 @@ function makeService(opts?: {
     })),
     findPlan: jest.fn(async () => ({})),
     remainingOwed: jest.fn(async () => remaining),
+    availableForPendingOnline: jest.fn(async () => available),
     amountExceeds: jest.fn(async (left: string, right: string) => {
       const [a, b] = await Promise.all([
         Promise.resolve(left),
@@ -106,6 +109,7 @@ function makeService(opts?: {
       ),
     );
   const provider = { beginOnlineCharge };
+  const gateway = { insertAttempt: jest.fn(async () => undefined) };
   const service = new PaymentsService(
     postgres as never,
     orders as never,
@@ -116,6 +120,7 @@ function makeService(opts?: {
     paymentNotifications as never,
     identities as never,
     provider as never,
+    gateway as never,
   );
   return {
     service,
@@ -153,6 +158,29 @@ describe('PaymentsService createTransaction', () => {
       method: 'ONLINE',
     });
     expect(walletCod.syncOrderFinance).not.toHaveBeenCalled();
+  });
+
+  it('rejects a second pending online charge that would reserve more than the bill', async () => {
+    const { service, beginOnlineCharge, inserted } = makeService({
+      availableForPending: '0.00',
+    });
+    await expect(
+      service.createTransaction(
+        customerAuth,
+        ORDER_ID,
+        {
+          payer_type: 'CUSTOMER',
+          method: 'ONLINE',
+          amount: '100.00',
+        },
+        'idem-online-reserved',
+      ),
+    ).rejects.toMatchObject({
+      code: ErrorCodes.PAYMENT_EXCEEDS_OWED,
+      status: 409,
+    });
+    expect(beginOnlineCharge).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
   });
 
   it('rejects an ONLINE amount above remaining owed and does not call the provider', async () => {

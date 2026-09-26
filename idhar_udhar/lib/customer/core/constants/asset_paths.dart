@@ -65,6 +65,10 @@ abstract final class AssetPaths {
   static const String bike =
       'assets/customer/images/3d/idhar_udhar_delivery_bike.png';
 
+  /// Second two-wheeler artwork, used for Scooty.
+  static const String scooty =
+      'assets/customer/images/3d/idhar_udhar_delivery_bike_2.png';
+
   /// Auto-rickshaw / three-wheeler delivery vehicle.
   static const String auto =
       'assets/customer/images/3d/idhar_udhar_auto_rickshaw.png';

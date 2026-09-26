@@ -19,6 +19,7 @@ import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 import '../widgets/location_source_actions.dart';
 import '../widgets/saved_address_picker_sheet.dart';
+import 'complete_address_screen.dart';
 import 'map_location_picker_screen.dart';
 
 class DropLocationScreen extends ConsumerStatefulWidget {
@@ -220,6 +221,8 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
 
   Widget _buildSingleBody(BookingDraft draft) {
     final List<MockLocation> recents = ref.watch(recentLocationsProvider);
+    final List<MockLocation> saved =
+        ref.watch(savedAddressesProvider).addresses;
     final bool showSuggestions =
         _search.text.trim().length >= 2 && _placeSuggestions.isNotEmpty;
     final double keyboard = MediaQuery.viewInsetsOf(context).bottom;
@@ -276,7 +279,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.only(top: AppSpacing.md),
-            child: Text('Recent', style: AppTextStyles.headingS),
+            child: Text('Recent searches', style: AppTextStyles.headingS),
           ),
         ),
         if (showSuggestions)
@@ -312,7 +315,44 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               return _placeTile(
                 loc: loc,
                 selected: draft.drop?.id == loc.id,
-                onTap: () => _selectDrop(0, loc),
+                onTap: () => _finishDrop(loc, null),
+                onDelete: () =>
+                    ref.read(recentLocationsProvider.notifier).forget(loc.id),
+              );
+            },
+          ),
+        if (!showSuggestions)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.md),
+              child: Text('Saved addresses', style: AppTextStyles.headingS),
+            ),
+          ),
+        if (!showSuggestions && saved.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.md),
+              child: GlassContainer(
+                child: Text(
+                  'No saved addresses',
+                  style: AppTextStyles.body.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          )
+        else if (!showSuggestions)
+          SliverList.separated(
+            itemCount: saved.length,
+            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+            itemBuilder: (context, index) {
+              final MockLocation loc = saved[index];
+              return _placeTile(
+                loc: loc,
+                selected: draft.drop?.id == loc.id,
+                onTap: () => _finishDrop(loc, null),
               );
             },
           ),
@@ -487,30 +527,58 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   }
 
   Widget _pickupChip(BookingDraft draft) {
-    return GlassContainer(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      borderRadius: AppRadius.lgAll,
-      child: Row(
-        children: [
-          const Icon(Icons.trip_origin, color: AppColors.orange),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'Pickup: ${draft.pickup!.label}',
-              style: AppTextStyles.caption,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GlassContainer(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          borderRadius: AppRadius.lgAll,
+          child: Row(
+            children: [
+              const Icon(Icons.trip_origin, color: AppColors.orange),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Pickup: ${draft.pickup!.label}',
+                  style: AppTextStyles.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        _RouteDistanceLabel(points: _distancePoints(draft)),
+      ],
     );
+  }
+
+  List<GeoPoint> _distancePoints(BookingDraft draft) {
+    final List<GeoPoint> points = <GeoPoint>[];
+    final MockLocation? pickup = draft.pickup;
+    if (pickup?.latitude == null || pickup?.longitude == null) {
+      return points;
+    }
+    points.add(
+      GeoPoint(latitude: pickup!.latitude!, longitude: pickup.longitude!),
+    );
+    for (int i = 0; i < draft.requiredDropCount; i++) {
+      final MockLocation? drop = draft.dropAt(i);
+      if (drop?.latitude == null || drop?.longitude == null) {
+        break;
+      }
+      points.add(
+        GeoPoint(latitude: drop!.latitude!, longitude: drop.longitude!),
+      );
+    }
+    return points;
   }
 
   Widget _placeTile({
     required MockLocation loc,
     required bool selected,
     required VoidCallback onTap,
+    VoidCallback? onDelete,
   }) {
     return Material(
       color: Colors.transparent,
@@ -541,7 +609,16 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                   ],
                 ),
               ),
-              if (selected)
+              if (onDelete != null)
+                IconButton(
+                  tooltip: 'Delete recent search',
+                  onPressed: onDelete,
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    color: AppColors.orange,
+                  ),
+                )
+              else if (selected)
                 const Icon(Icons.check_circle, color: AppColors.orange),
             ],
           ),
@@ -687,14 +764,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
         latitude: details.latitude,
         longitude: details.longitude,
       );
-      if (dropIndex == null) {
-        ref.read(bookingDraftProvider.notifier).setDrop(loc);
-        _search.text = suggestion.primaryText;
-      } else {
-        _selectDrop(dropIndex, loc);
-      }
-      await ref.read(recentLocationsProvider.notifier).remember(loc);
-      setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+      await _finishDrop(loc, dropIndex);
     } finally {
       if (mounted) {
         setState(() => _resolvingPlace = false);
@@ -790,6 +860,23 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     }
   }
 
+  Future<void> _finishDrop(MockLocation location, int? dropIndex) async {
+    final MockLocation? confirmed =
+        await CompleteAddressScreen.open(context, initial: location);
+    if (!mounted || confirmed == null) {
+      return;
+    }
+    if (dropIndex == null) {
+      ref.read(bookingDraftProvider.notifier).setDrop(confirmed);
+      _search.text =
+          confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
+    } else {
+      _selectDrop(dropIndex, confirmed);
+    }
+    await ref.read(recentLocationsProvider.notifier).remember(confirmed);
+    setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+  }
+
   Future<void> _openMap([int? dropIndex]) async {
     final BookingDraft draft = ref.read(bookingDraftProvider);
     final MockLocation? current =
@@ -801,13 +888,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     if (!mounted || picked == null) {
       return;
     }
-    if (dropIndex == null) {
-      ref.read(bookingDraftProvider.notifier).setDrop(picked);
-      _search.text = picked.address.isNotEmpty ? picked.address : picked.label;
-    } else {
-      _selectDrop(dropIndex, picked);
-    }
-    await ref.read(recentLocationsProvider.notifier).remember(picked);
+    await _finishDrop(picked, dropIndex);
   }
 
   Future<void> _openSaved([int? dropIndex]) async {
@@ -815,13 +896,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     if (!mounted || picked == null) {
       return;
     }
-    if (dropIndex == null) {
-      ref.read(bookingDraftProvider.notifier).setDrop(picked);
-      _search.text = picked.address.isNotEmpty ? picked.address : picked.label;
-    } else {
-      _selectDrop(dropIndex, picked);
-    }
-    await ref.read(recentLocationsProvider.notifier).remember(picked);
+    await _finishDrop(picked, dropIndex);
   }
 
   void _selectDrop(int index, MockLocation loc) {
@@ -897,6 +972,105 @@ class _ModeTile extends StatelessWidget {
               color: AppColors.navy,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RouteDistanceLabel extends ConsumerStatefulWidget {
+  const _RouteDistanceLabel({required this.points});
+
+  final List<GeoPoint> points;
+
+  @override
+  ConsumerState<_RouteDistanceLabel> createState() =>
+      _RouteDistanceLabelState();
+}
+
+class _RouteDistanceLabelState extends ConsumerState<_RouteDistanceLabel> {
+  String _key = '';
+  String? _label;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _RouteDistanceLabel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_signature(widget.points) != _key) {
+      unawaited(_load());
+    }
+  }
+
+  String _signature(List<GeoPoint> points) {
+    return points
+        .map(
+          (GeoPoint point) =>
+              '${point.latitude.toStringAsFixed(5)},${point.longitude.toStringAsFixed(5)}',
+        )
+        .join('|');
+  }
+
+  double? _straightKm(List<GeoPoint> points) {
+    if (points.length < 2) {
+      return null;
+    }
+    double total = 0;
+    for (int i = 1; i < points.length; i++) {
+      total += GeoMath.haversineKm(
+        lat1: points[i - 1].latitude,
+        lng1: points[i - 1].longitude,
+        lat2: points[i].latitude,
+        lng2: points[i].longitude,
+      );
+    }
+    return total;
+  }
+
+  Future<void> _load() async {
+    final List<GeoPoint> points = widget.points;
+    final String key = _signature(points);
+    _key = key;
+    if (points.length < 2) {
+      if (mounted && _label != null) {
+        setState(() => _label = null);
+      }
+      return;
+    }
+    final DisplayRoute? route = await ref.read(routesServiceProvider).compute(
+          origin: points.first,
+          destination: points.last,
+          intermediates: points.length > 2
+              ? points.sublist(1, points.length - 1)
+              : const <GeoPoint>[],
+        );
+    if (!mounted || _key != key) {
+      return;
+    }
+    final double? km = route?.distanceKm ?? _straightKm(points);
+    if (km == null) {
+      setState(() => _label = null);
+      return;
+    }
+    setState(() => _label = 'Distance: ${km.toStringAsFixed(1)} km');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_label == null) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Text(
+        _label!,
+        style: AppTextStyles.bodyMedium.copyWith(
+          color: AppColors.navy,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

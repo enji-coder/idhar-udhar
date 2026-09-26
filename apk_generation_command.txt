@@ -2,3 +2,5 @@ cd
 flutter clean
 flutter pub get
 flutter build apk --release --flavor rider -t lib/rider/rider_main.dart
+
+flutter build apk --release --flavor customer -t lib/customer/customer_main.dart --dart-define=API_BASE_URL=https://api.idharudhar.co.in

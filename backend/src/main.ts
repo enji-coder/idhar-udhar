@@ -5,7 +5,10 @@ import { AppLogger } from './common/logger/app-logger';
 import { envFilePaths } from './config/configuration';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   configureApp(app);
   const logger = app.get(AppLogger);
   const port = Number(process.env.PORT ?? 3000);

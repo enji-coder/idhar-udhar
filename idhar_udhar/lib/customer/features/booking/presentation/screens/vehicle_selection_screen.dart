@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:idhar_udhar/customer/core/constants/asset_paths.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../../../core/constants/app_copy.dart';
@@ -16,6 +15,30 @@ import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 
+List<MockVehicle> _vehiclesForFamily(
+  List<MockVehicle> vehicles,
+  ServiceFamily? family,
+) {
+  if (family == null) {
+    return vehicles;
+  }
+  return vehicles
+      .where((MockVehicle vehicle) {
+        switch (family) {
+          case ServiceFamily.twoWheeler:
+            return vehicle.type == VehicleType.bike ||
+                vehicle.type == VehicleType.scooty;
+          case ServiceFamily.threeWheeler:
+            return vehicle.type == VehicleType.auto;
+          case ServiceFamily.truck:
+            return vehicle.type == VehicleType.truck ||
+                vehicle.type == VehicleType.pickup ||
+                vehicle.type == VehicleType.car;
+        }
+      })
+      .toList(growable: false);
+}
+
 MockVehicle _vehicleFromCategory(VehicleCategory category) {
   final String lower = category.name.toLowerCase();
   final VehicleType type = lower.contains('scoot')
@@ -25,11 +48,7 @@ MockVehicle _vehicleFromCategory(VehicleCategory category) {
           : (lower.contains('auto') || lower.contains('3w'))
               ? VehicleType.auto
               : VehicleType.truck;
-  final String image = type == VehicleType.bike || type == VehicleType.scooty
-      ? AssetPaths.bike
-      : type == VehicleType.auto
-          ? AssetPaths.auto
-          : AssetPaths.truck;
+  final String image = MockData.artworkFor(type);
   return MockVehicle(
     id: category.id,
     type: type,
@@ -54,7 +73,10 @@ class VehicleSelectionScreen extends ConsumerWidget {
     final catalog = ref.watch(vehicleCategoryCatalogProvider);
     final draft = ref.watch(bookingDraftProvider);
     final List<MockVehicle> options = catalog.maybeWhen(
-      data: (rows) => rows.map(_vehicleFromCategory).toList(growable: false),
+      data: (rows) => _vehiclesForFamily(
+        rows.map(_vehicleFromCategory).toList(growable: false),
+        draft.serviceFamily,
+      ),
       orElse: () => const <MockVehicle>[],
     );
     final bool showTwoWheelerNote = options.any(MockData.isTwoWheeler) &&
@@ -137,19 +159,39 @@ class VehicleSelectionScreen extends ConsumerWidget {
           const SizedBox(height: AppSpacing.lg),
           Expanded(
             child: catalog.isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: AppSpacing.md),
+                        Text('Loading available vehicles...'),
+                      ],
+                    ),
+                  )
                 : catalog.hasError
                     ? Center(
-                        child: Text(
-                          'Vehicle categories could not be loaded.',
-                          style: AppTextStyles.bodyMedium,
-                          textAlign: TextAlign.center,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Vehicle categories could not be loaded.',
+                              style: AppTextStyles.bodyMedium,
+                              textAlign: TextAlign.center,
+                            ),
+                            TextButton(
+                              onPressed: () => ref.invalidate(
+                                vehicleCategoryCatalogProvider,
+                              ),
+                              child: const Text('Retry'),
+                            ),
+                          ],
                         ),
                       )
                     : options.isEmpty
                         ? Center(
                             child: Text(
-                              'No vehicle categories are available.',
+                              'No vehicle categories are currently available.',
                               style: AppTextStyles.bodyMedium,
                               textAlign: TextAlign.center,
                             ),

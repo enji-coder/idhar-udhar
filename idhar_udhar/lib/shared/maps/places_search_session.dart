@@ -22,6 +22,7 @@ class PlacesSearchSession {
     _timer?.cancel();
     final String trimmed = text.trim();
     if (trimmed.length < 2) {
+      _generation++;
       onResult(const <PlaceSuggestion>[]);
       return;
     }

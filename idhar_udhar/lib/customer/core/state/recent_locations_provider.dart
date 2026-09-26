@@ -61,6 +61,22 @@ class RecentLocationsNotifier extends StateNotifier<List<MockLocation>> {
       jsonEncode(next.map((MockLocation e) => e.toJson()).toList()),
     );
   }
+
+  Future<void> forget(String id) async {
+    final String target = id.trim();
+    if (target.isEmpty) {
+      return;
+    }
+    final List<MockLocation> next = state
+        .where((MockLocation item) => item.id != target)
+        .toList(growable: false);
+    state = next;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _key,
+      jsonEncode(next.map((MockLocation e) => e.toJson()).toList()),
+    );
+  }
 }
 
 final recentLocationsProvider =

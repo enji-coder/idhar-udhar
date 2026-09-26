@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { cashfreeApiBaseUrl } from '../payments/cashfree-environment';
 import { parseFirebaseServiceAccountJson } from './firebase-credentials';
 
 export type AppConfig = {
@@ -87,11 +88,19 @@ export type AppConfig = {
   };
   payment: {
     /**
-     * Online adapter. Only `unconfigured` exists: record an ONLINE intent,
-     * never mark PAID, never call a gateway. Unknown values fail startup
-     * so production cannot silently assume Razorpay/Cashfree/Stripe/sandbox.
+     * unconfigured records an ONLINE intent and never marks PAID.
+     * cashfree calls Sandbox only. Production is parsed so the host can
+     * switch later, and is refused at startup in this phase.
      */
-    provider: 'unconfigured';
+    provider: 'unconfigured' | 'cashfree';
+    cashfree: {
+      environment: 'sandbox' | 'production';
+      clientId: string | null;
+      clientSecret: string | null;
+      apiVersion: string;
+      apiBaseUrl: string;
+      timeoutMs: number;
+    };
   };
   location: {
     /**
@@ -306,12 +315,39 @@ export function loadAppConfig(): AppConfig {
   const paymentRaw = (process.env.PAYMENT_PROVIDER ?? 'unconfigured')
     .trim()
     .toLowerCase();
-  if (paymentRaw !== 'unconfigured') {
+  if (paymentRaw !== 'unconfigured' && paymentRaw !== 'cashfree') {
     throw new Error(
-      'PAYMENT_PROVIDER must be unconfigured; no online payment vendor is implemented (refusing sandbox, mock capture, or an unnamed gateway)',
+      'PAYMENT_PROVIDER must be unconfigured or cashfree (refusing mock capture or an unnamed gateway)',
     );
   }
-  const paymentProvider = 'unconfigured' as const;
+  const paymentProvider = paymentRaw as 'unconfigured' | 'cashfree';
+  const cashfreeEnvironmentRaw =
+    (process.env.CASHFREE_ENVIRONMENT ?? '').trim().toLowerCase() || 'sandbox';
+  if (cashfreeEnvironmentRaw !== 'sandbox' && cashfreeEnvironmentRaw !== 'production') {
+    throw new Error('CASHFREE_ENVIRONMENT must be sandbox or production');
+  }
+  const cashfreeEnvironment = cashfreeEnvironmentRaw as 'sandbox' | 'production';
+  if (paymentProvider === 'cashfree' && cashfreeEnvironment === 'production') {
+    throw new Error(
+      'CASHFREE_ENVIRONMENT=production is not enabled. Use sandbox. The production host is selected later by this same setting.',
+    );
+  }
+  const cashfreeClientId = (process.env.CASHFREE_CLIENT_ID ?? '').trim() || null;
+  const cashfreeClientSecret = (process.env.CASHFREE_CLIENT_SECRET ?? '').trim() || null;
+  const cashfreeApiVersion =
+    (process.env.CASHFREE_API_VERSION ?? '').trim() || '2025-01-01';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cashfreeApiVersion)) {
+    throw new Error('CASHFREE_API_VERSION must look like 2025-01-01');
+  }
+  const cashfreeTimeoutMs = integer('CASHFREE_TIMEOUT_MS', 10000);
+  if (cashfreeTimeoutMs < 1000 || cashfreeTimeoutMs > 30000) {
+    throw new Error('CASHFREE_TIMEOUT_MS must be between 1000 and 30000');
+  }
+  if (paymentProvider === 'cashfree' && (!cashfreeClientId || !cashfreeClientSecret)) {
+    throw new Error(
+      'PAYMENT_PROVIDER=cashfree requires CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET',
+    );
+  }
 
   const redisEnabled = booleanFlag('REDIS_ENABLED', false);
   const redisHost = (process.env.REDIS_HOST ?? '').trim() || null;
@@ -417,6 +453,16 @@ export function loadAppConfig(): AppConfig {
     },
     payment: {
       provider: paymentProvider,
+      cashfree: {
+        environment: cashfreeEnvironment,
+        clientId: cashfreeClientId,
+        clientSecret: cashfreeClientSecret,
+        apiVersion: cashfreeApiVersion,
+        apiBaseUrl: cashfreeApiBaseUrl(
+          paymentProvider === 'cashfree' ? cashfreeEnvironment : 'sandbox',
+        ),
+        timeoutMs: cashfreeTimeoutMs,
+      },
     },
     location: {
       store: locationStore,

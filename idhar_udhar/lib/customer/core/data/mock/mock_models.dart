@@ -110,6 +110,8 @@ class MockLocation {
     this.isSaved = false,
     this.iconName = 'place',
     this.landmark = '',
+    this.unit = '',
+    this.premises = '',
     this.latitude,
     this.longitude,
     this.addressLabel,
@@ -124,6 +126,12 @@ class MockLocation {
   final bool isSaved;
   final String iconName;
   final String landmark;
+
+  /// House / flat number captured on Complete Your Address.
+  final String unit;
+
+  /// Society / building captured on Complete Your Address.
+  final String premises;
   final double? latitude;
   final double? longitude;
   final AddressLabel? addressLabel;
@@ -140,6 +148,8 @@ class MockLocation {
     bool? isSaved,
     String? iconName,
     String? landmark,
+    String? unit,
+    String? premises,
     double? latitude,
     double? longitude,
     AddressLabel? addressLabel,
@@ -154,6 +164,8 @@ class MockLocation {
       isSaved: isSaved ?? this.isSaved,
       iconName: iconName ?? this.iconName,
       landmark: landmark ?? this.landmark,
+      unit: unit ?? this.unit,
+      premises: premises ?? this.premises,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       addressLabel: addressLabel ?? this.addressLabel,
@@ -170,6 +182,8 @@ class MockLocation {
         'isSaved': isSaved,
         'iconName': iconName,
         'landmark': landmark,
+        'unit': unit,
+        'premises': premises,
         'latitude': latitude,
         'longitude': longitude,
         'addressLabel': addressLabel?.name,
@@ -187,6 +201,8 @@ class MockLocation {
       isSaved: json['isSaved'] as bool? ?? true,
       iconName: json['iconName'] as String? ?? 'place',
       landmark: json['landmark'] as String? ?? '',
+      unit: json['unit'] as String? ?? '',
+      premises: json['premises'] as String? ?? '',
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       addressLabel: labelName == null

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:idhar_udhar/customer/core/constants/asset_paths.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
@@ -115,5 +116,45 @@ void main() {
     expect(updatedA.status, OrderStatus.accepted);
     expect(draft().activeOrder?.id, b.id);
     expect(draft().activeOrder?.status, OrderStatus.searching);
+  });
+
+  test('selected vehicle artwork follows bike, scooty, and truck', () {
+    notifier.setVehicle(
+      MockData.vehicles.firstWhere((MockVehicle v) => v.type == VehicleType.bike),
+    );
+    expect(draft().vehicle!.imagePath, AssetPaths.bike);
+
+    notifier.setVehicle(
+      MockData.vehicles.firstWhere((MockVehicle v) => v.type == VehicleType.scooty),
+    );
+    expect(draft().vehicle!.imagePath, AssetPaths.scooty);
+    expect(draft().vehicle!.imagePath, isNot(AssetPaths.truck));
+
+    notifier.setVehicle(
+      MockData.vehicles.firstWhere((MockVehicle v) => v.type == VehicleType.truck),
+    );
+    expect(draft().vehicle!.imagePath, AssetPaths.truck);
+  });
+
+  test('two wheeler address keeps house and society editable and separate', () {
+    notifier.setServiceFamily(ServiceFamily.twoWheeler);
+    notifier.setPickup(loc('loc_paldi'));
+    notifier.setPickupUnit(house: 'B-12', society: 'Sunrise Society');
+
+    expect(draft().usesResidentialPickup, isTrue);
+    expect(draft().pickup!.address, 'Paldi Cross Road, Ahmedabad');
+    expect(
+      draft().pickupAddressText,
+      'B-12, Sunrise Society, Paldi Cross Road, Ahmedabad',
+    );
+  });
+
+  test('truck address text does not include residential fields', () {
+    notifier.setServiceFamily(ServiceFamily.truck);
+    notifier.setPickup(loc('loc_paldi'));
+    notifier.setPickupUnit(house: 'B-12', society: 'Sunrise Society');
+
+    expect(draft().usesResidentialPickup, isFalse);
+    expect(draft().pickupAddressText, 'Paldi Cross Road, Ahmedabad');
   });
 }

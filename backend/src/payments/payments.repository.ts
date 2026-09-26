@@ -199,6 +199,53 @@ export class PaymentsRepository {
     return result.rows[0];
   }
 
+  async findTransaction(
+    paymentTransactionId: string,
+    db: Queryable = this.postgres,
+  ): Promise<TransactionRow | null> {
+    const result = await db.query<TransactionRow>(
+      `SELECT ${TX_COLUMNS} FROM payment_transactions WHERE payment_transaction_id = $1`,
+      [paymentTransactionId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async availableForPendingOnline(
+    orderId: string,
+    payerType: PayerType,
+    db: Queryable,
+  ): Promise<string> {
+    const result = await db.query<{ available: string }>(
+      `
+      SELECT (
+        CASE WHEN $2 = 'CUSTOMER' THEN r.customer_responsibility ELSE r.receiver_responsibility END
+        - COALESCE((
+          SELECT SUM(CASE
+            WHEN direction = 'CHARGE' AND transaction_status = 'PAID' THEN amount
+            WHEN direction = 'REFUND' AND transaction_status = 'REFUNDED' THEN -amount
+            ELSE 0
+          END)
+          FROM payment_transactions t
+          WHERE t.order_id = r.order_id AND t.payer_type = $2
+        ), 0)
+        - COALESCE((
+          SELECT SUM(amount)
+          FROM payment_transactions t
+          WHERE t.order_id = r.order_id
+            AND t.payer_type = $2
+            AND method = 'ONLINE'
+            AND direction = 'CHARGE'
+            AND transaction_status = 'PENDING'
+        ), 0)
+      )::text AS available
+      FROM order_payment_responsibilities r
+      WHERE r.order_id = $1
+      `,
+      [orderId, payerType],
+    );
+    return result.rows[0]?.available ?? '0';
+  }
+
   async listTransactions(
     orderId: string,
     db: Queryable = this.postgres,
@@ -217,8 +264,30 @@ export class PaymentsRepository {
 
   async listRecentForAdmin(
     db: Queryable = this.postgres,
-  ): Promise<(TransactionRow & { display_id: string })[]> {
-    const result = await db.query<TransactionRow & { display_id: string }>(
+  ): Promise<
+    (TransactionRow & {
+      display_id: string;
+      cashfree_order_id: string | null;
+      cf_order_id: string | null;
+      cf_payment_id: string | null;
+      gateway_status: string | null;
+      gateway_environment: string | null;
+      failure_reason: string | null;
+      refund_status: string | null;
+    })[]
+  > {
+    const result = await db.query<
+      TransactionRow & {
+        display_id: string;
+        cashfree_order_id: string | null;
+        cf_order_id: string | null;
+        cf_payment_id: string | null;
+        gateway_status: string | null;
+        gateway_environment: string | null;
+        failure_reason: string | null;
+        refund_status: string | null;
+      }
+    >(
       `
       SELECT
         t.payment_transaction_id,
@@ -235,9 +304,25 @@ export class PaymentsRepository {
         t.created_by_profile_id,
         t.created_at,
         t.updated_at,
-        o.display_id
+        o.display_id,
+        g.gateway_order_id AS cashfree_order_id,
+        g.cf_order_id,
+        g.gateway_payment_id AS cf_payment_id,
+        g.gateway_status,
+        g.environment AS gateway_environment,
+        g.failure_reason,
+        ref.refund_status
       FROM payment_transactions t
       JOIN orders o ON o.order_id = t.order_id
+      LEFT JOIN payment_gateway_attempts g
+        ON g.payment_transaction_id = t.payment_transaction_id
+      LEFT JOIN LATERAL (
+        SELECT r.refund_status
+        FROM payment_gateway_refunds r
+        WHERE r.payment_transaction_id = t.payment_transaction_id
+        ORDER BY r.created_at DESC
+        LIMIT 1
+      ) ref ON TRUE
       ORDER BY t.created_at DESC
       LIMIT 200
       `,

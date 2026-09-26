@@ -4,7 +4,7 @@ import { currentRequestId } from '../http/request-context';
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
 const SENSITIVE_KEY =
-  /^(otp|password|access_token|refresh_token|accessToken|refreshToken|code_hash|password_hash|refresh_token_hash|pepper|secret|authkey|auth_key|authorization|signed_url|download_url|presigned_url|aws_access_key_id|aws_secret_access_key|file_contents|file_buffer|body|fcm_token|device_token|private_key|privateKey|firebase_service_account_json|service_account|google_maps_api_key|googleApiKey|x-goog-api-key|signature|webhook_signature|webhook_secret|card_number|cvv|pan|upi_id|vpa|api_key)$/i;
+  /^(otp|password|access_token|refresh_token|accessToken|refreshToken|code_hash|password_hash|refresh_token_hash|pepper|secret|client_secret|clientSecret|x-client-secret|cashfree_client_secret|payment_session_id|authkey|auth_key|authorization|signed_url|download_url|presigned_url|aws_access_key_id|aws_secret_access_key|file_contents|file_buffer|body|fcm_token|device_token|private_key|privateKey|firebase_service_account_json|service_account|google_maps_api_key|googleApiKey|x-goog-api-key|signature|webhook_signature|webhook_secret|card_number|cvv|pan|upi_id|vpa|api_key)$/i;
 
 export function redactFields(
   fields?: Record<string, unknown>,

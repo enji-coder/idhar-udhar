@@ -126,6 +126,13 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 _row('Pickup', draft.pickup?.address ?? '—'),
                 const Divider(height: 24),
                 _row('Drop', draft.drop?.address ?? '—'),
+                if (quote != null && _hasDistanceCoordinates(draft)) ...[
+                  const Divider(height: 24),
+                  _row(
+                    'Distance',
+                    '${quote.distanceKm.toStringAsFixed(1)} km',
+                  ),
+                ],
                 for (int i = 0; i < draft.extraDrops.length; i++) ...[
                   const Divider(height: 24),
                   _row('Drop ${i + 2}', draft.extraDrops[i].address),
@@ -497,6 +504,15 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
       parts.add('Receiver Cash ₹${allocation.receiverCash.toStringAsFixed(0)}');
     }
     return parts.isEmpty ? '—' : parts.join(' · ');
+  }
+
+  bool _hasDistanceCoordinates(BookingDraft draft) {
+    final pickup = draft.pickup;
+    final drop = draft.drop;
+    return pickup?.latitude != null &&
+        pickup?.longitude != null &&
+        drop?.latitude != null &&
+        drop?.longitude != null;
   }
 
   Widget _row(String label, String value) {

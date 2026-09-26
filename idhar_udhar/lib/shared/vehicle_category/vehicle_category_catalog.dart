@@ -11,15 +11,30 @@ abstract final class VehicleCategoryCatalog {
       '${ApiConfig.baseUrl}/v1/vehicle-categories',
       options: Options(receiveTimeout: const Duration(seconds: 8)),
     );
-    final rows = response.data?['vehicle_categories'];
+    return parsePayload(response.data);
+  }
+
+  /// Accepts the public `{ vehicle_categories: [...] }` payload.
+  ///
+  /// JSON maps arrive as `Map<String, dynamic>`. `Map` is invariant, so a
+  /// `whereType<Map<Object?, Object?>>()` check drops every real row.
+  static List<VehicleCategory> parsePayload(Object? data) {
+    final Object? rows = data is Map ? data['vehicle_categories'] : null;
     if (rows is! List) {
       return const <VehicleCategory>[];
     }
-    return rows
-        .whereType<Map<Object?, Object?>>()
-        .map((row) => VehicleCategory.fromJson(Map<String, dynamic>.from(row)))
-        .where((row) => row.isActive && row.id.isNotEmpty && row.name.trim().isNotEmpty)
-        .toList(growable: false);
+    final List<VehicleCategory> parsed = <VehicleCategory>[];
+    for (final Object? item in rows) {
+      if (item is! Map) {
+        continue;
+      }
+      final VehicleCategory row =
+          VehicleCategory.fromJson(Map<String, dynamic>.from(item));
+      if (row.isActive && row.id.isNotEmpty && row.name.trim().isNotEmpty) {
+        parsed.add(row);
+      }
+    }
+    return parsed;
   }
 }
 

@@ -31,6 +31,8 @@ class BookingDraft {
     this.dropCount = 1,
     this.extraDrops = const [],
     this.quotedNetPayable,
+    this.pickupHouse = '',
+    this.pickupSociety = '',
   });
 
   final MockLocation? pickup;
@@ -57,6 +59,54 @@ class BookingDraft {
   final int dropCount;
   final List<MockLocation> extraDrops;
   final double? quotedNetPayable;
+
+  /// House / flat number for a two-wheeler pickup. Kept separate so a new
+  /// map address does not wipe what the customer typed.
+  final String pickupHouse;
+
+  /// Society / building name for a two-wheeler pickup.
+  final String pickupSociety;
+
+  bool get usesResidentialPickup {
+    final MockVehicle? selected = vehicle;
+    if (selected != null) {
+      return selected.type == VehicleType.bike ||
+          selected.type == VehicleType.scooty;
+    }
+    return serviceFamily == ServiceFamily.twoWheeler;
+  }
+
+  /// Address sent with the booking. Residential fields are prefixed only
+  /// for bike and scooty.
+  String get pickupAddressText {
+    final MockLocation? from = pickup;
+    if (from == null) {
+      return '';
+    }
+    return locationAddress(from);
+  }
+
+  /// Address text for a stop. Residential lines are included for bike/scooty
+  /// and omitted for truck.
+  String locationAddress(MockLocation loc) {
+    final String full =
+        loc.address.trim().isNotEmpty ? loc.address.trim() : loc.label.trim();
+    if (!usesResidentialPickup) {
+      return full;
+    }
+    final bool isPickup = pickup != null && loc.id == pickup!.id;
+    final String house = isPickup && pickupHouse.trim().isNotEmpty
+        ? pickupHouse.trim()
+        : loc.unit.trim();
+    final String society = isPickup && pickupSociety.trim().isNotEmpty
+        ? pickupSociety.trim()
+        : loc.premises.trim();
+    return <String>[
+      house,
+      society,
+      full,
+    ].where((String part) => part.isNotEmpty).join(', ');
+  }
 
   String get categoryLabel {
     return MockData.parcelCategories
@@ -320,6 +370,8 @@ class BookingDraft {
     List<MockLocation>? extraDrops,
     double? quotedNetPayable,
     bool clearQuotedNetPayable = false,
+    String? pickupHouse,
+    String? pickupSociety,
   }) {
     return BookingDraft(
       pickup: pickup ?? this.pickup,
@@ -351,6 +403,8 @@ class BookingDraft {
       quotedNetPayable: clearQuotedNetPayable
           ? null
           : (quotedNetPayable ?? this.quotedNetPayable),
+      pickupHouse: pickupHouse ?? this.pickupHouse,
+      pickupSociety: pickupSociety ?? this.pickupSociety,
     );
   }
 }
@@ -367,6 +421,10 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
 
   void setPickup(MockLocation location) {
     state = state.copyWith(pickup: location, clearQuotedNetPayable: true);
+  }
+
+  void setPickupUnit({String? house, String? society}) {
+    state = state.copyWith(pickupHouse: house, pickupSociety: society);
   }
 
   void setDrop(MockLocation location) {
@@ -542,7 +600,11 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
   }
 
   MockOrder _createConfirmedOrder() {
-    final MockLocation pickup = state.pickup!;
+    final MockLocation pickup = state.pickup!.copyWith(
+      address: state.pickupAddressText.isEmpty
+          ? state.pickup!.address
+          : state.pickupAddressText,
+    );
     final List<MockLocation> drops = state.allDrops;
     final MockVehicle vehicle = state.vehicle ?? MockData.vehicles.first;
     final FareQuote quote = state.fareQuote;
