@@ -9,6 +9,8 @@ export type VehicleCategoryRow = {
   active: boolean;
   weight_capacity: string | null;
   size: string | null;
+  vehicle_type: string | null;
+  vehicle: string | null;
   created_at: Date;
   updated_at: Date;
   base_fare: string | null;
@@ -38,6 +40,8 @@ const CATEGORY_SELECT = `
   c.active,
   c.weight_capacity,
   c.size,
+  c.vehicle_type,
+  c.vehicle,
   c.created_at,
   c.updated_at,
   r.base_fare::text AS base_fare,
@@ -117,16 +121,28 @@ export class VehicleCategoriesRepository {
       active: boolean;
       weight_capacity: string | null;
       size: string | null;
+      vehicle_type: string | null;
+      vehicle: string | null;
     },
     db: Queryable = this.postgres,
   ): Promise<{ vehicle_category_id: string }> {
     const result = await db.query<{ vehicle_category_id: string }>(
       `
-      INSERT INTO vehicle_categories (name, code, active, weight_capacity, size)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO vehicle_categories (
+        name, code, active, weight_capacity, size, vehicle_type, vehicle
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING vehicle_category_id
       `,
-      [input.name, input.code, input.active, input.weight_capacity, input.size],
+      [
+        input.name,
+        input.code,
+        input.active,
+        input.weight_capacity,
+        input.size,
+        input.vehicle_type,
+        input.vehicle,
+      ],
     );
     return result.rows[0];
   }
@@ -139,6 +155,8 @@ export class VehicleCategoriesRepository {
       active: boolean;
       weight_capacity: string | null;
       size: string | null;
+      vehicle_type: string | null;
+      vehicle: string | null;
     },
     db: Queryable = this.postgres,
   ): Promise<void> {
@@ -149,10 +167,21 @@ export class VehicleCategoriesRepository {
           code = $3,
           active = $4,
           weight_capacity = $5,
-          size = $6
+          size = $6,
+          vehicle_type = $7,
+          vehicle = $8
       WHERE vehicle_category_id = $1
       `,
-      [id, input.name, input.code, input.active, input.weight_capacity, input.size],
+      [
+        id,
+        input.name,
+        input.code,
+        input.active,
+        input.weight_capacity,
+        input.size,
+        input.vehicle_type,
+        input.vehicle,
+      ],
     );
   }
 

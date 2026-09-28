@@ -70,6 +70,8 @@ describe('Admin vehicle categories (e2e)', () => {
     expect(created.status).toBe(201);
     expect(created.body.name).toMatch(/^E2E Bike /);
     expect(created.body.active).toBe(true);
+    expect(created.body.vehicle_type).toBeNull();
+    expect(created.body.vehicle).toBeNull();
     expect(created.body.vehicle_category_id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     );
@@ -217,6 +219,111 @@ describe('Admin vehicle categories (e2e)', () => {
           row.vehicle_category_id === created.body.vehicle_category_id,
       ),
     ).toBe(false);
+  });
+
+  it('stores a valid hierarchy and reads the fare configuration back', async () => {
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const created = await request(app.getHttpServer())
+      .post('/v1/admin/vehicle-categories')
+      .set(bearer(admin.tokens.accessToken))
+      .send({
+        name: `E2E Tempo ${Date.now()}`,
+        vehicle_type: 'truck',
+        vehicle: 'tempo',
+        weight_capacity: '900',
+        size: 'medium',
+        rates: {
+          base_fare: 40,
+          per_km: 8,
+          initial_minimum: 30,
+          waiting: 1,
+          surge: 2,
+          toll: 3,
+          parking: 4,
+          rider_percentage: 80,
+          company_commission_percentage: 20,
+        },
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.vehicle_type).toBe('truck');
+    expect(created.body.vehicle).toBe('tempo');
+    expect(created.body.weight_capacity).toBe('900');
+    expect(created.body.size).toBe('medium');
+    expect(created.body.rates).toMatchObject({
+      base_fare: '40.00',
+      per_km: '8.00',
+      initial_minimum: '30.00',
+      waiting: '1.00',
+      surge: '2.00',
+      toll: '3.00',
+      parking: '4.00',
+      rider_percentage: '80.00',
+      company_commission_percentage: '20.00',
+    });
+    categoryIds.push(created.body.vehicle_category_id);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/v1/admin/vehicle-categories/${created.body.vehicle_category_id}`)
+      .set(bearer(admin.tokens.accessToken))
+      .send({ vehicle_type: 'truck', vehicle: 'large_tempo', name: created.body.name });
+    expect(updated.status).toBe(200);
+    expect(updated.body.vehicle).toBe('large_tempo');
+
+    const detail = await request(app.getHttpServer())
+      .get(`/v1/admin/vehicle-categories/${created.body.vehicle_category_id}`)
+      .set(bearer(admin.tokens.accessToken));
+    expect(detail.status).toBe(200);
+    expect(detail.body.vehicle_type).toBe('truck');
+    expect(detail.body.vehicle).toBe('large_tempo');
+    expect(detail.body.rates.parking).toBe('4.00');
+  });
+
+  it.each([
+    ['two_wheeler', 'tempo'],
+    ['two_wheeler', 'truck'],
+    ['three_wheeler', 'bike'],
+    ['truck', 'bike'],
+  ])('rejects %s / %s', async (vehicleType, vehicle) => {
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const response = await request(app.getHttpServer())
+      .post('/v1/admin/vehicle-categories')
+      .set(bearer(admin.tokens.accessToken))
+      .send({
+        name: `E2E Invalid ${vehicleType} ${vehicle} ${Date.now()}`,
+        vehicle_type: vehicleType,
+        vehicle,
+      });
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects a negative fare and a negative weight', async () => {
+    const admin = await issueAdminSession(app);
+    identityIds.push(admin.identityId);
+    const negativeFare = await request(app.getHttpServer())
+      .post('/v1/admin/vehicle-categories')
+      .set(bearer(admin.tokens.accessToken))
+      .send({
+        name: `E2E Negative Fare ${Date.now()}`,
+        vehicle_type: 'two_wheeler',
+        vehicle: 'bike',
+        rates: { base_fare: -1 },
+      });
+    expect(negativeFare.status).toBe(400);
+
+    const negativeWeight = await request(app.getHttpServer())
+      .post('/v1/admin/vehicle-categories')
+      .set(bearer(admin.tokens.accessToken))
+      .send({
+        name: `E2E Negative Weight ${Date.now()}`,
+        vehicle_type: 'two_wheeler',
+        vehicle: 'scooty',
+        weight_capacity: '-5',
+      });
+    expect(negativeWeight.status).toBe(400);
+    expect(negativeWeight.body.error.message).toMatch(/weight capacity/i);
   });
 
   it('rejects unauthenticated access', async () => {

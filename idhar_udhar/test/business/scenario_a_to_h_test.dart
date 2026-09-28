@@ -4,7 +4,6 @@ import 'package:idhar_udhar/shared/business/business.dart';
 void main() {
   setUp(() {
     OrderIds.resetDemoSequence(1);
-    FareCatalog.resetDemo();
   });
 
   group('Scenario A — normal order', () {
@@ -114,36 +113,6 @@ void main() {
       expect(stops.map((s) => s.sequence).toList(), [0, 1, 2, 3]);
       expect(BookingLimits.maxDeliveryStops, 3);
       expect(BookingLimits.maxStopsPendingBusinessDecision, isFalse);
-    });
-  });
-
-  group('Scenario H — fare configuration change does not rewrite history', () {
-    test('old quote stays on ₹40 after Admin publishes ₹50', () {
-      final FareConfig v1 = FareCatalog.currentFor('bike').copyWith(
-        versionId: 'bike_40',
-        baseFare: 40,
-        initialMinimum: 40,
-        perKmCharge: 0,
-      );
-      final FareQuote oldQuote = FareEngine.quote(config: v1, distanceKm: 0);
-      expect(oldQuote.netTotal, 40);
-      expect(oldQuote.tax, 0);
-
-      FareCatalog.publish(
-        'bike',
-        v1.copyWith(
-          versionId: 'bike_50',
-          baseFare: 50,
-          initialMinimum: 50,
-        ),
-      );
-      final FareQuote newQuote = FareEngine.quote(
-        config: FareCatalog.currentFor('bike'),
-        distanceKm: 0,
-      );
-      expect(newQuote.netTotal, 50);
-      expect(oldQuote.netTotal, 40);
-      expect(oldQuote.configVersionId, 'bike_40');
     });
   });
 

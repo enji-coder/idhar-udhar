@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
+import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/searching_rider_screen.dart';
-import 'package:idhar_udhar/shared/business/business.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -17,11 +17,20 @@ void main() {
 
     final ProviderContainer container = ProviderContainer();
     addTearDown(container.dispose);
-    OrderIds.resetDemoSequence(50);
-    container.read(bookingDraftProvider.notifier)
-      ..setPickup(MockData.locations[4])
-      ..setDrop(MockData.locations.firstWhere((l) => l.id == 'loc_paldi'))
-      ..confirmBooking();
+    final MockLocation pickup = MockData.locations[4];
+    final MockLocation drop =
+        MockData.locations.firstWhere((l) => l.id == 'loc_paldi');
+    container.read(bookingDraftProvider.notifier).attachActive(
+          MockOrder(
+            id: 'IU-AMD-0000000050',
+            status: OrderStatus.searching,
+            pickup: pickup,
+            drop: drop,
+            vehicle: MockData.vehicles.first,
+            fare: 0,
+            createdAt: DateTime.utc(2026, 1, 1),
+          ),
+        );
 
     await tester.pumpWidget(
       UncontrolledProviderScope(

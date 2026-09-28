@@ -1,12 +1,14 @@
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { VEHICLES, VEHICLE_TYPES } from '../vehicle-catalog';
 import { FareRatesDto } from './fare-rates.dto';
 
 export class CreateVehicleCategoryDto {
@@ -33,6 +35,14 @@ export class CreateVehicleCategoryDto {
   @IsString()
   @MaxLength(40)
   size?: string;
+
+  @IsOptional()
+  @IsIn(VEHICLE_TYPES)
+  vehicle_type?: (typeof VEHICLE_TYPES)[number];
+
+  @IsOptional()
+  @IsIn(VEHICLES)
+  vehicle?: (typeof VEHICLES)[number];
 
   @IsOptional()
   @ValidateNested()

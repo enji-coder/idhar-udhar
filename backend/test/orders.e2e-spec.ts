@@ -48,6 +48,7 @@ describe('Orders (e2e)', () => {
     const body = {
       city_id: options?.cityId ?? catalog.cityId,
       vehicle_category_id: options?.vehicleCategoryId ?? catalog.vehicleCategoryId,
+      package_weight_kg: 1,
       stops: options?.stops ?? sampleStops(catalog.zoneId),
       ...options?.extra,
     };

@@ -58,6 +58,14 @@ export type FareSnapshotRow = {
   confirmed_at: Date;
 };
 
+const TRIP_FARE_SQL = `GREATEST(
+  initial_minimum,
+  ROUND(
+    base_fare + distance_charge + waiting + surge + toll + parking,
+    2
+  )
+)`;
+
 const QUOTE_COLUMNS = `
   fare_quote_id,
   customer_profile_id,
@@ -134,13 +142,7 @@ export class FareRepository {
           parking,
           rider_percentage,
           company_commission_percentage,
-          GREATEST(
-            initial_minimum,
-            ROUND(
-              base_fare + distance_charge + waiting + surge + toll + parking,
-              2
-            )
-          ) AS trip_fare
+          ${TRIP_FARE_SQL} AS trip_fare
         FROM rates
       )
       INSERT INTO fare_quotes (
@@ -346,6 +348,165 @@ export class FareRepository {
       [orderId],
     );
     return result.rows[0] ?? null;
+  }
+
+  /**
+   * Same active-version formula as insertQuoteFromActiveConfig, without writing a quote.
+   * One distance prices every active canonical vehicle from its own rate row.
+   */
+  async previewActiveVehicleFares(
+    distanceKm: string,
+    db: Queryable = this.postgres,
+  ): Promise<
+    Array<{
+      vehicle_category_id: string;
+      name: string;
+      vehicle_type: string | null;
+      vehicle: string | null;
+      active: boolean;
+      weight_capacity: string | null;
+      size: string | null;
+      fare_config_version_id: string;
+      base_fare: string;
+      distance_charge: string;
+      waiting: string;
+      surge: string;
+      toll: string;
+      parking: string;
+      trip_fare: string;
+      discount: string;
+      rounding: string;
+      net_payable: string;
+      tax: string;
+    }>
+  > {
+    const result = await db.query<{
+      vehicle_category_id: string;
+      name: string;
+      vehicle_type: string | null;
+      vehicle: string | null;
+      active: boolean;
+      weight_capacity: string | null;
+      size: string | null;
+      fare_config_version_id: string;
+      base_fare: string;
+      distance_charge: string;
+      waiting: string;
+      surge: string;
+      toll: string;
+      parking: string;
+      trip_fare: string;
+      discount: string;
+      rounding: string;
+      net_payable: string;
+      tax: string;
+    }>(
+      `
+      WITH rates AS (
+        SELECT
+          v.fare_config_version_id,
+          c.vehicle_category_id,
+          c.name,
+          c.vehicle_type,
+          c.vehicle,
+          c.active,
+          c.weight_capacity,
+          c.size,
+          r.base_fare,
+          ROUND(r.per_km * $1::numeric(10,3), 2) AS distance_charge,
+          r.initial_minimum,
+          r.waiting,
+          r.surge,
+          r.toll,
+          r.parking
+        FROM vehicle_categories c
+        JOIN fare_config_versions v
+          ON v.status = 'ACTIVE'
+        JOIN fare_config_version_rates r
+          ON r.fare_config_version_id = v.fare_config_version_id
+         AND r.vehicle_category_id = c.vehicle_category_id
+        WHERE c.active = TRUE
+          AND c.vehicle_type IS NOT NULL
+          AND c.vehicle IS NOT NULL
+      ),
+      calc AS (
+        SELECT
+          fare_config_version_id,
+          vehicle_category_id,
+          name,
+          vehicle_type,
+          vehicle,
+          active,
+          weight_capacity,
+          size,
+          base_fare,
+          distance_charge,
+          initial_minimum,
+          waiting,
+          surge,
+          toll,
+          parking,
+          ${TRIP_FARE_SQL} AS trip_fare
+        FROM rates
+      )
+      SELECT
+        vehicle_category_id,
+        name,
+        vehicle_type,
+        vehicle,
+        active,
+        weight_capacity,
+        size,
+        fare_config_version_id,
+        base_fare::money_inr::text AS base_fare,
+        distance_charge::money_inr::text AS distance_charge,
+        waiting::money_inr::text AS waiting,
+        surge::money_inr::text AS surge,
+        toll::money_inr::text AS toll,
+        parking::money_inr::text AS parking,
+        trip_fare::money_inr::text AS trip_fare,
+        '0.00'::text AS discount,
+        (ROUND(trip_fare, 2) - trip_fare)::money_inr::text AS rounding,
+        ROUND(trip_fare, 2)::money_inr::text AS net_payable,
+        '0.00'::text AS tax
+      FROM calc
+      ORDER BY vehicle_type ASC, name ASC
+      `,
+      [distanceKm],
+    );
+    return result.rows;
+  }
+
+  /** Recalculate trip fare from the quote's fare version and the routed distance. */
+  async tripFareForVersion(
+    input: {
+      fareConfigVersionId: string;
+      vehicleCategoryId: string;
+      distanceKm: string;
+    },
+    db: Queryable = this.postgres,
+  ): Promise<string | null> {
+    const result = await db.query<{ trip_fare: string }>(
+      `
+      WITH rates AS (
+        SELECT
+          r.base_fare,
+          ROUND(r.per_km * $3::numeric(10,3), 2) AS distance_charge,
+          r.initial_minimum,
+          r.waiting,
+          r.surge,
+          r.toll,
+          r.parking
+        FROM fare_config_version_rates r
+        WHERE r.fare_config_version_id = $1
+          AND r.vehicle_category_id = $2
+      )
+      SELECT ${TRIP_FARE_SQL}::money_inr::text AS trip_fare
+      FROM rates
+      `,
+      [input.fareConfigVersionId, input.vehicleCategoryId, input.distanceKm],
+    );
+    return result.rows[0]?.trip_fare ?? null;
   }
 }
 

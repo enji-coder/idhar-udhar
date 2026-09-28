@@ -12,6 +12,7 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
+import '../../../../core/state/vehicle_fare.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/custom_snack_bar.dart';
@@ -29,6 +30,8 @@ class BookingSummaryScreen extends ConsumerStatefulWidget {
 
 class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   bool _busy = false;
+  bool _quoting = false;
+  String? _quoteError;
 
   @override
   void initState() {
@@ -39,13 +42,25 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   }
 
   Future<void> _prefetchQuote() async {
+    if (_quoting) {
+      return;
+    }
+    _quoting = true;
     try {
       await ensureCustomerQuote(ref);
       if (mounted) {
-        setState(() {});
+        setState(() => _quoteError = null);
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        setState(() => _quoteError = error.message);
       }
     } catch (_) {
-      // Confirm path shows the mapped error; keep the existing layout.
+      if (mounted) {
+        setState(() => _quoteError = 'Fare could not be calculated.');
+      }
+    } finally {
+      _quoting = false;
     }
   }
 
@@ -90,8 +105,26 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
     final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
-    final ApiQuote? quote = hold?.quote;
+    final bool matched = quoteHoldMatches(draft, hold);
+    final ApiQuote? quote = matched ? hold!.quote : null;
+    ref.listen(bookingDraftProvider, (BookingDraft? previous, BookingDraft next) {
+      if (!quoteHoldMatches(next, ref.read(backendQuoteHoldProvider))) {
+        unawaited(_prefetchQuote());
+      }
+    });
     final double? displayedFare = quote?.tripFare;
+    final List<FareLine> fareLines = quote == null
+        ? const <FareLine>[]
+        : customerFareLines(
+            baseFare: quote.baseFare,
+            distanceCharge: quote.distanceCharge,
+            waiting: quote.waiting,
+            surge: quote.surge,
+            toll: quote.toll,
+            parking: quote.parking,
+            discount: quote.discount,
+            rounding: quote.rounding,
+          );
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
@@ -123,9 +156,20 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _row('Pickup', draft.pickup?.address ?? '—'),
+                _row(
+                  'Pickup',
+                  draft.pickup == null || draft.pickupAddressText.isEmpty
+                      ? '—'
+                      : draft.pickupAddressText,
+                ),
                 const Divider(height: 24),
-                _row('Drop', draft.drop?.address ?? '—'),
+                _row(
+                  'Drop',
+                  draft.drop == null ||
+                          draft.locationAddress(draft.drop!).isEmpty
+                      ? '—'
+                      : draft.locationAddress(draft.drop!),
+                ),
                 if (quote != null && _hasDistanceCoordinates(draft)) ...[
                   const Divider(height: 24),
                   _row(
@@ -135,10 +179,17 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 ],
                 for (int i = 0; i < draft.extraDrops.length; i++) ...[
                   const Divider(height: 24),
-                  _row('Drop ${i + 2}', draft.extraDrops[i].address),
+                  _row(
+                    'Drop ${i + 2}',
+                    draft.locationAddress(draft.extraDrops[i]),
+                  ),
                 ],
                 const Divider(height: 24),
                 _row('Vehicle', draft.vehicle?.name ?? '—'),
+                if ((draft.vehicle?.capacity ?? '').trim().isNotEmpty) ...[
+                  const Divider(height: 24),
+                  _row('Capacity', draft.vehicle!.capacity),
+                ],
                 const Divider(height: 24),
                 _row('Package', '${draft.categoryLabel} · ${draft.sizeLabel}'),
                 const Divider(height: 24),
@@ -196,19 +247,19 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 const SizedBox(height: AppSpacing.md),
                 if (quote == null)
                   Text(
-                    'Fare is calculated by the server from this route and vehicle.',
+                    _quoteError ??
+                        'Fare is calculated by the server from this route and vehicle.',
                     style: AppTextStyles.caption.copyWith(
-                      color: AppColors.textSecondary,
+                      color: _quoteError == null
+                          ? AppColors.textSecondary
+                          : AppColors.orange,
                     ),
                   )
-                else
+                else ...[
+                  for (final FareLine line in fareLines)
+                    _fareLine(line.label, line.amount),
                   _fareLine('Trip Fare', quote.tripFare),
-                if ((quote?.distanceCharge ?? 0) > 0)
-                  _fareLine('Distance', quote!.distanceCharge),
-                if ((quote?.waiting ?? 0) > 0)
-                  _fareLine('Waiting', quote!.waiting),
-                if ((quote?.discount ?? 0) > 0)
-                  _fareLine('Discount', quote!.discount),
+                ],
                 const Divider(height: 24),
                 Row(
                   children: [

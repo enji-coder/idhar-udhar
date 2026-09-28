@@ -48,6 +48,7 @@ function order(status: OrderRow['canonical_status'] = 'DELIVERY_ATTEMPT'): Order
     city_code: 'AMD',
     vehicle_category_id: '99999999-9999-4999-8999-999999999999',
     vehicle_category_name_snapshot: 'Bike',
+    package_weight_kg: null,
     vehicle_id: null,
     canonical_status: status,
     parent_order_id: null,

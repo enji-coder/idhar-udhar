@@ -135,7 +135,36 @@ describe('admin mappers', () => {
     assert.equal(row.name, 'Bike');
     assert.equal(row.status, 'Active');
     assert.equal(row.baseFare, 79);
+    assert.equal(row.vehicleType, '');
+    assert.equal(row.vehicle, '');
     assert.equal(row.source, 'api');
+  });
+
+  it('maps canonical vehicle type and vehicle slugs', () => {
+    const row = mapVehicleCategory({
+      vehicle_category_id: '11111111-1111-4111-8111-111111111111',
+      name: 'Tempo',
+      vehicle_type: 'truck',
+      vehicle: 'tempo',
+      active: true,
+      rates: {
+        base_fare: '10.00',
+        per_km: '2.00',
+        initial_minimum: '10.00',
+        waiting: '1.00',
+        surge: '0.00',
+        toll: '3.00',
+        parking: '4.00',
+        rider_percentage: '80.00',
+        company_commission_percentage: '20.00',
+      },
+    });
+    assert.equal(row.vehicleType, 'truck');
+    assert.equal(row.vehicle, 'tempo');
+    assert.equal(row.name, 'Tempo');
+    assert.equal(row.riderSharePercent, 80);
+    assert.equal(row.companyCommissionPercent, 20);
+    assert.equal(row.parkingCharge, 4);
   });
 
   it('maps zones from postgres rows', () => {

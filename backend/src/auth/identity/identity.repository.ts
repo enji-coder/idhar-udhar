@@ -30,6 +30,8 @@ export type RiderProfileRow = {
   home_city_id: string | null;
   home_zone_id: string | null;
   cod_operational_status: string;
+  preferred_language: string | null;
+  profile_picture_file_id: string | null;
 };
 
 export type AdminProfileRow = {
@@ -229,7 +231,9 @@ export class IdentityRepository {
         online_status,
         home_city_id,
         home_zone_id,
-        cod_operational_status
+        cod_operational_status,
+        preferred_language,
+        profile_picture_file_id
       FROM rider_profiles
       WHERE identity_id = $1
       `,
@@ -259,7 +263,9 @@ export class IdentityRepository {
         online_status,
         home_city_id,
         home_zone_id,
-        cod_operational_status
+        cod_operational_status,
+        preferred_language,
+        profile_picture_file_id
       `,
       [identityId],
     );
@@ -456,6 +462,67 @@ export class IdentityRepository {
       WHERE p.customer_profile_id = $1
       `,
       [customerProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findRiderGate(riderProfileId: string): Promise<{
+    rider_profile_id: string;
+    approval_status: string;
+    online_status: string;
+    deactivated_at: Date | null;
+  } | null> {
+    const result = await this.postgres.query<{
+      rider_profile_id: string;
+      approval_status: string;
+      online_status: string;
+      deactivated_at: Date | null;
+    }>(
+      `
+      SELECT rider_profile_id, approval_status, online_status, deactivated_at
+      FROM rider_profiles
+      WHERE rider_profile_id = $1
+      `,
+      [riderProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async updateRiderOnlineStatus(
+    riderProfileId: string,
+    onlineStatus: 'ONLINE' | 'OFFLINE',
+  ): Promise<{ approval_status: string; online_status: string } | null> {
+    const result = await this.postgres.query<{
+      approval_status: string;
+      online_status: string;
+    }>(
+      `
+      UPDATE rider_profiles
+      SET online_status = $2
+      WHERE rider_profile_id = $1
+      RETURNING approval_status, online_status
+      `,
+      [riderProfileId, onlineStatus],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async updateRiderLanguage(
+    riderProfileId: string,
+    preferredLanguage: string,
+  ): Promise<{ preferred_language: string; approval_status: string; online_status: string } | null> {
+    const result = await this.postgres.query<{
+      preferred_language: string;
+      approval_status: string;
+      online_status: string;
+    }>(
+      `
+      UPDATE rider_profiles
+      SET preferred_language = $2
+      WHERE rider_profile_id = $1
+      RETURNING preferred_language, approval_status, online_status
+      `,
+      [riderProfileId, preferredLanguage],
     );
     return result.rows[0] ?? null;
   }

@@ -267,6 +267,8 @@ export function mapVehicleCategory(row) {
     companyCommissionPercent: rates.company_commission_percentage == null || rates.company_commission_percentage === '' ? 15 : money(rates.company_commission_percentage),
     weightCapacityKg: row.weight_capacity || '',
     size: row.size || '',
+    vehicleType: row.vehicle_type || '',
+    vehicle: row.vehicle || '',
     usage: {
       vehicles: Number(usage.vehicles || 0),
       orders: Number(usage.orders || 0),

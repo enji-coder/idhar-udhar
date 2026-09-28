@@ -33,6 +33,11 @@ class BookingDraft {
     this.quotedNetPayable,
     this.pickupHouse = '',
     this.pickupSociety = '',
+    this.confirmedPickupKey,
+    this.confirmedDropKey,
+    this.extraDropConfirmedKeys = const <String?>[],
+    this.routeDistanceMeters,
+    this.routeDurationSeconds,
   });
 
   final MockLocation? pickup;
@@ -67,6 +72,22 @@ class BookingDraft {
   /// Society / building name for a two-wheeler pickup.
   final String pickupSociety;
 
+  /// Identity of the pickup whose address was confirmed.
+  /// Unit and premises are not part of this identity.
+  final String? confirmedPickupKey;
+
+  /// Identity of the primary drop pin whose address was confirmed.
+  final String? confirmedDropKey;
+
+  /// Confirmation identity for each extra drop, parallel to [extraDrops].
+  final List<String?> extraDropConfirmedKeys;
+
+  /// Road distance from Google Routes, when a route was returned.
+  final int? routeDistanceMeters;
+
+  /// Road duration from Google Routes, when a route was returned.
+  final int? routeDurationSeconds;
+
   bool get usesResidentialPickup {
     final MockVehicle? selected = vehicle;
     if (selected != null) {
@@ -86,26 +107,25 @@ class BookingDraft {
     return locationAddress(from);
   }
 
-  /// Address text for a stop. Residential lines are included for bike/scooty
-  /// and omitted for truck.
+  /// Address shown for a stop. House and building are included when present,
+  /// and segments already inside the full location are not repeated.
   String locationAddress(MockLocation loc) {
-    final String full =
-        loc.address.trim().isNotEmpty ? loc.address.trim() : loc.label.trim();
-    if (!usesResidentialPickup) {
-      return full;
-    }
     final bool isPickup = pickup != null && loc.id == pickup!.id;
     final String house = isPickup && pickupHouse.trim().isNotEmpty
         ? pickupHouse.trim()
-        : loc.unit.trim();
+        : loc.unit;
     final String society = isPickup && pickupSociety.trim().isNotEmpty
         ? pickupSociety.trim()
-        : loc.premises.trim();
-    return <String>[
-      house,
-      society,
-      full,
-    ].where((String part) => part.isNotEmpty).join(', ');
+        : loc.premises;
+    final String composed = MockLocation.composeAddress(
+      unit: house,
+      premises: society,
+      address: loc.address,
+    );
+    if (composed.isNotEmpty) {
+      return composed;
+    }
+    return loc.label.trim();
   }
 
   String get categoryLabel {
@@ -137,6 +157,68 @@ class BookingDraft {
       return false;
     }
     return loc.address.trim().isNotEmpty || loc.label.trim().isNotEmpty;
+  }
+
+  /// Pin identity. Unit and premises are excluded so confirming an address
+  /// does not look like a new location. A different id, coordinate, or full
+  /// location does.
+  static String locationKey(MockLocation location) {
+    final String lat = location.latitude?.toStringAsFixed(5) ?? '';
+    final String lng = location.longitude?.toStringAsFixed(5) ?? '';
+    return '${location.id}|$lat|$lng|${location.address.trim().toLowerCase()}';
+  }
+
+  static bool samePin(MockLocation? current, MockLocation next) {
+    if (!isLocationSelected(current)) {
+      return false;
+    }
+    return locationKey(current!) == locationKey(next);
+  }
+
+  bool get pickupAddressConfirmed {
+    final MockLocation? loc = pickup;
+    if (loc == null || confirmedPickupKey == null) {
+      return false;
+    }
+    return confirmedPickupKey == locationKey(loc);
+  }
+
+  bool dropConfirmedAt(int index) {
+    final MockLocation? loc = dropAt(index);
+    if (loc == null) {
+      return false;
+    }
+    final String? key = index <= 0
+        ? confirmedDropKey
+        : (index - 1 < extraDropConfirmedKeys.length
+            ? extraDropConfirmedKeys[index - 1]
+            : null);
+    return key != null && key == locationKey(loc);
+  }
+
+  bool get dropsAddressConfirmed {
+    for (int i = 0; i < requiredDropCount; i++) {
+      if (!dropConfirmedAt(i)) {
+        return false;
+      }
+    }
+    return requiredDropCount > 0;
+  }
+
+  bool get readyForRoutePreview =>
+      pickupAddressConfirmed && dropsAddressConfirmed;
+
+  bool needsPickupConfirmationFor(MockLocation location) {
+    return !pickupAddressConfirmed ||
+        pickup == null ||
+        locationKey(pickup!) != locationKey(location);
+  }
+
+  bool needsDropConfirmationFor(MockLocation location, int index) {
+    final MockLocation? current = dropAt(index);
+    return !dropConfirmedAt(index) ||
+        current == null ||
+        locationKey(current) != locationKey(location);
   }
 
   MockLocation? dropAt(int index) {
@@ -177,79 +259,31 @@ class BookingDraft {
     return null;
   }
 
-  bool get canSubmitStops => incompleteStopMessage == null;
-
-  FareConfig get _fareConfig {
-    final String name = (vehicle?.name ?? 'Bike').toLowerCase();
-    if (name.contains('auto') || name.contains('three')) {
-      return FareCatalog.currentFor('auto');
-    }
-    if (name.contains('truck') || name.contains('tempo')) {
-      return FareCatalog.currentFor('truck');
-    }
-    return FareCatalog.currentFor('bike');
-  }
-
-  List<DeliveryStop> get orderedStops {
-    final List<DeliveryStop> stops = <DeliveryStop>[];
+  /// Pickup and drop pins that identify the route being priced.
+  String? get fareRouteKey {
     final MockLocation? from = pickup;
-    if (from != null) {
-      stops.add(
-        DeliveryStop(
-          id: from.id,
-          sequence: 0,
-          label: from.label,
-          address: from.address,
-          city: from.city,
-          latitude: from.latitude,
-          longitude: from.longitude,
-          kind: DeliveryStopKind.pickup,
-        ),
-      );
+    if (from?.latitude == null || from?.longitude == null) {
+      return null;
     }
-    for (int i = 0; i < allDrops.length; i++) {
-      final MockLocation loc = allDrops[i];
-      stops.add(
-        DeliveryStop(
-          id: loc.id,
-          sequence: i + 1,
-          label: loc.label,
-          address: loc.address,
-          city: loc.city,
-          latitude: loc.latitude,
-          longitude: loc.longitude,
-        ),
-      );
+    if (allDrops.length != requiredDropCount) {
+      return null;
     }
-    return stops;
+    final StringBuffer key = StringBuffer()
+      ..write(from!.latitude!.toStringAsFixed(6))
+      ..write(',')
+      ..write(from.longitude!.toStringAsFixed(6));
+    for (final MockLocation drop in allDrops) {
+      if (drop.latitude == null || drop.longitude == null) {
+        return null;
+      }
+      key
+        ..write('|')
+        ..write(drop.latitude!.toStringAsFixed(6))
+        ..write(',')
+        ..write(drop.longitude!.toStringAsFixed(6));
+    }
+    return key.toString();
   }
-
-  FareQuote get fareQuote {
-    final double km = GeoMath.routeKm(orderedStops);
-    return FareEngine.quote(
-      config: _fareConfig,
-      distanceKm: km,
-      stopCount: allDrops.length,
-    );
-  }
-
-  /// Admin-controlled fare. GST is not applied.
-  FareBreakdown get fareBreakdown {
-    final FareQuote quote = fareQuote;
-    return FareBreakdown(
-      baseFare: quote.baseFare,
-      distanceCharge: quote.distanceCharge,
-      waitingCharge: quote.waitingCharge,
-      surgeCharge: quote.surgeCharge,
-      tollCharge: quote.tollCharge,
-      parkingCharge: quote.parkingCharge,
-      discount: quote.discount,
-      tax: 0,
-      netTotal: quote.netTotal,
-    );
-  }
-
-  double get estimatedFare => fareBreakdown.total;
 
   double get payableTotal =>
       quotedNetPayable == null ? 0 : FareEngine.round2(quotedNetPayable!);
@@ -372,6 +406,14 @@ class BookingDraft {
     bool clearQuotedNetPayable = false,
     String? pickupHouse,
     String? pickupSociety,
+    String? confirmedPickupKey,
+    bool clearPickupConfirmation = false,
+    String? confirmedDropKey,
+    bool clearDropConfirmation = false,
+    List<String?>? extraDropConfirmedKeys,
+    int? routeDistanceMeters,
+    int? routeDurationSeconds,
+    bool clearRoute = false,
   }) {
     return BookingDraft(
       pickup: pickup ?? this.pickup,
@@ -405,6 +447,19 @@ class BookingDraft {
           : (quotedNetPayable ?? this.quotedNetPayable),
       pickupHouse: pickupHouse ?? this.pickupHouse,
       pickupSociety: pickupSociety ?? this.pickupSociety,
+      confirmedPickupKey: clearPickupConfirmation
+          ? null
+          : (confirmedPickupKey ?? this.confirmedPickupKey),
+      confirmedDropKey: clearDropConfirmation
+          ? null
+          : (confirmedDropKey ?? this.confirmedDropKey),
+      extraDropConfirmedKeys:
+          extraDropConfirmedKeys ?? this.extraDropConfirmedKeys,
+      routeDistanceMeters:
+          clearRoute ? null : (routeDistanceMeters ?? this.routeDistanceMeters),
+      routeDurationSeconds: clearRoute
+          ? null
+          : (routeDurationSeconds ?? this.routeDurationSeconds),
     );
   }
 }
@@ -413,22 +468,113 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
   BookingDraftNotifier()
       : super(BookingDraft(pickup: MockData.locations[4]));
 
-  final IdempotencyGuard _createGuard = IdempotencyGuard();
-  String _draftToken = 'draft_0';
-
-  String _nextDraftToken() =>
-      'draft_${DateTime.now().microsecondsSinceEpoch}';
+  /// Set when the customer chooses a pickup. A later GPS result must not replace it.
+  bool _manualPickup = false;
 
   void setPickup(MockLocation location) {
-    state = state.copyWith(pickup: location, clearQuotedNetPayable: true);
+    _manualPickup = true;
+    final bool same = BookingDraft.samePin(state.pickup, location);
+    state = state.copyWith(
+      pickup: location,
+      clearQuotedNetPayable: true,
+      clearRoute: !same,
+      clearPickupConfirmation: !same,
+    );
+  }
+
+  /// Startup GPS only. Ignored once the customer has chosen a pickup.
+  /// Does not confirm the address and does not replace a chosen pickup.
+  void applyDevicePickup(MockLocation location) {
+    if (_manualPickup) {
+      return;
+    }
+    state = state.copyWith(
+      pickup: location,
+      clearQuotedNetPayable: true,
+      clearRoute: true,
+      clearPickupConfirmation: true,
+    );
   }
 
   void setPickupUnit({String? house, String? society}) {
     state = state.copyWith(pickupHouse: house, pickupSociety: society);
   }
 
+  /// Stores the address captured for the current pickup pin.
+  /// Coordinates on [location] are kept as given.
+  void confirmPickupAddress(MockLocation location) {
+    _manualPickup = true;
+    state = state.copyWith(
+      pickup: location,
+      pickupHouse: location.unit,
+      pickupSociety: location.premises,
+      confirmedPickupKey: BookingDraft.locationKey(location),
+      clearQuotedNetPayable: true,
+      clearRoute: true,
+    );
+  }
+
   void setDrop(MockLocation location) {
-    state = state.copyWith(drop: location, clearQuotedNetPayable: true);
+    final bool same = BookingDraft.samePin(state.drop, location);
+    state = state.copyWith(
+      drop: location,
+      clearQuotedNetPayable: true,
+      clearRoute: !same,
+      clearDropConfirmation: !same,
+    );
+  }
+
+  /// Stores the address captured for the drop at [index].
+  /// Coordinates on [location] are kept as given.
+  void confirmDropAddress(MockLocation location, {int index = 0}) {
+    if (index <= 0) {
+      state = state.copyWith(
+        drop: location,
+        confirmedDropKey: BookingDraft.locationKey(location),
+        clearQuotedNetPayable: true,
+        clearRoute: true,
+      );
+      return;
+    }
+    final int extraSlots = state.dropCount - 1;
+    if (index > extraSlots) {
+      return;
+    }
+    final List<MockLocation> extra = List<MockLocation>.from(state.extraDrops);
+    while (extra.length < extraSlots) {
+      extra.add(const MockLocation(id: '', label: '', address: ''));
+    }
+    extra[index - 1] = location;
+    final List<String?> keys = List<String?>.from(state.extraDropConfirmedKeys);
+    while (keys.length < extraSlots) {
+      keys.add(null);
+    }
+    keys[index - 1] = BookingDraft.locationKey(location);
+    if (extra.length > extraSlots) {
+      extra.removeRange(extraSlots, extra.length);
+    }
+    if (keys.length > extraSlots) {
+      keys.removeRange(extraSlots, keys.length);
+    }
+    state = state.copyWith(
+      extraDrops: extra,
+      extraDropConfirmedKeys: keys,
+      clearQuotedNetPayable: true,
+      clearRoute: true,
+    );
+  }
+
+  /// Records a Google Routes result. A missing result clears any previous
+  /// distance so a straight-line figure cannot linger.
+  void recordRoute({int? distanceMeters, int? durationSeconds}) {
+    if (distanceMeters == null || distanceMeters <= 0) {
+      state = state.copyWith(clearRoute: true);
+      return;
+    }
+    state = state.copyWith(
+      routeDistanceMeters: distanceMeters,
+      routeDurationSeconds: durationSeconds ?? 0,
+    );
   }
 
   void applyQuotedPayable(double amount) {
@@ -436,7 +582,6 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
   }
 
   void beginNewBooking() {
-    _draftToken = _nextDraftToken();
     state = BookingDraft(
       pickup: state.pickup ?? MockData.locations[4],
     );
@@ -448,6 +593,7 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
         deliveryMode: mode,
         dropCount: 1,
         extraDrops: const [],
+        extraDropConfirmedKeys: const <String?>[],
       );
       return;
     }
@@ -463,12 +609,29 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
     if (extra.length > clamped - 1) {
       extra.removeRange(clamped - 1, extra.length);
     }
-    state = state.copyWith(dropCount: clamped, extraDrops: extra);
+    final List<String?> keys =
+        List<String?>.from(state.extraDropConfirmedKeys);
+    while (keys.length < clamped - 1) {
+      keys.add(null);
+    }
+    if (keys.length > clamped - 1) {
+      keys.removeRange(clamped - 1, keys.length);
+    }
+    state = state.copyWith(
+      dropCount: clamped,
+      extraDrops: extra,
+      extraDropConfirmedKeys: keys,
+    );
   }
 
   void setDropAt(int index, MockLocation location) {
     if (index <= 0) {
-      state = state.copyWith(drop: location);
+      final bool same = BookingDraft.samePin(state.drop, location);
+      state = state.copyWith(
+        drop: location,
+        clearRoute: !same,
+        clearDropConfirmation: !same,
+      );
       return;
     }
     final int extraSlots = state.dropCount - 1;
@@ -479,11 +642,28 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
     while (extra.length < extraSlots) {
       extra.add(const MockLocation(id: '', label: '', address: ''));
     }
+    final bool same = BookingDraft.samePin(extra[index - 1], location);
     extra[index - 1] = location;
     if (extra.length > extraSlots) {
       extra.removeRange(extraSlots, extra.length);
     }
-    state = state.copyWith(extraDrops: extra, clearQuotedNetPayable: true);
+    final List<String?> keys =
+        List<String?>.from(state.extraDropConfirmedKeys);
+    while (keys.length < extraSlots) {
+      keys.add(null);
+    }
+    if (!same) {
+      keys[index - 1] = null;
+    }
+    if (keys.length > extraSlots) {
+      keys.removeRange(extraSlots, keys.length);
+    }
+    state = state.copyWith(
+      extraDrops: extra,
+      extraDropConfirmedKeys: keys,
+      clearQuotedNetPayable: true,
+      clearRoute: !same,
+    );
   }
 
   void clearDropAt(int index) {
@@ -509,8 +689,10 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
 
   void setSize(String id) => state = state.copyWith(sizeId: id);
 
-  void setWeight(double kg) =>
-      state = state.copyWith(weightKg: kg.clamp(0.5, 1000));
+  void setWeight(double kg) => state = state.copyWith(
+        weightKg: kg.clamp(0.5, 1000),
+        clearQuotedNetPayable: true,
+      );
 
   void setInstructions(String value) =>
       state = state.copyWith(instructions: value);
@@ -587,62 +769,6 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
     } else {
       state = state.copyWith(scheduledAt: value);
     }
-  }
-
-  MockOrder? confirmBooking() {
-    if (!state.canSubmitStops) {
-      return null;
-    }
-    if (state.paymentValidationError != null) {
-      return null;
-    }
-    return _createGuard.run(_draftToken, _createConfirmedOrder);
-  }
-
-  MockOrder _createConfirmedOrder() {
-    final MockLocation pickup = state.pickup!.copyWith(
-      address: state.pickupAddressText.isEmpty
-          ? state.pickup!.address
-          : state.pickupAddressText,
-    );
-    final List<MockLocation> drops = state.allDrops;
-    final MockVehicle vehicle = state.vehicle ?? MockData.vehicles.first;
-    final FareQuote quote = state.fareQuote;
-    final PaymentAllocation allocation = state.paymentAllocation;
-    final PaymentResponsibility responsibility = state.paymentResponsibility;
-    final String orderId = OrderIds.nextDisplayId();
-    final MockOrder order = MockOrder(
-      id: orderId,
-      status: OrderStatus.searching,
-      pickup: pickup,
-      drop: drops.first,
-      vehicle: vehicle,
-      fare: quote.netTotal,
-      tripFare: quote.tripFare,
-      discount: quote.discount,
-      createdAt: DateTime.now(),
-      customerId: 'customer_session',
-      packageLabel: state.categoryLabel,
-      weightKg: state.weightKg,
-      instructions: state.instructions,
-      etaMinutes: vehicle.etaMinutes,
-      scheduledAt: state.scheduledAt,
-      extraDrops: drops.skip(1).toList(growable: false),
-      fareConfigVersionId: quote.configVersionId,
-      paymentMethod: state.derivedPaymentMethod,
-      customerResponsibility: responsibility.customerAmount,
-      receiverResponsibility: responsibility.receiverAmount,
-      customerOnline: allocation.customerOnline,
-      customerCash: allocation.customerCash,
-      receiverOnline: allocation.receiverOnline,
-      receiverCash: allocation.receiverCash,
-      paymentTransactions: PaymentEngine.plannedTransactions(
-        orderId: orderId,
-        allocation: allocation,
-      ),
-    );
-    state = state.copyWith(activeOrder: order);
-    return order;
   }
 
   void attachActive(MockOrder order) {
@@ -868,7 +994,7 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
   }
 
   void reset() {
-    _draftToken = _nextDraftToken();
+    _manualPickup = false;
     state = BookingDraft(pickup: MockData.locations[4]);
   }
 

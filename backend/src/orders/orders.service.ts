@@ -15,9 +15,17 @@ import {
   serializeSnapshot,
 } from '../fare/fare.repository';
 import { FareService } from '../fare/fare.service';
+import { formatInr } from '../fare/money';
 import { RoutingService } from '../routing/routing.service';
+import { riderMayAccessRides } from '../files/rider-verification';
 import { CatalogRepository } from './catalog.repository';
 import { CreateOrderDto, CreateOrderStopDto } from './dto/create-order.dto';
+import { PreviewVehicleFaresDto } from './dto/preview-vehicle-fares.dto';
+import { assertPackageForVehicle } from './package-constraints';
+import {
+  isCustomerBookableVehicle,
+  serializeCustomerVehicleFare,
+} from './vehicle-fare';
 import {
   hashRequest,
   IdempotencyRepository,
@@ -56,6 +64,7 @@ export class OrdersService {
     const requestHash = hashRequest({
       city_id: body.city_id,
       vehicle_category_id: body.vehicle_category_id,
+      package_weight_kg: body.package_weight_kg ?? null,
       stops: body.stops,
     });
     const existing = await this.idempotency.find('create-order', key);
@@ -76,6 +85,10 @@ export class OrdersService {
 
         const city = await this.requireCity(body.city_id, tx);
         const category = await this.requireCategory(body.vehicle_category_id, tx);
+        assertPackageForVehicle({
+          weightKg: body.package_weight_kg ?? null,
+          weightCapacity: category.weight_capacity,
+        });
         const stops = await this.validateStops(body.stops, city.city_id, tx);
         const displayId = await this.orders.allocateDisplayId(city.city_id, tx);
         const order = await this.orders.insertOrder(
@@ -86,6 +99,7 @@ export class OrdersService {
             cityCode: city.city_code,
             vehicleCategoryId: category.vehicle_category_id,
             vehicleCategoryName: category.name,
+            packageWeightKg: body.package_weight_kg ?? null,
           },
           tx,
         );
@@ -199,6 +213,7 @@ export class OrdersService {
           409,
         );
       }
+      await this.requireCategory(order.vehicle_category_id, tx);
       const stops = await this.orders.listStops(order.order_id, tx);
       const routed = await this.routing.routeStops(stops);
       const quote = await this.fareService.quoteFromActiveConfig(
@@ -217,6 +232,23 @@ export class OrdersService {
         routing: this.routing.toResponse(routed),
       };
     });
+  }
+
+  async previewVehicleFares(auth: OrderActor, body: PreviewVehicleFaresDto) {
+    this.assertCustomer(auth);
+    const city = await this.requireCity(body.city_id, this.postgres);
+    const stops = await this.validateStops(body.stops, city.city_id, this.postgres);
+    const routed = await this.routing.routeStops(stops);
+    const distanceKm = this.routing.distanceKm(routed);
+    const rows = await this.fares.previewActiveVehicleFares(distanceKm);
+    return {
+      distance_km: distanceKm,
+      stop_count: stops.length,
+      routing: this.routing.toResponse(routed),
+      vehicles: rows
+        .filter((row) => isCustomerBookableVehicle(row))
+        .map((row) => serializeCustomerVehicleFare(row)),
+    };
   }
 
   async routeForAdmin(auth: OrderActor, orderId: string) {
@@ -255,17 +287,56 @@ export class OrdersService {
           409,
         );
       }
+      const category = await this.requireCategory(order.vehicle_category_id, tx);
       const quote = await this.fares.findQuote(fareQuoteId, tx);
       if (!quote) {
         throw new ApiError(ErrorCodes.QUOTE_NOT_FOUND, 'Fare quote was not found', 404);
       }
       const stops = await this.orders.listStops(order.order_id, tx);
+      const routed = await this.routing.routeStops(stops);
+      const distanceKm = this.routing.distanceKm(routed);
       this.fareService.assertQuoteUsable({
         quote,
         customerProfileId: auth.profileId,
         vehicleCategoryId: order.vehicle_category_id,
         stopCount: stops.length,
+        distanceKm,
       });
+      assertPackageForVehicle({
+        weightKg:
+          order.package_weight_kg == null ? null : Number(order.package_weight_kg),
+        weightCapacity: category.weight_capacity,
+      });
+      const recalculated = await this.fares.tripFareForVersion(
+        {
+          fareConfigVersionId: quote.fare_config_version_id,
+          vehicleCategoryId: order.vehicle_category_id,
+          distanceKm,
+        },
+        tx,
+      );
+      let recalculatedFare: string;
+      let quotedFare: string;
+      try {
+        if (!recalculated) {
+          throw new Error('missing fare');
+        }
+        recalculatedFare = formatInr(recalculated);
+        quotedFare = formatInr(quote.trip_fare);
+      } catch {
+        throw new ApiError(
+          ErrorCodes.QUOTE_MISMATCH,
+          'Fare quote does not match the fare configuration for this route',
+          409,
+        );
+      }
+      if (recalculatedFare !== quotedFare) {
+        throw new ApiError(
+          ErrorCodes.QUOTE_MISMATCH,
+          'Fare quote does not match the fare configuration for this route',
+          409,
+        );
+      }
       const snapshot = await this.fares.insertSnapshotFromQuote(
         {
           orderId: order.order_id,
@@ -500,6 +571,20 @@ export class OrdersService {
 
   async listRiderOffers(auth: OrderActor) {
     this.assertRider(auth);
+    const rider = await this.catalog.findRider(auth.profileId);
+    if (
+      !rider ||
+      !riderMayAccessRides({
+        approvalStatus: rider.approval_status,
+        deactivated: Boolean(rider.deactivated_at),
+      })
+    ) {
+      throw new ApiError(
+        ErrorCodes.RIDER_NOT_ELIGIBLE,
+        'Rider is not approved to receive orders',
+        409,
+      );
+    }
     const ttlMs = this.offerTtlMs();
     const rows = await this.orders.listOffersForRider(auth.profileId);
     const now = Date.now();
@@ -969,7 +1054,7 @@ export class OrdersService {
       vehicleCategoryId,
       db,
     );
-    if (!category || !category.active) {
+    if (!category || !isCustomerBookableVehicle(category)) {
       throw new ApiError(
         ErrorCodes.VEHICLE_CATEGORY_INVALID,
         'Vehicle category was not found or is inactive',
@@ -1078,6 +1163,7 @@ export class OrdersService {
       vehicle_category_id: order.vehicle_category_id,
       vehicle_category_name: order.vehicle_category_name_snapshot,
       canonical_status: order.canonical_status,
+      package_weight_kg: order.package_weight_kg,
       created_at: order.created_at.toISOString(),
       updated_at: order.updated_at.toISOString(),
       ...(stops ? { stops: stops.map((stop) => this.serializeStop(stop)) } : {}),

@@ -140,6 +140,41 @@ class MockLocation {
 
   String get displayLabel => addressLabel?.title ?? label;
 
+  /// User-facing address. Structured fields stay intact; empty parts and
+  /// segments already present in [address] are left out.
+  String get formattedAddress => composeAddress(
+        unit: unit,
+        premises: premises,
+        address: address,
+      );
+
+  static String composeAddress({
+    required String unit,
+    required String premises,
+    required String address,
+  }) {
+    final List<String> parts = <String>[];
+    void add(String raw) {
+      final String trimmed = raw.trim();
+      if (trimmed.isEmpty) {
+        return;
+      }
+      final bool duplicate = parts.any(
+        (String existing) => existing.toLowerCase() == trimmed.toLowerCase(),
+      );
+      if (!duplicate) {
+        parts.add(trimmed);
+      }
+    }
+
+    add(unit);
+    add(premises);
+    for (final String segment in address.split(',')) {
+      add(segment);
+    }
+    return parts.join(', ');
+  }
+
   MockLocation copyWith({
     String? id,
     String? label,
@@ -259,48 +294,6 @@ class MockRider {
   final String phone;
   final int trips;
   final String? imagePath;
-}
-
-/// Fare lines from the Admin-controlled engine. GST is always 0.
-class FareBreakdown {
-  const FareBreakdown({
-    required this.baseFare,
-    required this.distanceCharge,
-    this.vehicleCharge = 0,
-    this.platformFee = 0,
-    this.tax = 0,
-    this.discount = 0,
-    this.waitingCharge = 0,
-    this.surgeCharge = 0,
-    this.tollCharge = 0,
-    this.parkingCharge = 0,
-    this.netTotal,
-  });
-
-  final double baseFare;
-  final double distanceCharge;
-  final double vehicleCharge;
-  final double platformFee;
-  final double tax;
-  final double discount;
-  final double waitingCharge;
-  final double surgeCharge;
-  final double tollCharge;
-  final double parkingCharge;
-  final double? netTotal;
-
-  double get total =>
-      netTotal ??
-      (baseFare +
-          distanceCharge +
-          vehicleCharge +
-          platformFee +
-          waitingCharge +
-          surgeCharge +
-          tollCharge +
-          parkingCharge -
-          discount +
-          tax);
 }
 
 class MockOrder {

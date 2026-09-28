@@ -54,20 +54,26 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   }
 
   Future<void> _finishPickup(MockLocation location) async {
-    final MockLocation? confirmed =
-        await CompleteAddressScreen.open(context, initial: location);
-    if (!mounted || confirmed == null) {
+    final BookingDraftNotifier notifier =
+        ref.read(bookingDraftProvider.notifier);
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    if (draft.needsPickupConfirmationFor(location)) {
+      notifier.setPickup(location);
+      final MockLocation? confirmed =
+          await CompleteAddressScreen.open(context, initial: location);
+      if (!mounted || confirmed == null) {
+        return;
+      }
+      notifier.confirmPickupAddress(confirmed);
+      _search.text =
+          confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
+      setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+      await ref.read(recentLocationsProvider.notifier).remember(confirmed);
+    }
+    if (!mounted) {
       return;
     }
-    ref.read(bookingDraftProvider.notifier).setPickup(confirmed);
-    ref.read(bookingDraftProvider.notifier).setPickupUnit(
-          house: confirmed.unit,
-          society: confirmed.premises,
-        );
-    _search.text =
-        confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
-    setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
-    await ref.read(recentLocationsProvider.notifier).remember(confirmed);
+    await context.push(AppRoutes.bookDrop);
   }
 
   IconData _iconFor(MockLocation loc) {
@@ -170,6 +176,14 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
     await _finishPickup(picked);
   }
 
+  Future<void> _continue() async {
+    final MockLocation? pickup = ref.read(bookingDraftProvider).pickup;
+    if (!_pickupChosen(pickup)) {
+      return;
+    }
+    await _finishPickup(pickup!);
+  }
+
   Future<void> _openSaved() async {
     final MockLocation? picked = await showSavedAddressPicker(context);
     if (!mounted || picked == null) {
@@ -191,7 +205,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
       bottom: AnimatedPrimaryButton(
         label: 'Continue',
         enabled: pickupChosen,
-        onPressed: () => context.push(AppRoutes.bookDrop),
+        onPressed: _continue,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

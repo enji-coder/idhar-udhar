@@ -42,6 +42,9 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
   late final TextEditingController _house;
   late final TextEditingController _society;
   late final TextEditingController _address;
+  String? _houseError;
+  String? _societyError;
+  String? _addressError;
 
   @override
   void initState() {
@@ -104,35 +107,40 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
   bool get _hasPin =>
       widget.initial.latitude != null && widget.initial.longitude != null;
 
-  void _confirm(bool residential) {
+  void _confirm() {
+    final String house = _house.text.trim();
+    final String building = _society.text.trim();
     final String address = _address.text.trim();
-    if (!_hasPin || address.isEmpty) {
+    setState(() {
+      _houseError = house.isEmpty
+          ? 'Enter House / Flat / Floor / Office No.'
+          : null;
+      _societyError =
+          building.isEmpty ? 'Enter Building / Flat / Office Name' : null;
+      _addressError = address.isEmpty ? 'Enter Full Location' : null;
+    });
+    if (!_hasPin || house.isEmpty || building.isEmpty || address.isEmpty) {
       return;
     }
-    final String house = residential ? _house.text.trim() : '';
-    final String society = residential ? _society.text.trim() : '';
     Navigator.of(context).pop(
       widget.initial.copyWith(
         address: address,
         unit: house,
-        premises: society,
-        landmark: society.isNotEmpty ? society : widget.initial.landmark,
+        premises: building,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final BookingDraft draft = ref.watch(bookingDraftProvider);
-    final bool residential = draft.usesResidentialPickup;
-    final bool canConfirm = _hasPin && _address.text.trim().isNotEmpty;
+    final bool canConfirm = _hasPin;
     final double keyboard = MediaQuery.viewInsetsOf(context).bottom;
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Confirm Address',
         enabled: canConfirm,
-        onPressed: canConfirm ? () => _confirm(residential) : null,
+        onPressed: canConfirm ? _confirm : null,
       ),
       child: ListView(
         controller: _scroll,
@@ -154,9 +162,7 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
           ),
           const SizedBox(height: AppSpacing.lg),
           Text(
-            residential
-                ? 'Add the house details, then confirm this pickup or drop.'
-                : 'Review the address, then confirm this pickup or drop.',
+            'Add the address details, then confirm this pickup or drop.',
             style: AppTextStyles.bodyMedium.copyWith(
               color: AppColors.textSecondary,
             ),
@@ -168,43 +174,46 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
               style: AppTextStyles.caption.copyWith(color: AppColors.orange),
             ),
           ],
-          if (residential) ...[
-            const SizedBox(height: AppSpacing.lg),
-            KeyedSubtree(
-              key: _houseKey,
-              child: GlassTextField(
-                controller: _house,
-                focusNode: _houseFocus,
-                hint: 'House / Flat No.',
-                leadingIcon: Icons.home_outlined,
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => _societyFocus.requestFocus(),
-              ),
+          const SizedBox(height: AppSpacing.lg),
+          KeyedSubtree(
+            key: _houseKey,
+            child: GlassTextField(
+              controller: _house,
+              focusNode: _houseFocus,
+              hint: 'House / Flat / Floor / Office No.',
+              leadingIcon: Icons.home_outlined,
+              textInputAction: TextInputAction.next,
+              errorText: _houseError,
+              onChanged: (_) => setState(() => _houseError = null),
+              onSubmitted: (_) => _societyFocus.requestFocus(),
             ),
-            const SizedBox(height: AppSpacing.md),
-            KeyedSubtree(
-              key: _societyKey,
-              child: GlassTextField(
-                controller: _society,
-                focusNode: _societyFocus,
-                hint: 'Flat / Society',
-                leadingIcon: Icons.apartment_outlined,
-                textInputAction: TextInputAction.next,
-                onSubmitted: (_) => _addressFocus.requestFocus(),
-              ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          KeyedSubtree(
+            key: _societyKey,
+            child: GlassTextField(
+              controller: _society,
+              focusNode: _societyFocus,
+              hint: 'Building / Flat / Office Name',
+              leadingIcon: Icons.apartment_outlined,
+              textInputAction: TextInputAction.next,
+              errorText: _societyError,
+              onChanged: (_) => setState(() => _societyError = null),
+              onSubmitted: (_) => _addressFocus.requestFocus(),
             ),
-          ],
+          ),
           const SizedBox(height: AppSpacing.md),
           KeyedSubtree(
             key: _addressKey,
             child: GlassTextField(
               controller: _address,
               focusNode: _addressFocus,
-              hint: 'Full Address',
+              hint: 'Full Location',
               leadingIcon: Icons.place_outlined,
               maxLines: 3,
               textInputAction: TextInputAction.done,
-              onChanged: (_) => setState(() {}),
+              errorText: _addressError,
+              onChanged: (_) => setState(() => _addressError = null),
             ),
           ),
           SizedBox(height: keyboard > 0 ? keyboard : AppSpacing.xl),

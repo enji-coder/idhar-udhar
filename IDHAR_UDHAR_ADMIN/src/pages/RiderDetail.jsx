@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
 import GlassCard from '../components/common/GlassCard';
@@ -20,7 +20,8 @@ import { formatAppDate, formatAppTime, parseAppDate, sortByDateTime } from '../u
 import { maskAadhaar, maskBankAccount } from '../utils/masking';
 import { enrichRiderProfile, enrichVehicleRecord, riderDocumentsFor } from '../services/profileEnrichment';
 import { calculateOrderFinance } from '../services/commission';
-import { fetchAdminRider, fetchRiderCod, fetchRiderEarnings, fetchRiderWallet, fetchRiderWalletLedger } from '../api/adminApi';
+import { approveRiderDocument, fetchAdminRider, fetchRiderCod, fetchRiderDocumentUrl, fetchRiderDocuments, fetchRiderEarnings, fetchRiderProfilePicture, fetchRiderWallet, fetchRiderWalletLedger, rejectRiderDocument, reopenRiderVerification } from '../api/adminApi';
+import { canSubmitReview, documentLabel, documentStatusLabel, documentsLockedLabel, languageLabel, rejectionIssue, verificationSourceLabel } from '../services/documentReview';
 
 const DOC_STATUSES = ['Pending', 'Verified', 'Rejected'];
 
@@ -41,6 +42,16 @@ export default function RiderDetail() {
   const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [serverDocuments, setServerDocuments] = useState([]);
+  const [documentsError, setDocumentsError] = useState(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [openingDoc, setOpeningDoc] = useState(false);
+  const reviewingRef = useRef(false);
+  const openingRef = useRef(false);
+  const [profilePictureUrl, setProfilePictureUrl] = useState('');
+  const [documentMeta, setDocumentMeta] = useState(null);
+  const [reopening, setReopening] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   useEffect(() => {
     if (!id) return undefined;
@@ -51,11 +62,12 @@ export default function RiderDetail() {
         const profile = await fetchAdminRider(id);
         if (cancelled) return;
         setRider(profile);
-        const [walletResult, codResult, earningsResult, ledgerResult] = await Promise.allSettled([
+        const [walletResult, codResult, earningsResult, ledgerResult, documentsResult] = await Promise.allSettled([
           fetchRiderWallet(id),
           fetchRiderCod(id),
           fetchRiderEarnings(id),
           fetchRiderWalletLedger(id),
+          fetchRiderDocuments(id),
         ]);
         if (cancelled) return;
         if (walletResult.status === 'fulfilled') setWalletBalance(walletResult.value);
@@ -78,6 +90,24 @@ export default function RiderDetail() {
         } else {
           setLedger([]);
         }
+        if (documentsResult.status === 'fulfilled') {
+          setServerDocuments(documentsResult.value?.documents || []);
+          setDocumentMeta(documentsResult.value || null);
+          setDocumentsError(null);
+          if (documentsResult.value?.has_profile_picture) {
+            try {
+              const signed = await fetchRiderProfilePicture(id);
+              if (!cancelled) setProfilePictureUrl(signed?.download_url || '');
+            } catch {
+              if (!cancelled) setProfilePictureUrl('');
+            }
+          } else if (!cancelled) {
+            setProfilePictureUrl('');
+          }
+        } else {
+          setServerDocuments([]);
+          setDocumentsError(documentsResult.reason);
+        }
         setLoadError(null);
       } catch (error) {
         if (!cancelled) setLoadError(error);
@@ -95,7 +125,10 @@ export default function RiderDetail() {
     if (!rider) return null;
     return enrichVehicleRecord({ number: rider.vehicleNumber, category: rider.vehicle, type: rider.vehicle }, rider);
   }, [rider]);
-  const documents = useMemo(() => (rider ? riderDocumentsFor(rider) : []), [rider]);
+  const documents = useMemo(() => {
+    if (rider?.source === 'api') return serverDocuments;
+    return rider ? riderDocumentsFor(rider) : [];
+  }, [rider, serverDocuments]);
   const history = useMemo(
     () => sortByDateTime(orders.filter((order) => order.riderId === id || order.rider === rider?.name)),
     [orders, id, rider?.name],
@@ -114,13 +147,94 @@ export default function RiderDetail() {
     setToast('Document verification is not available on the server yet.');
   }
 
+  async function viewServerDocument(doc) {
+    if (!canSubmitReview(openingRef.current || reviewingRef.current)) return;
+    openingRef.current = true;
+    setOpeningDoc(true);
+    try {
+      const signed = await fetchRiderDocumentUrl(doc.rider_document_id);
+      if (!signed?.download_url) {
+        setToast('The document link was not returned.');
+        return;
+      }
+      window.open(signed.download_url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      setToast(error.message || 'Could not open the document.');
+    } finally {
+      openingRef.current = false;
+      setOpeningDoc(false);
+    }
+  }
+
+  async function submitDocumentDecision(decision) {
+    if (!docView?.rider_document_id || !canSubmitReview(reviewingRef.current)) return;
+    if (decision === 'REJECTED') {
+      const issue = rejectionIssue(rejectReason);
+      if (issue) {
+        setToast(issue);
+        return;
+      }
+    }
+    reviewingRef.current = true;
+    setReviewing(true);
+    try {
+      const result = decision === 'APPROVED'
+        ? await approveRiderDocument(docView.rider_document_id)
+        : await rejectRiderDocument(docView.rider_document_id, rejectReason.trim());
+      setServerDocuments((current) => current.map((row) => (
+        row.rider_document_id === result.document.rider_document_id ? result.document : row
+      )));
+      setDocumentMeta((current) => ({
+        ...(current || {}),
+        approval_status: result.approval_status,
+        onboarding_kyc_status: result.onboarding_kyc_status,
+        documents_locked: result.approval_status === 'APPROVED',
+      }));
+      const profile = await fetchAdminRider(id);
+      setRider(profile);
+      setDocView(null);
+      setRejectReason('');
+      setToast(decision === 'APPROVED' ? 'Document approved.' : 'Document rejected.');
+    } catch (error) {
+      setToast(error.message || 'Could not save the document decision.');
+    } finally {
+      reviewingRef.current = false;
+      setReviewing(false);
+    }
+  }
+
+  async function reopenVerification() {
+    if (!id || !canSubmitReview(reopening)) return;
+    setReopening(true);
+    try {
+      const result = await reopenRiderVerification(id);
+      setDocumentMeta((current) => ({
+        ...(current || {}),
+        approval_status: result.approval_status,
+        onboarding_kyc_status: result.onboarding_kyc_status,
+        documents_locked: result.documents_locked,
+      }));
+      const profile = await fetchAdminRider(id);
+      setRider(profile);
+      setToast('Rider reopened for verification.');
+    } catch (error) {
+      setToast(error.message || 'Could not reopen verification.');
+    } finally {
+      setReopening(false);
+    }
+  }
+
   return (
     <PageContainer className="space-y-4">
       <p className="text-sm"><Link to="/riders" className="font-semibold text-brand-600">← Riders</Link></p>
       <section className="grid gap-4 lg:grid-cols-3">
         <GlassCard className="lg:col-span-1">
           <div className="flex items-center gap-3">
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-lg font-bold text-white">{initials(rider.name)}</span>
+            {profilePictureUrl ? (
+              <img src={profilePictureUrl} alt="" className="h-14 w-14 rounded-full object-cover" />
+            ) : (
+              <span className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-lg font-bold text-white">{initials(rider.name)}</span>
+            )}
             <div>
               <h2 className="text-xl font-bold">{rider.name}</h2>
               <p className="text-sm text-ink-muted">{rider.id} · {rider.zone}</p>
@@ -144,20 +258,54 @@ export default function RiderDetail() {
           </div>
         </GlassCard>
         <GlassCard className="lg:col-span-2">
-          <h3 className="mb-3 text-lg font-semibold">Documents</h3>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-lg font-semibold">Documents</h3>
+            {rider.source === 'api' ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+                <span>Approval {documentMeta?.approval_status || rider.approval || 'PENDING'} · KYC {documentMeta?.onboarding_kyc_status || rider.kyc || 'PENDING'}</span>
+                <span>Language {languageLabel(documentMeta?.preferred_language)}</span>
+                <span>Documents {documentsLockedLabel(Boolean(documentMeta?.documents_locked))}</span>
+                {documentMeta?.documents_locked ? (
+                  <Button size="sm" variant="edit" loading={reopening} disabled={reopening} onClick={reopenVerification}>Reopen for re-verification</Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          {rider.source === 'api' && documentsError ? (
+            <p className="text-sm text-danger">{documentsError.message || 'Documents could not be loaded.'}</p>
+          ) : null}
+          {rider.source === 'api' && !documentsError && documents.length === 0 ? (
+            <p className="text-sm text-ink-muted">No documents have been uploaded.</p>
+          ) : null}
           <ul className="grid gap-3 sm:grid-cols-2">
-            {documents.map((doc) => (
-              <li key={doc.key} className="flex items-center justify-between gap-3 rounded-2xl bg-white/70 px-3 py-3">
-                <div className="min-w-0">
-                  <p className="font-medium">{doc.label}</p>
-                  <p className="truncate text-xs text-ink-muted">{doc.number}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <StatusBadge status={doc.status} />
-                  <ActionButton icon={Eye} tone="view" onClick={() => setDocView(doc)}>View</ActionButton>
-                </div>
-              </li>
-            ))}
+            {rider.source === 'api'
+              ? documents.map((doc) => (
+                <li key={doc.rider_document_id} className="flex items-center justify-between gap-3 rounded-2xl bg-white/70 px-3 py-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{documentLabel(doc.document_type)}</p>
+                    <p className="truncate text-xs text-ink-muted">
+                      {verificationSourceLabel(doc.verification_source)} · {formatAppDate(parseAppDate(doc.created_at))} {formatAppTime(doc.created_at)}
+                    </p>
+                    {doc.rejection_reason ? <p className="truncate text-xs text-danger">{doc.rejection_reason}</p> : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusBadge status={documentStatusLabel(doc.status)} />
+                    <ActionButton icon={Eye} tone="view" disabled={openingDoc || reviewing} onClick={() => { setRejectReason(''); setDocView(doc); }}>View</ActionButton>
+                  </div>
+                </li>
+              ))
+              : documents.map((doc) => (
+                <li key={doc.key} className="flex items-center justify-between gap-3 rounded-2xl bg-white/70 px-3 py-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{doc.label}</p>
+                    <p className="truncate text-xs text-ink-muted">{doc.number}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusBadge status={doc.status} />
+                    <ActionButton icon={Eye} tone="view" onClick={() => setDocView(doc)}>View</ActionButton>
+                  </div>
+                </li>
+              ))}
           </ul>
         </GlassCard>
       </section>
@@ -236,8 +384,39 @@ export default function RiderDetail() {
           </ul>
         </GlassCard>
       </section>
-      <Modal open={Boolean(docView)} title={docView?.label || 'Document'} onClose={() => setDocView(null)} footer={<Button onClick={() => setDocView(null)}>Close</Button>}>
-        {docView ? (
+      <Modal
+        open={Boolean(docView)}
+        title={docView?.rider_document_id ? documentLabel(docView.document_type) : (docView?.label || 'Document')}
+        onClose={() => { if (!reviewing) setDocView(null); }}
+        footer={docView?.rider_document_id ? (
+          <>
+            <Button variant="ghost" disabled={reviewing} onClick={() => setDocView(null)}>Close</Button>
+            <Button variant="approve" loading={reviewing} disabled={reviewing || openingDoc} onClick={() => submitDocumentDecision('APPROVED')}>Approve</Button>
+            <Button variant="reject" loading={reviewing} disabled={reviewing || openingDoc} onClick={() => submitDocumentDecision('REJECTED')}>Reject</Button>
+          </>
+        ) : <Button onClick={() => setDocView(null)}>Close</Button>}
+      >
+        {docView?.rider_document_id ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl bg-white/70 p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">{documentLabel(docView.document_type)}</p>
+              <p className="mt-2 text-sm text-ink-muted">Status {documentStatusLabel(docView.status)} · {verificationSourceLabel(docView.verification_source)}</p>
+              <p className="mt-1 text-sm text-ink-muted">Uploaded {formatAppDate(parseAppDate(docView.created_at))} {formatAppTime(docView.created_at)}</p>
+              {docView.rejection_reason ? <p className="mt-2 text-sm text-danger">{docView.rejection_reason}</p> : null}
+            </div>
+            <Button variant="view" loading={openingDoc} disabled={reviewing} onClick={() => viewServerDocument(docView)}>Open document</Button>
+            <Field label="Rejection reason">
+              <textarea
+                className={inputClass}
+                rows={3}
+                value={rejectReason}
+                disabled={reviewing}
+                onChange={(event) => setRejectReason(event.target.value)}
+                placeholder="Required only when rejecting"
+              />
+            </Field>
+          </div>
+        ) : docView ? (
           <div className="space-y-4">
             <div className="rounded-2xl bg-white/70 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">{docView.label}</p>

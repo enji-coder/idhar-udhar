@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import 'api_client.dart';
 import 'json_codec.dart';
 
@@ -47,6 +49,8 @@ class RiderApiProfile {
     this.onlineStatus,
     this.codOperationalStatus,
     this.phoneNormalized,
+    this.preferredLanguage,
+    this.hasProfilePicture = false,
   });
 
   final String identityId;
@@ -56,6 +60,8 @@ class RiderApiProfile {
   final String? onlineStatus;
   final String? codOperationalStatus;
   final String? phoneNormalized;
+  final String? preferredLanguage;
+  final bool hasProfilePicture;
 
   factory RiderApiProfile.fromJson(Map<String, Object?> json) {
     return RiderApiProfile(
@@ -66,8 +72,29 @@ class RiderApiProfile {
       onlineStatus: jsonString(json['online_status']),
       codOperationalStatus: jsonString(json['cod_operational_status']),
       phoneNormalized: jsonString(json['phone_normalized']),
+      preferredLanguage: jsonString(json['preferred_language']),
+      hasProfilePicture: json['has_profile_picture'] == true,
     );
   }
+}
+
+class SignedProfilePicture {
+  const SignedProfilePicture({
+    required this.downloadUrl,
+    this.expiresInSeconds = 0,
+  });
+
+  factory SignedProfilePicture.fromJson(Map<String, Object?> json) {
+    return SignedProfilePicture(
+      downloadUrl: jsonString(json['download_url']) ?? '',
+      expiresInSeconds: json['download_url_expires_in'] is num
+          ? (json['download_url_expires_in'] as num).toInt()
+          : 0,
+    );
+  }
+
+  final String downloadUrl;
+  final int expiresInSeconds;
 }
 
 class ProfilesApi {
@@ -96,5 +123,34 @@ class ProfilesApi {
 
   Future<RiderApiProfile> rider() async {
     return RiderApiProfile.fromJson(await _client.get('/v1/rider/profile'));
+  }
+
+  Future<RiderApiProfile> updateRiderLanguage(String preferredLanguage) async {
+    final Map<String, Object?> body = await _client.put(
+      '/v1/rider/profile/language',
+      data: <String, Object?>{'preferred_language': preferredLanguage},
+    );
+    return RiderApiProfile(
+      identityId: '',
+      riderProfileId: '',
+      preferredLanguage: jsonString(body['preferred_language']),
+      approvalStatus: jsonString(body['approval_status']),
+      onlineStatus: jsonString(body['online_status']),
+    );
+  }
+
+  Future<SignedProfilePicture> riderProfilePicture() async {
+    return SignedProfilePicture.fromJson(
+      await _client.get('/v1/rider/profile/picture'),
+    );
+  }
+
+  Future<SignedProfilePicture> uploadRiderProfilePicture(String filePath) async {
+    final FormData form = FormData.fromMap(<String, Object?>{
+      'file': await MultipartFile.fromFile(filePath),
+    });
+    return SignedProfilePicture.fromJson(
+      await _client.postForm('/v1/rider/profile/picture', data: form),
+    );
   }
 }

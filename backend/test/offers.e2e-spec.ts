@@ -39,6 +39,7 @@ describe('Offers, dispatch and state machine (e2e)', () => {
       .send({
         city_id: catalog.cityId,
         vehicle_category_id: catalog.vehicleCategoryId,
+        package_weight_kg: 1,
         stops: sampleStops(catalog.zoneId),
       });
     const quote = await request(app.getHttpServer())

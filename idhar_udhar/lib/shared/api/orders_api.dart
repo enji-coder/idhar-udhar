@@ -128,6 +128,11 @@ class ApiQuote {
     this.distanceCharge = 0,
     this.discount = 0,
     this.waiting = 0,
+    this.surge = 0,
+    this.toll = 0,
+    this.parking = 0,
+    this.rounding = 0,
+    this.tax = 0,
   });
 
   final String orderId;
@@ -140,6 +145,11 @@ class ApiQuote {
   final double distanceCharge;
   final double discount;
   final double waiting;
+  final double surge;
+  final double toll;
+  final double parking;
+  final double rounding;
+  final double tax;
 
   factory ApiQuote.fromJson(Map<String, Object?> json) {
     return ApiQuote(
@@ -153,6 +163,11 @@ class ApiQuote {
       distanceCharge: jsonDouble(json['distance_charge']),
       discount: jsonDouble(json['discount']),
       waiting: jsonDouble(json['waiting']),
+      surge: jsonDouble(json['surge']),
+      toll: jsonDouble(json['toll']),
+      parking: jsonDouble(json['parking']),
+      rounding: jsonDouble(json['rounding']),
+      tax: jsonDouble(json['tax']),
     );
   }
 }
@@ -163,10 +178,24 @@ class OrdersApi {
   final ApiClient _client;
   final Uuid _uuid = const Uuid();
 
+  Future<Map<String, Object?>> previewVehicleFares({
+    required String cityId,
+    required List<ApiStop> stops,
+  }) {
+    return _client.post(
+      '/v1/orders/vehicle-fares',
+      data: <String, Object?>{
+        'city_id': cityId,
+        'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
+      },
+    );
+  }
+
   Future<ApiOrder> create({
     required String cityId,
     required String vehicleCategoryId,
     required List<ApiStop> stops,
+    double? packageWeightKg,
     String? idempotencyKey,
   }) async {
     final Map<String, Object?> body = await _client.post(
@@ -174,6 +203,7 @@ class OrdersApi {
       data: <String, Object?>{
         'city_id': cityId,
         'vehicle_category_id': vehicleCategoryId,
+        if (packageWeightKg != null) 'package_weight_kg': packageWeightKg,
         'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
       },
       headers: <String, String>{

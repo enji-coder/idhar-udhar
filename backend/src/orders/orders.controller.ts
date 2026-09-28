@@ -14,6 +14,7 @@ import { UuidParamPipe } from '../common/uuid-param.pipe';
 import { AuthContext } from '../auth/types/auth-context';
 import { ConfirmOrderDto } from './dto/confirm-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { PreviewVehicleFaresDto } from './dto/preview-vehicle-fares.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
 import { TransitionOrderDto } from './dto/transition-order.dto';
 import { readIdempotencyKey } from './idempotency-key';
@@ -22,6 +23,16 @@ import { OrdersService } from './orders.service';
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
+
+  @Roles('CUSTOMER')
+  @Post('vehicle-fares')
+  @HttpCode(HttpStatus.OK)
+  previewVehicleFares(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: PreviewVehicleFaresDto,
+  ) {
+    return this.orders.previewVehicleFares(auth, body);
+  }
 
   @Roles('CUSTOMER')
   @Post()

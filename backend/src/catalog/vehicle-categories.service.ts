@@ -16,6 +16,7 @@ import {
 import { CreateVehicleCategoryDto } from './dto/create-vehicle-category.dto';
 import { UpdateVehicleCategoryDto } from './dto/update-vehicle-category.dto';
 import { FarePublishRepository } from './fare-publish.repository';
+import { isVehiclePair } from './vehicle-catalog';
 import {
   CategoryUsage,
   VehicleCategoriesRepository,
@@ -61,6 +62,9 @@ export class VehicleCategoriesService {
   async create(auth: AuthContext, body: CreateVehicleCategoryDto) {
     const name = body.name.replace(/\s+/g, ' ').trim();
     await this.assertNameAvailable(name, null);
+    const hierarchy = this.resolveHierarchy(body.vehicle_type, body.vehicle, 'create');
+    const weightCapacity = this.emptyToNull(body.weight_capacity);
+    this.assertWeight(weightCapacity);
     const active = body.active !== false;
     const code = this.normalizeCode(body.code);
     const created = await this.postgres.transaction(async (db) => {
@@ -69,8 +73,9 @@ export class VehicleCategoriesService {
           name,
           code,
           active,
-          weight_capacity: this.emptyToNull(body.weight_capacity),
+          weight_capacity: weightCapacity,
           size: this.emptyToNull(body.size),
+          ...hierarchy,
         },
         db,
       );
@@ -101,15 +106,24 @@ export class VehicleCategoriesService {
     }
     const name = (body.name ?? existing.name).replace(/\s+/g, ' ').trim();
     await this.assertNameAvailable(name, id);
+    const hierarchy = this.resolveHierarchy(
+      body.vehicle_type,
+      body.vehicle,
+      'update',
+      existing,
+    );
+    const weightCapacity =
+      body.weight_capacity !== undefined
+        ? this.emptyToNull(body.weight_capacity)
+        : existing.weight_capacity;
+    this.assertWeight(weightCapacity);
     const next = {
       name,
       code: body.code !== undefined ? this.normalizeCode(body.code) : existing.code,
       active: body.active ?? existing.active,
-      weight_capacity:
-        body.weight_capacity !== undefined
-          ? this.emptyToNull(body.weight_capacity)
-          : existing.weight_capacity,
+      weight_capacity: weightCapacity,
       size: body.size !== undefined ? this.emptyToNull(body.size) : existing.size,
+      ...hierarchy,
     };
     await this.postgres.transaction(async (db) => {
       await this.categories.update(id, next, db);
@@ -252,6 +266,55 @@ export class VehicleCategoriesService {
     return rates;
   }
 
+  private resolveHierarchy(
+    vehicleType: string | undefined,
+    vehicle: string | undefined,
+    mode: 'create' | 'update',
+    existing?: VehicleCategoryRow,
+  ): { vehicle_type: string | null; vehicle: string | null } {
+    if (mode === 'update' && vehicleType === undefined && vehicle === undefined) {
+      return {
+        vehicle_type: existing?.vehicle_type ?? null,
+        vehicle: existing?.vehicle ?? null,
+      };
+    }
+    const nextType =
+      vehicleType !== undefined
+        ? this.blankToNull(vehicleType)
+        : (existing?.vehicle_type ?? null);
+    const nextVehicle =
+      vehicle !== undefined ? this.blankToNull(vehicle) : (existing?.vehicle ?? null);
+    if (nextType == null && nextVehicle == null) {
+      return { vehicle_type: null, vehicle: null };
+    }
+    if (!nextType || !nextVehicle || !isVehiclePair(nextType, nextVehicle)) {
+      throw new ApiError(
+        ErrorCodes.VALIDATION_ERROR,
+        'Vehicle does not belong to the selected vehicle type',
+        400,
+      );
+    }
+    return { vehicle_type: nextType, vehicle: nextVehicle };
+  }
+
+  private assertWeight(value: string | null) {
+    if (value == null) return;
+    const trimmed = value.trim();
+    if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return;
+    if (Number(trimmed) < 0) {
+      throw new ApiError(
+        ErrorCodes.VALIDATION_ERROR,
+        'Weight capacity must be 0 or more',
+        400,
+      );
+    }
+  }
+
+  private blankToNull(value?: string | null): string | null {
+    const trimmed = String(value ?? '').trim();
+    return trimmed ? trimmed : null;
+  }
+
   private normalizeCode(code?: string | null): string | null {
     const value = String(code || '').trim().toUpperCase();
     return value ? value : null;
@@ -270,6 +333,8 @@ export class VehicleCategoriesService {
       active: row.active,
       weight_capacity: row.weight_capacity,
       size: row.size,
+      vehicle_type: row.vehicle_type,
+      vehicle: row.vehicle,
       rates: {
         base_fare: row.base_fare ?? '0.00',
         per_km: row.per_km ?? '0.00',
@@ -290,6 +355,8 @@ export class VehicleCategoriesService {
       active: row.active,
       weight_capacity: row.weight_capacity,
       size: row.size,
+      vehicle_type: row.vehicle_type,
+      vehicle: row.vehicle,
       created_at: row.created_at,
       updated_at: row.updated_at,
       fare_config_version_id: row.fare_config_version_id,

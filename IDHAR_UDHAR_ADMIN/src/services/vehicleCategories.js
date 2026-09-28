@@ -1,3 +1,4 @@
+import { issuesForVehicleCategoryForm } from '../data/vehicleCatalog';
 import { createEntityStore } from './entityStore';
 import { orderStore, riderStore, vehicleStore } from './stores';
 import {
@@ -81,20 +82,7 @@ export function categoryUsage(nameOrRow) {
 }
 
 export function validateVehicleCategory(form, rows = listVehicleCategories()) {
-  const name = normalizeName(form.name);
-  const issues = {};
-  if (!name) issues.name = 'Vehicle category name is required.';
-  else if (rows.find((row) => row.id !== form.id && normalizeName(row.name).toLowerCase() === name.toLowerCase())) {
-    issues.name = 'This vehicle category already exists.';
-  }
-  const rider = Number(form.riderSharePercent);
-  const company = Number(form.companyCommissionPercent);
-  if (!Number.isFinite(rider) || rider < 0) issues.riderSharePercent = 'Rider percentage must be 0 or more.';
-  if (!Number.isFinite(company) || company < 0) issues.companyCommissionPercent = 'Company commission must be 0 or more.';
-  if (Number.isFinite(rider) && Number.isFinite(company) && Math.round((rider + company) * 100) !== 10000) {
-    issues.companyCommissionPercent = 'Rider percentage and company commission must add up to 100%.';
-  }
-  return { name, issues };
+  return issuesForVehicleCategoryForm(form, rows);
 }
 
 export async function syncVehicleCategories() {
@@ -105,11 +93,13 @@ export async function syncVehicleCategories() {
 
 export async function saveVehicleCategory(form) {
   const rows = listVehicleCategories();
-  const { name, issues } = validateVehicleCategory(form, rows);
+  const { name, vehicleType, vehicle, issues } = validateVehicleCategory(form, rows);
   if (Object.keys(issues).length) return { ok: false, issues };
   const rates = toRates(form);
   const payload = {
     name,
+    vehicle_type: vehicleType,
+    vehicle,
     active: form.status !== 'Inactive',
     weight_capacity: form.weightCapacityKg ? String(form.weightCapacityKg) : '',
     size: form.size ? String(form.size) : '',
@@ -123,7 +113,7 @@ export async function saveVehicleCategory(form) {
     return { ok: true, record };
   } catch (error) {
     if (error instanceof ApiError && error.code === 'VEHICLE_CATEGORY_NAME_TAKEN') {
-      return { ok: false, issues: { name: error.message } };
+      return { ok: false, issues: { vehicle: error.message } };
     }
     throw error;
   }

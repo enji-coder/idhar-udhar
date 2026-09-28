@@ -53,6 +53,7 @@ describe('Rider wallet and COD (e2e)', () => {
       .send({
         city_id: catalog.cityId,
         vehicle_category_id: catalog.vehicleCategoryId,
+        package_weight_kg: 1,
         stops: sampleStops(catalog.zoneId),
       });
     expect(created.status).toBe(201);

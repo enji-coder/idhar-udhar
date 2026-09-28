@@ -149,7 +149,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Continue',
-        onPressed: () => _continue(context, draft),
+        onPressed: _continue,
       ),
       child: draft.deliveryMode == DeliveryMode.multiple
           ? _buildMultipleBody(draft)
@@ -268,9 +268,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               child: GlassContainer(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 child: Text(
-                  draft.drop!.address.isNotEmpty
-                      ? draft.drop!.address
-                      : draft.drop!.label,
+                  draft.locationAddress(draft.drop!),
                   style: AppTextStyles.bodyMedium,
                 ),
               ),
@@ -539,7 +537,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  'Pickup: ${draft.pickup!.label}',
+                  'Pickup: ${draft.pickupAddressText.isNotEmpty ? draft.pickupAddressText : draft.pickup!.label}',
                   style: AppTextStyles.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -861,20 +859,39 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   }
 
   Future<void> _finishDrop(MockLocation location, int? dropIndex) async {
-    final MockLocation? confirmed =
-        await CompleteAddressScreen.open(context, initial: location);
-    if (!mounted || confirmed == null) {
-      return;
+    final int index = dropIndex ?? 0;
+    final BookingDraftNotifier notifier =
+        ref.read(bookingDraftProvider.notifier);
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    MockLocation saved = location;
+    if (draft.needsDropConfirmationFor(location, index)) {
+      if (dropIndex == null) {
+        notifier.setDrop(location);
+      } else {
+        notifier.setDropAt(index, location);
+      }
+      final MockLocation? confirmed =
+          await CompleteAddressScreen.open(context, initial: location);
+      if (!mounted || confirmed == null) {
+        return;
+      }
+      notifier.confirmDropAddress(confirmed, index: index);
+      saved = confirmed;
+      await ref.read(recentLocationsProvider.notifier).remember(confirmed);
     }
     if (dropIndex == null) {
-      ref.read(bookingDraftProvider.notifier).setDrop(confirmed);
-      _search.text =
-          confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
+      _search.text = saved.address.isNotEmpty ? saved.address : saved.label;
     } else {
-      _selectDrop(dropIndex, confirmed);
+      _dropFields[index].text =
+          saved.address.isNotEmpty ? saved.address : saved.label;
+      _dropErrors[index] = null;
+      _dropFocus[index].unfocus();
     }
-    await ref.read(recentLocationsProvider.notifier).remember(confirmed);
     setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+    if (!mounted) {
+      return;
+    }
+    _openRouteIfReady();
   }
 
   Future<void> _openMap([int? dropIndex]) async {
@@ -907,14 +924,47 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     setState(() => _activeDropIndex = null);
   }
 
-  void _continue(BuildContext context, BookingDraft draft) {
+  Future<void> _continue() async {
+    final BookingDraft draft = ref.read(bookingDraftProvider);
     final String? message = draft.incompleteStopMessage;
     if (message != null) {
       _showStopErrors(draft);
       CustomSnackBar.error(context, message);
       return;
     }
-    context.push(AppRoutes.bookVehicle);
+    final BookingDraftNotifier notifier =
+        ref.read(bookingDraftProvider.notifier);
+    for (int i = 0; i < draft.requiredDropCount; i++) {
+      if (!mounted) {
+        return;
+      }
+      final BookingDraft current = ref.read(bookingDraftProvider);
+      final MockLocation? loc = current.dropAt(i);
+      if (loc == null) {
+        return;
+      }
+      if (!current.needsDropConfirmationFor(loc, i)) {
+        continue;
+      }
+      final MockLocation? confirmed =
+          await CompleteAddressScreen.open(context, initial: loc);
+      if (!mounted || confirmed == null) {
+        return;
+      }
+      notifier.confirmDropAddress(confirmed, index: i);
+      await ref.read(recentLocationsProvider.notifier).remember(confirmed);
+    }
+    if (!mounted) {
+      return;
+    }
+    _openRouteIfReady();
+  }
+
+  void _openRouteIfReady() {
+    if (!ref.read(bookingDraftProvider).readyForRoutePreview) {
+      return;
+    }
+    context.push(AppRoutes.bookRoute);
   }
 
   void _showStopErrors(BookingDraft draft) {

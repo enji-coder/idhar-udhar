@@ -4,7 +4,6 @@ import 'package:idhar_udhar/customer/core/constants/asset_paths.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
-import 'package:idhar_udhar/shared/business/business.dart';
 
 void main() {
   late ProviderContainer container;
@@ -13,8 +12,19 @@ void main() {
   MockLocation loc(String id) =>
       MockData.locations.firstWhere((l) => l.id == id);
 
+  MockOrder searchingOrder(String id, MockLocation drop) {
+    return MockOrder(
+      id: id,
+      status: OrderStatus.searching,
+      pickup: MockData.locations[4],
+      drop: drop,
+      vehicle: MockData.vehicles.first,
+      fare: 0,
+      createdAt: DateTime.utc(2026, 1, 1),
+    );
+  }
+
   setUp(() {
-    OrderIds.resetDemoSequence(1);
     container = ProviderContainer();
     notifier = container.read(bookingDraftProvider.notifier);
   });
@@ -51,10 +61,6 @@ void main() {
     expect(draft().dropCount, 2);
     expect(draft().dropAt(2), isNull);
     expect(draft().allDrops.map((d) => d.id), ['loc_paldi', 'loc_bopal']);
-
-    final MockOrder? order = notifier.confirmBooking();
-    expect(order, isNotNull);
-    expect(order!.extraDrops.map((d) => d.id), ['loc_bopal']);
   });
 
   test('confirm is blocked until every required drop is selected', () {
@@ -63,51 +69,35 @@ void main() {
     notifier.setDropAt(0, loc('loc_paldi'));
 
     expect(draft().incompleteStopMessage, 'Select Drop Location 2');
-    expect(notifier.confirmBooking(), isNull);
 
     notifier.setDropCount(3);
     notifier.setDropAt(1, loc('loc_bopal'));
     expect(draft().incompleteStopMessage, 'Select Drop Location 3');
-    expect(notifier.confirmBooking(), isNull);
 
     notifier.setDropAt(2, loc('loc_office'));
     expect(draft().incompleteStopMessage, isNull);
-    expect(notifier.confirmBooking(), isNotNull);
   });
 
-  test('second order is a new id and does not mutate the first', () {
+  test('a new booking does not keep the previous drop', () {
     notifier.setDrop(loc('loc_paldi'));
-    final MockOrder? first = notifier.confirmBooking();
-    expect(first, isNotNull);
-
     notifier.beginNewBooking();
     notifier.setDrop(loc('loc_bopal'));
-    final MockOrder? second = notifier.confirmBooking();
 
-    expect(second, isNotNull);
-    expect(second!.id, isNot(first!.id));
-    expect(first.drop.id, 'loc_paldi');
-    expect(second.drop.id, 'loc_bopal');
-  });
-
-  test('confirming the same draft twice is idempotent', () {
-    notifier.setDrop(loc('loc_paldi'));
-    final MockOrder? first = notifier.confirmBooking();
-    final MockOrder? second = notifier.confirmBooking();
-    expect(first!.id, second!.id);
+    expect(draft().drop?.id, 'loc_bopal');
+    expect(draft().allDrops.map((d) => d.id), ['loc_bopal']);
   });
 
   test('advancing order A does not rewrite order B in the draft', () {
-    notifier.setDrop(loc('loc_paldi'));
-    final MockOrder a = notifier.confirmBooking()!;
+    final MockOrder a = searchingOrder('IU-A', loc('loc_paldi'));
+    notifier.attachActive(a);
     notifier.assignRider();
     final MockOrder assignedA = draft().activeOrder!;
     expect(assignedA.id, a.id);
     expect(assignedA.status, OrderStatus.assigned);
 
     notifier.beginNewBooking();
-    notifier.setDrop(loc('loc_bopal'));
-    final MockOrder b = notifier.confirmBooking()!;
+    final MockOrder b = searchingOrder('IU-B', loc('loc_bopal'));
+    notifier.attachActive(b);
     expect(draft().activeOrder?.id, b.id);
     expect(draft().activeOrder?.status, OrderStatus.searching);
 
@@ -149,12 +139,98 @@ void main() {
     );
   });
 
-  test('truck address text does not include residential fields', () {
+  test('truck address text includes the entered house and building', () {
     notifier.setServiceFamily(ServiceFamily.truck);
     notifier.setPickup(loc('loc_paldi'));
     notifier.setPickupUnit(house: 'B-12', society: 'Sunrise Society');
 
     expect(draft().usesResidentialPickup, isFalse);
-    expect(draft().pickupAddressText, 'Paldi Cross Road, Ahmedabad');
+    expect(
+      draft().pickupAddressText,
+      'B-12, Sunrise Society, Paldi Cross Road, Ahmedabad',
+    );
+  });
+
+  test('display address joins unit, premises, and full location', () {
+    expect(
+      MockLocation.composeAddress(
+        unit: 'A-204',
+        premises: 'Sunrise Heights',
+        address: '100 Feet Road, Satellite, Ahmedabad, Gujarat',
+      ),
+      'A-204, Sunrise Heights, 100 Feet Road, Satellite, Ahmedabad, Gujarat',
+    );
+    expect(
+      MockLocation.composeAddress(
+        unit: '',
+        premises: 'Sunrise Heights',
+        address: '100 Feet Road, Satellite, Ahmedabad',
+      ),
+      'Sunrise Heights, 100 Feet Road, Satellite, Ahmedabad',
+    );
+    expect(
+      MockLocation.composeAddress(
+        unit: 'A-204',
+        premises: '',
+        address: '100 Feet Road, Satellite, Ahmedabad',
+      ),
+      'A-204, 100 Feet Road, Satellite, Ahmedabad',
+    );
+    expect(
+      MockLocation.composeAddress(
+        unit: '',
+        premises: '',
+        address: '100 Feet Road, Satellite, Ahmedabad, Gujarat',
+      ),
+      '100 Feet Road, Satellite, Ahmedabad, Gujarat',
+    );
+    expect(
+      MockLocation.composeAddress(
+        unit: 'A-204',
+        premises: 'Sunrise Heights',
+        address: 'A-204, Sunrise Heights, 100 Feet Road, Satellite, Ahmedabad',
+      ),
+      'A-204, Sunrise Heights, 100 Feet Road, Satellite, Ahmedabad',
+    );
+  });
+
+  test('confirmed pickup and drop keep coordinates and show the combined address', () {
+    const MockLocation pickup = MockLocation(
+      id: 'pickup_1',
+      label: 'Satellite',
+      address: '100 Feet Road, Satellite, Ahmedabad, Gujarat',
+      unit: 'A-204',
+      premises: 'Sunrise Heights',
+      latitude: 23.03,
+      longitude: 72.51,
+    );
+    const MockLocation drop = MockLocation(
+      id: 'drop_1',
+      label: 'Bopal',
+      address: '100 Feet Road, Satellite, Ahmedabad',
+      unit: 'A-204',
+      premises: 'Sunrise Heights',
+      latitude: 23.04,
+      longitude: 72.48,
+    );
+    notifier.setPickup(pickup);
+    notifier.setPickupUnit(house: pickup.unit, society: pickup.premises);
+    notifier.setDrop(drop);
+
+    expect(draft().pickup!.latitude, 23.03);
+    expect(draft().pickup!.longitude, 72.51);
+    expect(draft().pickup!.address, pickup.address);
+    expect(draft().pickup!.unit, 'A-204');
+    expect(draft().pickup!.premises, 'Sunrise Heights');
+    expect(
+      draft().pickupAddressText,
+      'A-204, Sunrise Heights, 100 Feet Road, Satellite, Ahmedabad, Gujarat',
+    );
+    expect(draft().drop!.latitude, 23.04);
+    expect(draft().drop!.longitude, 72.48);
+    expect(
+      draft().locationAddress(draft().drop!),
+      'A-204, Sunrise Heights, 100 Feet Road, Satellite, Ahmedabad',
+    );
   });
 }

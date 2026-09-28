@@ -44,19 +44,19 @@ void main() {
     );
   }
 
-  testWidgets('bike and scooty show residential fields', (tester) async {
+  testWidgets('pickup address requires the three fields', (tester) async {
     await pump(tester, family: ServiceFamily.twoWheeler, location: pin);
-    expect(field('House / Flat No.'), findsOneWidget);
-    expect(field('Flat / Society'), findsOneWidget);
-    expect(field('Full Address'), findsOneWidget);
+    expect(field('House / Flat / Floor / Office No.'), findsOneWidget);
+    expect(field('Building / Flat / Office Name'), findsOneWidget);
+    expect(field('Full Location'), findsOneWidget);
     expect(find.text('Shilaj, Ahmedabad'), findsOneWidget);
   });
 
-  testWidgets('truck hides residential fields', (tester) async {
+  testWidgets('drop address requires the same three fields', (tester) async {
     await pump(tester, family: ServiceFamily.truck, location: pin);
-    expect(field('House / Flat No.'), findsNothing);
-    expect(field('Flat / Society'), findsNothing);
-    expect(field('Full Address'), findsOneWidget);
+    expect(field('House / Flat / Floor / Office No.'), findsOneWidget);
+    expect(field('Building / Flat / Office Name'), findsOneWidget);
+    expect(field('Full Location'), findsOneWidget);
   });
 
   testWidgets('confirm keeps coordinates and blocks a missing pin', (tester) async {
@@ -88,8 +88,8 @@ void main() {
     );
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
-    await tester.enterText(field('House / Flat No.'), 'B-12');
-    await tester.enterText(field('Flat / Society'), 'Sunrise');
+    await tester.enterText(field('House / Flat / Floor / Office No.'), 'B-12');
+    await tester.enterText(field('Building / Flat / Office Name'), 'Sunrise');
     final Finder confirm = find.text('Confirm Address');
     await tester.ensureVisible(confirm);
     await tester.tap(confirm);
@@ -101,6 +101,10 @@ void main() {
     expect(confirmed!.address, 'Shilaj, Ahmedabad');
     expect(confirmed!.unit, 'B-12');
     expect(confirmed!.premises, 'Sunrise');
+    expect(
+      confirmed!.formattedAddress,
+      'B-12, Sunrise, Shilaj, Ahmedabad',
+    );
   });
 
   testWidgets('a place without coordinates cannot be confirmed', (tester) async {
@@ -124,5 +128,68 @@ void main() {
       isFalse,
     );
     expect(find.text('Complete Your Address'), findsOneWidget);
+  });
+
+  testWidgets('missing address details stay on the screen', (tester) async {
+    await pump(tester, family: ServiceFamily.twoWheeler, location: pin);
+    await tester.tap(find.text('Confirm Address'));
+    await tester.pump();
+    expect(find.text('Enter House / Flat / Floor / Office No.'), findsOneWidget);
+    expect(find.text('Enter Building / Flat / Office Name'), findsOneWidget);
+    expect(find.text('Complete Your Address'), findsOneWidget);
+  });
+
+  testWidgets('a valid drop address keeps the selected coordinates', (tester) async {
+    const MockLocation drop = MockLocation(
+      id: 'drop_1',
+      label: 'Bopal',
+      address: 'Bopal, Ahmedabad',
+      latitude: 23.03,
+      longitude: 72.47,
+    );
+    MockLocation? confirmed;
+    final ProviderContainer container = ProviderContainer();
+    addTearDown(container.dispose);
+    container.read(bookingDraftProvider.notifier).setPickup(pin);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Builder(
+            builder: (BuildContext context) {
+              return TextButton(
+                onPressed: () async {
+                  confirmed = await CompleteAddressScreen.open(
+                    context,
+                    initial: drop,
+                  );
+                },
+                child: const Text('Open'),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm Address'));
+    await tester.pump();
+    expect(confirmed, isNull);
+    expect(find.text('Complete Your Address'), findsOneWidget);
+
+    await tester.enterText(field('House / Flat / Floor / Office No.'), '4');
+    await tester.enterText(field('Building / Flat / Office Name'), 'Lake View');
+    final Finder confirm = find.text('Confirm Address');
+    await tester.ensureVisible(confirm);
+    await tester.tap(confirm);
+    await tester.pumpAndSettle();
+
+    expect(confirmed, isNotNull);
+    expect(confirmed!.latitude, 23.03);
+    expect(confirmed!.longitude, 72.47);
+    expect(confirmed!.address, 'Bopal, Ahmedabad');
+    expect(confirmed!.unit, '4');
+    expect(confirmed!.premises, 'Lake View');
   });
 }

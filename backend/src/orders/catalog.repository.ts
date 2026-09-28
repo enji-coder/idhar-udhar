@@ -21,6 +21,10 @@ export type VehicleCategoryRow = {
   code: string | null;
   name: string;
   active: boolean;
+  weight_capacity: string | null;
+  size: string | null;
+  vehicle_type: string | null;
+  vehicle: string | null;
 };
 
 export type RiderEligibilityRow = {
@@ -71,7 +75,9 @@ export class CatalogRepository {
   ): Promise<VehicleCategoryRow | null> {
     const result = await db.query<VehicleCategoryRow>(
       `
-      SELECT vehicle_category_id, code, name, active
+      SELECT
+        vehicle_category_id, code, name, active, weight_capacity, size,
+        vehicle_type, vehicle
       FROM vehicle_categories
       WHERE vehicle_category_id = $1
       `,

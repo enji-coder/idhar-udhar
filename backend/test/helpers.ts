@@ -344,6 +344,8 @@ async function resolveVehicleCategory(postgres: PostgresService): Promise<{
       ON v.vehicle_category_id = r.vehicle_category_id
     WHERE f.status = 'ACTIVE'
       AND v.active
+      AND v.vehicle_type IS NOT NULL
+      AND v.vehicle IS NOT NULL
     ORDER BY (v.code IS NOT DISTINCT FROM 'BIKE') DESC, v.name
     LIMIT 1
     `,
@@ -365,6 +367,17 @@ async function upsertVehicleCategory(postgres: PostgresService): Promise<{
     `SELECT vehicle_category_id, name FROM vehicle_categories WHERE code = 'BIKE'`,
   );
   if (existing.rows[0]) {
+    await postgres.query(
+      `
+      UPDATE vehicle_categories
+      SET vehicle_type = 'two_wheeler',
+          vehicle = 'bike'
+      WHERE vehicle_category_id = $1
+        AND vehicle_type IS NULL
+        AND vehicle IS NULL
+      `,
+      [existing.rows[0].vehicle_category_id],
+    );
     return existing.rows[0];
   }
   const inserted = await postgres.query<{
@@ -372,8 +385,8 @@ async function upsertVehicleCategory(postgres: PostgresService): Promise<{
     name: string;
   }>(
     `
-    INSERT INTO vehicle_categories (code, name, active)
-    VALUES ('BIKE', 'Bike', TRUE)
+    INSERT INTO vehicle_categories (code, name, active, vehicle_type, vehicle)
+    VALUES ('BIKE', 'Bike', TRUE, 'two_wheeler', 'bike')
     RETURNING vehicle_category_id, name
     `,
   );

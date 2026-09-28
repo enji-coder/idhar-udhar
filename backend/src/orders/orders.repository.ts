@@ -15,6 +15,7 @@ export type OrderRow = {
   vehicle_category_name_snapshot: string;
   vehicle_id: string | null;
   canonical_status: OrderStatus;
+  package_weight_kg: string | null;
   parent_order_id: string | null;
   scheduled_at: Date | null;
   created_at: Date;
@@ -68,6 +69,7 @@ const ORDER_SELECT = `
   o.vehicle_category_name_snapshot,
   o.vehicle_id,
   o.canonical_status,
+  o.package_weight_kg::text AS package_weight_kg,
   o.parent_order_id,
   o.scheduled_at,
   o.created_at,
@@ -94,6 +96,7 @@ export class OrdersRepository {
       cityCode: string;
       vehicleCategoryId: string;
       vehicleCategoryName: string;
+      packageWeightKg: number | null;
     },
     db: Queryable,
   ): Promise<OrderRow> {
@@ -105,9 +108,10 @@ export class OrdersRepository {
         city_id,
         vehicle_category_id,
         vehicle_category_name_snapshot,
-        canonical_status
+        canonical_status,
+        package_weight_kg
       )
-      VALUES ($1, $2, $3, $4, $5, 'CREATED')
+      VALUES ($1, $2, $3, $4, $5, 'CREATED', $7)
       RETURNING
         order_id,
         display_id,
@@ -119,6 +123,7 @@ export class OrdersRepository {
         vehicle_category_name_snapshot,
         vehicle_id,
         canonical_status,
+        package_weight_kg::text AS package_weight_kg,
         parent_order_id,
         scheduled_at,
         created_at,
@@ -131,6 +136,7 @@ export class OrdersRepository {
         input.vehicleCategoryId,
         input.vehicleCategoryName,
         input.cityCode,
+        input.packageWeightKg,
       ],
     );
     return result.rows[0];
@@ -496,6 +502,7 @@ export class OrdersRepository {
         o.vehicle_category_name_snapshot,
         o.vehicle_id,
         o.canonical_status,
+        o.package_weight_kg::text AS package_weight_kg,
         o.parent_order_id,
         o.scheduled_at,
         o.created_at,

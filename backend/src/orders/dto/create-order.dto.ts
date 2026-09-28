@@ -66,6 +66,13 @@ export class CreateOrderDto {
   @Matches(UUID_RE)
   vehicle_category_id!: string;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0.001)
+  @Max(100000)
+  package_weight_kg?: number;
+
   @IsArray()
   @ArrayMinSize(2)
   @ArrayMaxSize(4)

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'config/app_config.dart';
 import 'config/environment.dart';
 import 'core/routing/app_router.dart';
+import 'core/state/startup_device_pickup.dart';
 import 'core/theme/app_theme.dart';
 
 Future<void> main() async {
@@ -35,11 +36,13 @@ class IdharUdharApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: AppConfig.appName,
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      routerConfig: AppRouter.config,
+    return StartupDevicePickup(
+      child: MaterialApp.router(
+        title: AppConfig.appName,
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        routerConfig: AppRouter.config,
+      ),
     );
   }
 }

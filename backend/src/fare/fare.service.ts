@@ -72,6 +72,7 @@ export class FareService {
     customerProfileId: string;
     vehicleCategoryId: string;
     stopCount: number;
+    distanceKm?: string;
     now?: Date;
   }): void {
     if (input.quote.customer_profile_id !== input.customerProfileId) {
@@ -94,6 +95,27 @@ export class FareService {
         'Fare quote stop count does not match the order',
         409,
       );
+    }
+    if (input.distanceKm != null) {
+      let quoted: string;
+      let routed: string;
+      try {
+        quoted = assertPositiveKm(input.quote.distance_km);
+        routed = assertPositiveKm(input.distanceKm);
+      } catch {
+        throw new ApiError(
+          ErrorCodes.QUOTE_MISMATCH,
+          'Fare quote distance does not match this route',
+          409,
+        );
+      }
+      if (quoted !== routed) {
+        throw new ApiError(
+          ErrorCodes.QUOTE_MISMATCH,
+          'Fare quote distance does not match this route',
+          409,
+        );
+      }
     }
     const now = input.now ?? new Date();
     if (input.quote.expires_at.getTime() <= now.getTime()) {

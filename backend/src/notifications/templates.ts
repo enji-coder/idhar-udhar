@@ -18,6 +18,8 @@ export const NOTIFICATION_TYPES = [
   'COD_SETTLEMENT_COMPLETED',
   'COD_SUSPENDED',
   'COD_ELIGIBLE',
+  'RIDER_PROFILE_VERIFIED',
+  'RIDER_DOCUMENT_REJECTED',
 ] as const;
 
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
@@ -44,6 +46,7 @@ export function renderNotification(
   vars: {
     displayId?: string | null;
     amount?: string | null;
+    reason?: string | null;
   } = {},
 ): RenderedNotification {
   const order = displayId(vars.displayId);
@@ -204,6 +207,22 @@ export function renderNotification(
         title: 'Ready to accept deliveries',
         body: 'COD Due is below the suspension threshold. You can accept new deliveries again.',
       };
+    case 'RIDER_PROFILE_VERIFIED':
+      return {
+        type,
+        title: 'Profile Verified',
+        body: 'Your profile has been verified. You can now access rides and go online.',
+      };
+    case 'RIDER_DOCUMENT_REJECTED': {
+      const why = vars.reason?.trim();
+      return {
+        type,
+        title: 'Document Verification Required',
+        body: why
+          ? `A document was rejected: ${why}`
+          : 'A document was rejected. Upload a replacement to continue verification.',
+      };
+    }
     default: {
       const exhaustive: never = type;
       throw new Error(`Unhandled notification type: ${exhaustive}`);

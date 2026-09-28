@@ -25,6 +25,7 @@ export type NotifyInput = {
   orderId?: string | null;
   displayId?: string | null;
   amount?: string | null;
+  reason?: string | null;
 };
 
 export type NotifyResult = {
@@ -76,6 +77,7 @@ export class NotificationService {
     const rendered = renderNotification(input.type, input.audience, {
       displayId: input.displayId,
       amount: input.amount,
+      reason: input.reason,
     });
     const inserted = await this.repo.insertNotification(
       {

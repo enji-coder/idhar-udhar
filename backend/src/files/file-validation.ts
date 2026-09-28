@@ -56,6 +56,18 @@ function sniffContentType(buffer: Buffer): AllowedContentType | null {
   return null;
 }
 
+export function validateProfileImage(file: UploadedBinary | undefined): ValidatedUpload {
+  const validated = validateUpload(file);
+  if (validated.contentType === 'application/pdf') {
+    throw new ApiError(
+      ErrorCodes.VALIDATION_ERROR,
+      'Profile picture must be an image',
+      400,
+    );
+  }
+  return validated;
+}
+
 export function isRiderDocumentType(value: string): value is RiderDocumentType {
   return (RIDER_DOCUMENT_TYPES as readonly string[]).includes(value);
 }

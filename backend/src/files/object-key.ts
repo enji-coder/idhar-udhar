@@ -58,6 +58,16 @@ export function riderDocumentObjectKey(input: {
   return `riders/${riderProfileId}/documents/${documentId}/${fileName}`;
 }
 
+export function riderProfilePictureObjectKey(input: {
+  riderProfileId: string;
+  fileId: string;
+  fileName: string;
+}): string {
+  const riderProfileId = assertUuidSegment(input.riderProfileId, 'riderProfileId');
+  const fileId = assertUuidSegment(input.fileId, 'fileId');
+  return `riders/${riderProfileId}/profile/${fileId}/${input.fileName}`;
+}
+
 export function orderPodObjectKey(input: {
   orderId: string;
   stopId: string;

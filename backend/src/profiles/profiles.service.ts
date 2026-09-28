@@ -3,6 +3,7 @@ import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository, PROVISIONAL_CUSTOMER_DISPLAY_NAME } from '../auth/identity/identity.repository';
+import { riderMayGoOnline } from '../files/rider-verification';
 
 @Injectable()
 export class ProfilesService {
@@ -72,6 +73,57 @@ export class ProfilesService {
       home_zone_id: profile.home_zone_id,
       cod_operational_status: profile.cod_operational_status,
       phone_normalized: identity?.phone_normalized ?? null,
+      preferred_language: profile.preferred_language ?? null,
+      has_profile_picture: Boolean(profile.profile_picture_file_id),
+    };
+  }
+
+  async setRiderLanguage(auth: AuthContext, preferredLanguage: string) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
+    }
+    const updated = await this.identities.updateRiderLanguage(
+      auth.profileId,
+      preferredLanguage,
+    );
+    if (!updated) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    return {
+      preferred_language: updated.preferred_language,
+      approval_status: updated.approval_status,
+      online_status: updated.online_status,
+    };
+  }
+
+  async setRiderAvailability(auth: AuthContext, online: boolean) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
+    }
+    const gate = await this.identities.findRiderGate(auth.profileId);
+    if (!gate || gate.rider_profile_id !== auth.profileId) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    if (gate.deactivated_at) {
+      throw new ApiError(ErrorCodes.RIDER_NOT_ELIGIBLE, 'Rider was not found', 409);
+    }
+    if (online && !riderMayGoOnline(gate.approval_status)) {
+      throw new ApiError(
+        ErrorCodes.RIDER_NOT_ELIGIBLE,
+        'Rider is not approved to go online',
+        409,
+      );
+    }
+    const updated = await this.identities.updateRiderOnlineStatus(
+      auth.profileId,
+      online ? 'ONLINE' : 'OFFLINE',
+    );
+    if (!updated) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    return {
+      approval_status: updated.approval_status,
+      online_status: updated.online_status,
     };
   }
 

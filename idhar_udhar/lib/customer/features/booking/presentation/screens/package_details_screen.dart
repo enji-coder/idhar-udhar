@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
+import '../../../../core/state/vehicle_fare.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/glass_container.dart';
@@ -49,6 +51,16 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
     _notes.dispose();
     _customWeight.dispose();
     super.dispose();
+  }
+
+  String? _weightError(VehicleFareSelection selection) {
+    if (_useCustomWeight) {
+      final double? parsed = double.tryParse(_customWeight.text.trim());
+      if (parsed == null || parsed <= 0) {
+        return 'Enter a package weight.';
+      }
+    }
+    return selection.packageError;
   }
 
   String _formatWeight(double kg) {
@@ -104,6 +116,21 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
     final notifier = ref.read(bookingDraftProvider.notifier);
+    final preview = ref.watch(vehicleFarePreviewProvider);
+    final bool calculating = preview.isLoading;
+    final VehicleFareSelection selection = VehicleFareSelection(
+      calculating: calculating,
+      options: calculating
+          ? const <VehicleFareOption>[]
+          : (preview.asData?.value.vehicles ?? const <VehicleFareOption>[]),
+      selectedId: draft.vehicle?.id,
+      family: draft.serviceFamily,
+      packageWeightKg: draft.weightKg,
+    );
+    final String? weightError = _weightError(selection);
+    final VehicleFareOption? selected = selection.selected;
+    final bool canContinue =
+        !calculating && weightError == null && selection.canContinuePackage;
 
     return GlassPageScaffold(
       bottom: Column(
@@ -119,17 +146,44 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Fare',
+                        selected == null ? 'Fare' : selected.name,
                         style: AppTextStyles.caption.copyWith(
                           color: AppColors.textSecondary,
                         ),
                       ),
                       Text(
-                        'Calculated at summary',
+                        calculating
+                            ? 'Calculating'
+                            : selected == null
+                                ? '—'
+                                : '₹${selected.tripFare.toStringAsFixed(0)}',
                         style: AppTextStyles.headingS.copyWith(
                           color: AppColors.orange,
                         ),
                       ),
+                      if (selected != null)
+                        Text(
+                          'Capacity: ${selected.capacityLabel}',
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.navy,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      if (!calculating && preview.asData != null)
+                        Text(
+                          'Estimated distance ${preview.requireValue.distanceLabel}',
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      if (weightError != null)
+                        Text(
+                          weightError,
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.orange,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -144,7 +198,10 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
           const SizedBox(height: AppSpacing.md),
           AnimatedPrimaryButton(
             label: 'Continue',
-            onPressed: () => context.push(AppRoutes.bookSummary),
+            enabled: canContinue,
+            onPressed: canContinue
+                ? () => context.push(AppRoutes.bookSummary)
+                : null,
           ),
         ],
       ),

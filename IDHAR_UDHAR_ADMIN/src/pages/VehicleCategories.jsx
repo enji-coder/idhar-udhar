@@ -21,6 +21,13 @@ import useQueryAction from '../hooks/useQueryAction';
 import useStore from '../hooks/useStore';
 import { VEHICLE_CATEGORY_STATUSES } from '../data/vehicleCategories';
 import {
+  VEHICLE_TYPES,
+  compatibleVehicle,
+  vehicleLabel,
+  vehicleTypeLabel,
+  vehiclesForType,
+} from '../data/vehicleCatalog';
+import {
   activateVehicleCategory,
   deactivateVehicleCategory,
   saveVehicleCategory,
@@ -32,6 +39,8 @@ import { formatAppDate, parseAppDate } from '../utils/dates';
 const emptyCategory = {
   id: '',
   name: '',
+  vehicleType: '',
+  vehicle: '',
   status: 'Active',
   baseFare: '',
   perKmCharge: '',
@@ -74,7 +83,11 @@ export default function VehicleCategories() {
 
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
-    return rows.filter((row) => `${row.id} ${row.name} ${row.status}`.toLowerCase().includes(query));
+    return rows.filter((row) =>
+      `${row.id} ${row.name} ${vehicleTypeLabel(row.vehicleType)} ${vehicleLabel(row.vehicle)} ${row.status}`
+        .toLowerCase()
+        .includes(query),
+    );
   }, [rows, searchQuery]);
 
   async function save() {
@@ -108,7 +121,8 @@ export default function VehicleCategories() {
 
   const columns = [
     { key: 'id', label: 'Category ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
-    { key: 'name', label: 'Vehicle Category', sortable: true },
+    { key: 'vehicleType', label: 'Vehicle Type', sortable: true, render: (row) => vehicleTypeLabel(row.vehicleType) || '—' },
+    { key: 'name', label: 'Vehicle', sortable: true, render: (row) => vehicleLabel(row.vehicle) || row.name },
     { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     { key: 'updatedAt', label: 'Updated', hideBelow: 'lg', render: (row) => formatAppDate(parseAppDate(row.updatedAt) || new Date(row.updatedAt)) },
     {
@@ -157,35 +171,64 @@ export default function VehicleCategories() {
         footer={<><Button variant="ghost" onClick={panel.closeForm}>Cancel</Button><Button onClick={save}>Save</Button></>}
       >
         <div className="space-y-3">
-          <Field label="Vehicle Category" error={panel.errors.name}>
-            <input className={inputClass} value={panel.form.name} onChange={(event) => panel.setForm({ ...panel.form, name: event.target.value })} placeholder="Truck" />
+          <Field label="Vehicle Type" error={panel.errors.vehicleType}>
+            <select
+              className={inputClass}
+              value={panel.form.vehicleType || ''}
+              onChange={(event) => {
+                const vehicleType = event.target.value;
+                panel.setForm({
+                  ...panel.form,
+                  vehicleType,
+                  vehicle: compatibleVehicle(vehicleType, panel.form.vehicle),
+                });
+              }}
+            >
+              <option value="">Select vehicle type</option>
+              {VEHICLE_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
           </Field>
+          {panel.form.vehicleType ? (
+            <Field label="Vehicle" error={panel.errors.vehicle}>
+              <select
+                className={inputClass}
+                value={compatibleVehicle(panel.form.vehicleType, panel.form.vehicle)}
+                onChange={(event) => panel.setForm({ ...panel.form, vehicle: event.target.value })}
+              >
+                <option value="">Select vehicle</option>
+                {vehiclesForType(panel.form.vehicleType).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          {compatibleVehicle(panel.form.vehicleType, panel.form.vehicle) ? <>
           <Field label="Status">
             <select className={inputClass} value={panel.form.status || 'Active'} onChange={(event) => panel.setForm({ ...panel.form, status: event.target.value })}>
               {VEHICLE_CATEGORY_STATUSES.map((item) => <option key={item}>{item}</option>)}
             </select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Base Fare"><input type="number" className={inputClass} value={panel.form.baseFare ?? ''} onChange={(event) => panel.setForm({ ...panel.form, baseFare: event.target.value })} /></Field>
-            <Field label="Per KM Charge"><input type="number" className={inputClass} value={panel.form.perKmCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, perKmCharge: event.target.value })} /></Field>
-            <Field label="Initial Minimum"><input type="number" className={inputClass} value={panel.form.initialMinimum ?? ''} onChange={(event) => panel.setForm({ ...panel.form, initialMinimum: event.target.value })} /></Field>
-            <Field label="Waiting Charge"><input type="number" className={inputClass} value={panel.form.waitingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, waitingCharge: event.target.value })} /></Field>
-            <Field label="Surge Charge"><input type="number" className={inputClass} value={panel.form.surgeCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, surgeCharge: event.target.value })} /></Field>
-            <Field label="Toll Charge"><input type="number" className={inputClass} value={panel.form.tollCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, tollCharge: event.target.value })} /></Field>
-            <Field label="Parking Charge"><input type="number" className={inputClass} value={panel.form.parkingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, parkingCharge: event.target.value })} /></Field>
-            <Field label="Rider Money Part (%)" error={panel.errors.riderSharePercent}><input type="number" className={inputClass} value={panel.form.riderSharePercent ?? ''} onChange={(event) => panel.setForm({ ...panel.form, riderSharePercent: event.target.value })} /></Field>
-            <Field label="Company Commission (%)" error={panel.errors.companyCommissionPercent}><input type="number" className={inputClass} value={panel.form.companyCommissionPercent ?? ''} onChange={(event) => panel.setForm({ ...panel.form, companyCommissionPercent: event.target.value })} /></Field>
-            <Field label="Weight Capacity"><input className={inputClass} value={panel.form.weightCapacityKg ?? ''} onChange={(event) => panel.setForm({ ...panel.form, weightCapacityKg: event.target.value })} /></Field>
+            <Field label="Base Fare" error={panel.errors.baseFare}><input type="number" min="0" className={inputClass} value={panel.form.baseFare ?? ''} onChange={(event) => panel.setForm({ ...panel.form, baseFare: event.target.value })} /></Field>
+            <Field label="Per KM Charge" error={panel.errors.perKmCharge}><input type="number" min="0" className={inputClass} value={panel.form.perKmCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, perKmCharge: event.target.value })} /></Field>
+            <Field label="Initial Minimum" error={panel.errors.initialMinimum}><input type="number" min="0" className={inputClass} value={panel.form.initialMinimum ?? ''} onChange={(event) => panel.setForm({ ...panel.form, initialMinimum: event.target.value })} /></Field>
+            <Field label="Waiting Charge" error={panel.errors.waitingCharge}><input type="number" min="0" className={inputClass} value={panel.form.waitingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, waitingCharge: event.target.value })} /></Field>
+            <Field label="Surge Charge" error={panel.errors.surgeCharge}><input type="number" min="0" className={inputClass} value={panel.form.surgeCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, surgeCharge: event.target.value })} /></Field>
+            <Field label="Toll Charge" error={panel.errors.tollCharge}><input type="number" min="0" className={inputClass} value={panel.form.tollCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, tollCharge: event.target.value })} /></Field>
+            <Field label="Parking Charge" error={panel.errors.parkingCharge}><input type="number" min="0" className={inputClass} value={panel.form.parkingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, parkingCharge: event.target.value })} /></Field>
+            <Field label="Rider Commission (%)" error={panel.errors.riderSharePercent}><input type="number" min="0" max="100" className={inputClass} value={panel.form.riderSharePercent ?? ''} onChange={(event) => panel.setForm({ ...panel.form, riderSharePercent: event.target.value })} /></Field>
+            <Field label="Company Commission (%)" error={panel.errors.companyCommissionPercent}><input type="number" min="0" max="100" className={inputClass} value={panel.form.companyCommissionPercent ?? ''} onChange={(event) => panel.setForm({ ...panel.form, companyCommissionPercent: event.target.value })} /></Field>
+            <Field label="Weight Capacity" error={panel.errors.weightCapacityKg}><input className={inputClass} value={panel.form.weightCapacityKg ?? ''} onChange={(event) => panel.setForm({ ...panel.form, weightCapacityKg: event.target.value })} /></Field>
           </div>
           <Field label="Size"><input className={inputClass} value={panel.form.size ?? ''} onChange={(event) => panel.setForm({ ...panel.form, size: event.target.value })} /></Field>
+          </> : null}
         </div>
       </Modal>
 
-      <Drawer open={Boolean(panel.view)} size="lg" eyebrow="Vehicle Category" title={panel.view?.name} onClose={() => panel.setView(null)} footer={<Button onClick={() => panel.setView(null)}>Close</Button>}>
+      <Drawer open={Boolean(panel.view)} size="lg" eyebrow="Vehicle Category" title={vehicleLabel(panel.view?.vehicle) || panel.view?.name} onClose={() => panel.setView(null)} footer={<Button onClick={() => panel.setView(null)}>Close</Button>}>
         {panel.view ? (
           <DetailSection title="Category record">
             <DetailRow label="Category ID" value={panel.view.id} />
-            <DetailRow label="Name" value={panel.view.name} />
+            <DetailRow label="Vehicle Type" value={vehicleTypeLabel(panel.view.vehicleType) || '—'} />
+            <DetailRow label="Vehicle" value={vehicleLabel(panel.view.vehicle) || panel.view.name} />
             <DetailRow label="Status" value={panel.view.status} />
             <DetailRow label="Created" value={formatAppDate(parseAppDate(panel.view.createdAt) || new Date(panel.view.createdAt))} />
             <DetailRow label="Updated" value={formatAppDate(parseAppDate(panel.view.updatedAt) || new Date(panel.view.updatedAt))} />
@@ -196,7 +239,7 @@ export default function VehicleCategories() {
             <DetailRow label="Surge Charge" value={panel.view.surgeCharge} />
             <DetailRow label="Toll Charge" value={panel.view.tollCharge} />
             <DetailRow label="Parking Charge" value={panel.view.parkingCharge} />
-            <DetailRow label="Rider Money Part (%)" value={panel.view.riderSharePercent} />
+            <DetailRow label="Rider Commission (%)" value={panel.view.riderSharePercent} />
             <DetailRow label="Company Commission (%)" value={panel.view.companyCommissionPercent} />
             <DetailRow label="Weight Capacity" value={panel.view.weightCapacityKg} />
             <DetailRow label="Size" value={panel.view.size} />

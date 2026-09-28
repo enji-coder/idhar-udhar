@@ -70,6 +70,33 @@ export async function fetchAdminRider(id) {
   return mapRider(await apiRequest(`/v1/admin/riders/${id}`));
 }
 
+export async function fetchRiderDocuments(riderId) {
+  return apiRequest(`/v1/admin/riders/${riderId}/documents`);
+}
+
+export async function fetchRiderDocumentUrl(documentId) {
+  return apiRequest(`/v1/admin/documents/${documentId}`);
+}
+
+export async function approveRiderDocument(documentId) {
+  return apiRequest(`/v1/admin/documents/${documentId}/approve`, { method: 'POST' });
+}
+
+export async function fetchRiderProfilePicture(riderId) {
+  return apiRequest(`/v1/admin/riders/${riderId}/profile-picture`);
+}
+
+export async function reopenRiderVerification(riderId) {
+  return apiRequest(`/v1/admin/riders/${riderId}/reopen-verification`, { method: 'POST' });
+}
+
+export async function rejectRiderDocument(documentId, rejectionReason) {
+  return apiRequest(`/v1/admin/documents/${documentId}/reject`, {
+    method: 'POST',
+    body: { rejection_reason: rejectionReason },
+  });
+}
+
 export async function fetchAdminCustomers() {
   const body = await apiRequest('/v1/admin/customers');
   return (body.customers || []).map((row) => mapCustomer(row));

@@ -11,6 +11,7 @@ import '../../features/booking/presentation/screens/order_details_screen.dart';
 import '../../features/booking/presentation/screens/package_details_screen.dart';
 import '../../features/booking/presentation/screens/pickup_location_screen.dart';
 import '../../features/booking/presentation/screens/rider_assigned_screen.dart';
+import '../../features/booking/presentation/screens/route_preview_screen.dart';
 import '../../features/booking/presentation/screens/searching_rider_screen.dart';
 import '../../features/booking/presentation/screens/tracking_screen.dart';
 import '../../features/booking/presentation/screens/vehicle_selection_screen.dart';
@@ -169,6 +170,14 @@ abstract final class AppRouter {
         pageBuilder: (context, state) => RouteTransitions.fadeThrough(
           key: state.pageKey,
           child: const DropLocationScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.bookRoute,
+        name: 'bookRoute',
+        pageBuilder: (context, state) => RouteTransitions.fadeThrough(
+          key: state.pageKey,
+          child: const RoutePreviewScreen(),
         ),
       ),
       GoRoute(
