@@ -42,8 +42,6 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
   late final TextEditingController _house;
   late final TextEditingController _society;
   late final TextEditingController _address;
-  String? _houseError;
-  String? _societyError;
   String? _addressError;
 
   @override
@@ -112,14 +110,9 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
     final String building = _society.text.trim();
     final String address = _address.text.trim();
     setState(() {
-      _houseError = house.isEmpty
-          ? 'Enter House / Flat / Floor / Office No.'
-          : null;
-      _societyError =
-          building.isEmpty ? 'Enter Building / Flat / Office Name' : null;
       _addressError = address.isEmpty ? 'Enter Full Location' : null;
     });
-    if (!_hasPin || house.isEmpty || building.isEmpty || address.isEmpty) {
+    if (!_hasPin || address.isEmpty) {
       return;
     }
     Navigator.of(context).pop(
@@ -183,8 +176,6 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
               hint: 'House / Flat / Floor / Office No.',
               leadingIcon: Icons.home_outlined,
               textInputAction: TextInputAction.next,
-              errorText: _houseError,
-              onChanged: (_) => setState(() => _houseError = null),
               onSubmitted: (_) => _societyFocus.requestFocus(),
             ),
           ),
@@ -197,8 +188,6 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
               hint: 'Building / Flat / Office Name',
               leadingIcon: Icons.apartment_outlined,
               textInputAction: TextInputAction.next,
-              errorText: _societyError,
-              onChanged: (_) => setState(() => _societyError = null),
               onSubmitted: (_) => _addressFocus.requestFocus(),
             ),
           ),

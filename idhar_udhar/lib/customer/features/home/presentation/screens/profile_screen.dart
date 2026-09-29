@@ -131,7 +131,7 @@ class ProfileScreen extends ConsumerWidget {
             _tile(
               icon: Icons.description_outlined,
               title: 'Terms & Privacy',
-              onTap: () {},
+              onTap: () => context.push(AppRoutes.terms),
             ),
             const SizedBox(height: AppSpacing.xxl),
             Align(

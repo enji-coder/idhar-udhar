@@ -220,7 +220,6 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   }
 
   Widget _buildSingleBody(BookingDraft draft) {
-    final List<MockLocation> recents = ref.watch(recentLocationsProvider);
     final List<MockLocation> saved =
         ref.watch(savedAddressesProvider).addresses;
     final bool showSuggestions =
@@ -274,12 +273,6 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               ),
             ),
           ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.md),
-            child: Text('Recent searches', style: AppTextStyles.headingS),
-          ),
-        ),
         if (showSuggestions)
           SliverList.separated(
             itemCount: _placeSuggestions.length,
@@ -287,15 +280,13 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
             itemBuilder: (context, index) =>
                 _suggestionTile(_placeSuggestions[index]),
           )
-        else if (recents.isEmpty)
+        else if (_search.text.trim().length >= 2)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.only(top: AppSpacing.md),
               child: GlassContainer(
                 child: Text(
-                  _search.text.trim().length >= 2
-                      ? 'No matching places'
-                      : 'No recent searches',
+                  'No matching places',
                   style: AppTextStyles.body.copyWith(
                     color: AppColors.textSecondary,
                   ),
@@ -303,22 +294,45 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                 ),
               ),
             ),
-          )
-        else
-          SliverList.separated(
-            itemCount: recents.length,
-            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
-            itemBuilder: (context, index) {
-              final MockLocation loc = recents[index];
-              return _placeTile(
-                loc: loc,
-                selected: draft.drop?.id == loc.id,
-                onTap: () => _finishDrop(loc, null),
-                onDelete: () =>
-                    ref.read(recentLocationsProvider.notifier).forget(loc.id),
-              );
-            },
           ),
+        // Recent searches is hidden for now. Restore this block to show it again.
+        // final List<MockLocation> recents = ref.watch(recentLocationsProvider);
+        // SliverToBoxAdapter(
+        //   child: Padding(
+        //     padding: const EdgeInsets.only(top: AppSpacing.md),
+        //     child: Text('Recent searches', style: AppTextStyles.headingS),
+        //   ),
+        // ),
+        // if (recents.isEmpty)
+        //   SliverToBoxAdapter(
+        //     child: Padding(
+        //       padding: const EdgeInsets.only(top: AppSpacing.md),
+        //       child: GlassContainer(
+        //         child: Text(
+        //           'No recent searches',
+        //           style: AppTextStyles.body.copyWith(
+        //             color: AppColors.textSecondary,
+        //           ),
+        //           textAlign: TextAlign.center,
+        //         ),
+        //       ),
+        //     ),
+        //   )
+        // else
+        //   SliverList.separated(
+        //     itemCount: recents.length,
+        //     separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+        //     itemBuilder: (context, index) {
+        //       final MockLocation loc = recents[index];
+        //       return _placeTile(
+        //         loc: loc,
+        //         selected: draft.drop?.id == loc.id,
+        //         onTap: () => _finishDrop(loc, null),
+        //         onDelete: () =>
+        //             ref.read(recentLocationsProvider.notifier).forget(loc.id),
+        //       );
+        //     },
+        //   ),
         if (!showSuggestions)
           SliverToBoxAdapter(
             child: Padding(

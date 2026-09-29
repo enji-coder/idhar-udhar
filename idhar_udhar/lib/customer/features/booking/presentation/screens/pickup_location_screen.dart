@@ -196,7 +196,6 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
     final bool pickupChosen = _pickupChosen(draft.pickup);
-    final List<MockLocation> recents = ref.watch(recentLocationsProvider);
     final List<MockLocation> saved =
         ref.watch(savedAddressesProvider).addresses;
     final bool showSuggestions = _search.text.trim().length >= 2;
@@ -299,30 +298,6 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
                     keyboardDismissBehavior:
                         ScrollViewKeyboardDismissBehavior.onDrag,
                     children: [
-                      Text('Recent searches', style: AppTextStyles.headingS),
-                      const SizedBox(height: AppSpacing.md),
-                      if (recents.isEmpty)
-                        GlassContainer(
-                          child: Text(
-                            'No recent searches',
-                            style: AppTextStyles.body.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      else
-                        for (final MockLocation loc in recents) ...[
-                          _catalogTile(
-                            loc,
-                            draft.pickup?.id == loc.id,
-                            onDelete: () => ref
-                                .read(recentLocationsProvider.notifier)
-                                .forget(loc.id),
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                        ],
-                      const SizedBox(height: AppSpacing.md),
                       Text('Saved addresses', style: AppTextStyles.headingS),
                       const SizedBox(height: AppSpacing.md),
                       if (saved.isEmpty)
