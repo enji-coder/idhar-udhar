@@ -7,10 +7,21 @@ export type PutObjectInput = {
   downloadFileName?: string;
 };
 
+export type SignedUrlDisposition = 'inline' | 'attachment';
+
+export type SignedGetOptions = {
+  disposition?: SignedUrlDisposition;
+  contentType?: string;
+};
+
 export interface ObjectStorage {
   putObject(input: PutObjectInput): Promise<void>;
   deleteObject(key: string): Promise<void>;
-  getSignedGetUrl(key: string, downloadFileName?: string): Promise<{
+  getSignedGetUrl(
+    key: string,
+    downloadFileName?: string,
+    options?: SignedGetOptions,
+  ): Promise<{
     url: string;
     expiresInSeconds: number;
   }>;

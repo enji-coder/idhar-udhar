@@ -162,6 +162,11 @@ class OTPInputRowState extends State<OTPInputRow> {
 
   bool get isComplete => code.length == widget.length;
 
+  /// Fills the existing boxes from an SMS or platform autofill suggestion.
+  void fillFromAutofill(String raw) {
+    _setCode(raw);
+  }
+
   void clear({bool requestFocus = true}) {
     _completedNotified = false;
     _syncing = true;
@@ -184,6 +189,7 @@ class OTPInputRowState extends State<OTPInputRow> {
     if (isComplete) {
       if (!_completedNotified) {
         _completedNotified = true;
+        TextInput.finishAutofillContext(shouldSave: false);
         widget.onCompleted?.call(current);
       }
     } else {
@@ -273,15 +279,16 @@ class OTPInputRowState extends State<OTPInputRow> {
                 }),
               ),
             ),
-            // Real input on top — transparent; drives typing / paste / backspace.
+            // Real input on top. Text stays transparent so the boxes remain
+            // the visible OTP. Opacity 0 would hide the field from autofill.
             Positioned.fill(
-              child: Opacity(
-                opacity: 0,
+              child: AutofillGroup(
                 child: TextField(
                   controller: _controller,
                   focusNode: _focusNode,
                   enabled: widget.enabled,
                   autofocus: widget.autofocus,
+                  autofillHints: const [AutofillHints.oneTimeCode],
                   keyboardType: TextInputType.number,
                   textInputAction: TextInputAction.done,
                   enableSuggestions: false,

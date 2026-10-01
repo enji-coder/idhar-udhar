@@ -62,6 +62,16 @@ class RecentLocationsNotifier extends StateNotifier<List<MockLocation>> {
     );
   }
 
+  Future<void> clear() async {
+    state = const <MockLocation>[];
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_key);
+    } catch (_) {
+      state = const <MockLocation>[];
+    }
+  }
+
   Future<void> forget(String id) async {
     final String target = id.trim();
     if (target.isEmpty) {

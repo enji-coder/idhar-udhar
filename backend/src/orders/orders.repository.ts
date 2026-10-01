@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
+import { RECEIVABLE_OUTSTANDING_CASE } from '../settlement/settlement.repository';
 import { TransitionActor } from './order-status';
 import { OrderStatus } from './order-status';
 
@@ -313,6 +314,9 @@ export class OrdersRepository {
       rider_percentage: string | null;
       company_commission_percentage: string | null;
       operational_cost_percentage_of_commission: string | null;
+      pickup_waiting_amount: string | null;
+      pickup_waiting_status: string | null;
+      receivable_outstanding: string | null;
     }[]
   > {
     if (orderIds.length === 0) {
@@ -345,6 +349,9 @@ export class OrdersRepository {
       rider_percentage: string | null;
       company_commission_percentage: string | null;
       operational_cost_percentage_of_commission: string | null;
+      pickup_waiting_amount: string | null;
+      pickup_waiting_status: string | null;
+      receivable_outstanding: string | null;
     }>(
       `
       SELECT
@@ -373,7 +380,10 @@ export class OrdersRepository {
         fin.profit_amount::text AS profit_amount,
         fin.rider_percentage::text AS rider_percentage,
         fin.company_commission_percentage::text AS company_commission_percentage,
-        fin.operational_cost_percentage_of_commission::text AS operational_cost_percentage_of_commission
+        fin.operational_cost_percentage_of_commission::text AS operational_cost_percentage_of_commission,
+        wait.amount::text AS pickup_waiting_amount,
+        wait.settlement_status AS pickup_waiting_status,
+        recv.outstanding::text AS receivable_outstanding
       FROM orders o
       JOIN customer_profiles cp ON cp.customer_profile_id = o.customer_profile_id
       JOIN identities ic ON ic.identity_id = cp.identity_id
@@ -408,6 +418,17 @@ export class OrdersRepository {
         ORDER BY frozen_at DESC
         LIMIT 1
       ) fin ON TRUE
+      LEFT JOIN order_waiting_charges wait ON wait.order_id = o.order_id
+      LEFT JOIN LATERAL (
+        SELECT GREATEST(
+          0::numeric(12,2),
+          COALESCE(SUM(${RECEIVABLE_OUTSTANDING_CASE}), 0)
+        ) AS outstanding
+        FROM customer_receivable_entries e
+        JOIN order_waiting_charges w
+          ON w.order_waiting_charge_id = e.order_waiting_charge_id
+        WHERE e.order_id = o.order_id
+      ) recv ON TRUE
       WHERE o.order_id = ANY($1::uuid[])
       `,
       [orderIds],

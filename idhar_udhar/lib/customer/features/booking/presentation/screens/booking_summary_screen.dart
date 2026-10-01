@@ -12,7 +12,6 @@ import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
-import '../../../../core/state/vehicle_fare.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/custom_snack_bar.dart';
@@ -30,8 +29,6 @@ class BookingSummaryScreen extends ConsumerStatefulWidget {
 
 class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   bool _busy = false;
-  bool _quoting = false;
-  String? _quoteError;
 
   @override
   void initState() {
@@ -42,25 +39,13 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   }
 
   Future<void> _prefetchQuote() async {
-    if (_quoting) {
-      return;
-    }
-    _quoting = true;
     try {
       await ensureCustomerQuote(ref);
       if (mounted) {
-        setState(() => _quoteError = null);
-      }
-    } on ApiException catch (error) {
-      if (mounted) {
-        setState(() => _quoteError = error.message);
+        setState(() {});
       }
     } catch (_) {
-      if (mounted) {
-        setState(() => _quoteError = 'Fare could not be calculated.');
-      }
-    } finally {
-      _quoting = false;
+      // Confirm path shows the mapped error; keep the existing layout.
     }
   }
 
@@ -105,32 +90,16 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
     final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
-    final bool matched = quoteHoldMatches(draft, hold);
-    final ApiQuote? quote = matched ? hold!.quote : null;
-    ref.listen(bookingDraftProvider, (BookingDraft? previous, BookingDraft next) {
-      if (!quoteHoldMatches(next, ref.read(backendQuoteHoldProvider))) {
-        unawaited(_prefetchQuote());
-      }
-    });
-    final double? displayedFare = quote?.tripFare;
-    final List<FareLine> fareLines = quote == null
-        ? const <FareLine>[]
-        : customerFareLines(
-            baseFare: quote.baseFare,
-            distanceCharge: quote.distanceCharge,
-            waiting: quote.waiting,
-            surge: quote.surge,
-            toll: quote.toll,
-            parking: quote.parking,
-            discount: quote.discount,
-            rounding: quote.rounding,
-          );
+    final bool quoteCurrent =
+        hold != null && hold.bookingKey == draft.quoteBookingKey;
+    final ApiQuote? quote = quoteCurrent ? hold.quote : null;
+    final double? displayedFare = quote?.netPayable;
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Confirm Booking',
         isLoading: _busy,
-        onPressed: _busy || quote == null ? null : _confirm,
+        onPressed: _busy || !quoteCurrent ? null : _confirm,
       ),
       child: ListView(
         children: [
@@ -156,21 +125,31 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _row(
-                  'Pickup',
-                  draft.pickup == null || draft.pickupAddressText.isEmpty
-                      ? '—'
-                      : draft.pickupAddressText,
-                ),
+                _row('Pickup', draft.pickup == null ? '—' : draft.locationAddress(draft.pickup!)),
                 const Divider(height: 24),
-                _row(
-                  'Drop',
-                  draft.drop == null ||
-                          draft.locationAddress(draft.drop!).isEmpty
-                      ? '—'
-                      : draft.locationAddress(draft.drop!),
-                ),
-                if (quote != null && _hasDistanceCoordinates(draft)) ...[
+                _row('Drop', draft.drop == null ? '—' : draft.locationAddress(draft.drop!)),
+                if (draft.receiverName.trim().isNotEmpty) ...[
+                  const Divider(height: 24),
+                  _row('Receiver', draft.receiverName.trim()),
+                ],
+                if (draft.receiverMobile.trim().isNotEmpty) ...[
+                  const Divider(height: 24),
+                  _row('Receiver mobile', draft.receiverMobile.trim()),
+                ],
+                if (draft.hasRouteForCurrentStops) ...[
+                  const Divider(height: 24),
+                  _row(
+                    'Distance',
+                    '${draft.routeDistanceKm!.toStringAsFixed(1)} km',
+                  ),
+                  if ((draft.routeDurationSeconds ?? 0) > 0) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    _row(
+                      'Approx. travel time',
+                      '${(draft.routeDurationSeconds! / 60).ceil()} min',
+                    ),
+                  ],
+                ] else if (quote != null && _hasDistanceCoordinates(draft)) ...[
                   const Divider(height: 24),
                   _row(
                     'Distance',
@@ -179,17 +158,10 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 ],
                 for (int i = 0; i < draft.extraDrops.length; i++) ...[
                   const Divider(height: 24),
-                  _row(
-                    'Drop ${i + 2}',
-                    draft.locationAddress(draft.extraDrops[i]),
-                  ),
+                  _row('Drop ${i + 2}', draft.locationAddress(draft.extraDrops[i])),
                 ],
                 const Divider(height: 24),
                 _row('Vehicle', draft.vehicle?.name ?? '—'),
-                if ((draft.vehicle?.capacity ?? '').trim().isNotEmpty) ...[
-                  const Divider(height: 24),
-                  _row('Capacity', draft.vehicle!.capacity),
-                ],
                 const Divider(height: 24),
                 _row('Package', '${draft.categoryLabel} · ${draft.sizeLabel}'),
                 const Divider(height: 24),
@@ -245,21 +217,23 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
               children: [
                 Text('Fare breakdown', style: AppTextStyles.headingS),
                 const SizedBox(height: AppSpacing.md),
-                if (quote == null)
+                if (displayedFare != null)
+                  _fareLine('Trip Fare', displayedFare)
+                else if (quote == null)
                   Text(
-                    _quoteError ??
-                        'Fare is calculated by the server from this route and vehicle.',
+                    'Fare is calculated by the server from this route and vehicle.',
                     style: AppTextStyles.caption.copyWith(
-                      color: _quoteError == null
-                          ? AppColors.textSecondary
-                          : AppColors.orange,
+                      color: AppColors.textSecondary,
                     ),
                   )
-                else ...[
-                  for (final FareLine line in fareLines)
-                    _fareLine(line.label, line.amount),
+                else
                   _fareLine('Trip Fare', quote.tripFare),
-                ],
+                if (displayedFare == null && (quote?.distanceCharge ?? 0) > 0)
+                  _fareLine('Distance', quote!.distanceCharge),
+                if (displayedFare == null && (quote?.waiting ?? 0) > 0)
+                  _fareLine('Waiting', quote!.waiting),
+                if (displayedFare == null && (quote?.discount ?? 0) > 0)
+                  _fareLine('Discount', quote!.discount),
                 const Divider(height: 24),
                 Row(
                   children: [
@@ -270,9 +244,9 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                       ),
                     ),
                     Text(
-                      quote == null
+                      displayedFare == null
                           ? '—'
-                          : '₹${quote.netPayable.toStringAsFixed(0)}',
+                          : '₹${displayedFare.toStringAsFixed(0)}',
                       style: AppTextStyles.headingS.copyWith(
                         color: AppColors.orange,
                       ),

@@ -7,17 +7,30 @@ import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
+import '../../../../core/state/recent_locations_provider.dart';
 import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
-import '../../../../shared/widgets/custom_dialog.dart';
 import '../../../../shared/widgets/glass_container.dart';
 
 /// Customer dashboard — aligned to attached sunset glass reference.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
+
+  void _startBooking(BuildContext context, WidgetRef ref, ServiceFamily? family) {
+    final BookingDraftNotifier draft = ref.read(bookingDraftProvider.notifier);
+    draft.beginNewBooking();
+    ref.read(backendQuoteHoldProvider.notifier).state = null;
+    if (family == null) {
+      draft.clearServiceFamily();
+    } else {
+      draft.setServiceFamily(family);
+    }
+    context.push(AppRoutes.bookVehicle);
+  }
 
   String _greeting() {
     final int hour = DateTime.now().hour;
@@ -80,6 +93,7 @@ class DashboardScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const _FreshHomeActivity(),
               FadeAnimation(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -248,15 +262,7 @@ class DashboardScreen extends ConsumerWidget {
                       AnimatedPrimaryButton(
                         label: 'Book a Delivery',
                         height: compact ? 48 : 52,
-                        onPressed: () {
-                          ref
-                              .read(bookingDraftProvider.notifier)
-                              .beginNewBooking();
-                          ref
-                              .read(bookingDraftProvider.notifier)
-                              .clearServiceFamily();
-                          context.push(AppRoutes.bookPickup);
-                        },
+                        onPressed: () => _startBooking(context, ref, null),
                       ),
                     ],
                   ),
@@ -278,13 +284,8 @@ class DashboardScreen extends ConsumerWidget {
                     child: _PrimaryService(
                       title: 'Two\nWheeler',
                       imagePath: AssetPaths.bike,
-                      onTap: () {
-                        ref.read(bookingDraftProvider.notifier).beginNewBooking();
-                        ref
-                            .read(bookingDraftProvider.notifier)
-                            .setServiceFamily(ServiceFamily.twoWheeler);
-                        context.push(AppRoutes.bookPickup);
-                      },
+                      onTap: () =>
+                          _startBooking(context, ref, ServiceFamily.twoWheeler),
                     ),
                   ),
                   const SizedBox(width: AppSpacing.md),
@@ -292,13 +293,11 @@ class DashboardScreen extends ConsumerWidget {
                     child: _PrimaryService(
                       title: 'Three\nWheeler',
                       imagePath: AssetPaths.auto,
-                      onTap: () {
-                        ref.read(bookingDraftProvider.notifier).beginNewBooking();
-                        ref
-                            .read(bookingDraftProvider.notifier)
-                            .setServiceFamily(ServiceFamily.threeWheeler);
-                        context.push(AppRoutes.bookPickup);
-                      },
+                      onTap: () => _startBooking(
+                        context,
+                        ref,
+                        ServiceFamily.threeWheeler,
+                      ),
                     ),
                   ),
                   const SizedBox(width: AppSpacing.md),
@@ -306,13 +305,8 @@ class DashboardScreen extends ConsumerWidget {
                     child: _PrimaryService(
                       title: 'Truck',
                       imagePath: AssetPaths.truck,
-                      onTap: () {
-                        ref.read(bookingDraftProvider.notifier).beginNewBooking();
-                        ref
-                            .read(bookingDraftProvider.notifier)
-                            .setServiceFamily(ServiceFamily.truck);
-                        context.push(AppRoutes.bookPickup);
-                      },
+                      onTap: () =>
+                          _startBooking(context, ref, ServiceFamily.truck),
                     ),
                   ),
                 ],
@@ -597,4 +591,53 @@ class _RecentDeliveryRow extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Clears temporary pickup/drop and search history when Home is shown again.
+/// The first visit is left alone so startup GPS can still fill the pickup.
+class _FreshHomeActivity extends ConsumerStatefulWidget {
+  const _FreshHomeActivity();
+
+  @override
+  ConsumerState<_FreshHomeActivity> createState() => _FreshHomeActivityState();
+}
+
+class _FreshHomeActivityState extends ConsumerState<_FreshHomeActivity> {
+  bool _wasCurrent = false;
+  bool _leftHome = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      ref.read(recentLocationsProvider.notifier).clear();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final bool current = ModalRoute.of(context)?.isCurrent ?? false;
+    if (_wasCurrent && !current) {
+      _leftHome = true;
+    }
+    if (current && _leftHome) {
+      _leftHome = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || ModalRoute.of(context)?.isCurrent != true) {
+          return;
+        }
+        ref.read(bookingDraftProvider.notifier).clearTemporaryLocations();
+        ref.read(backendQuoteHoldProvider.notifier).state = null;
+        ref.read(recentLocationsProvider.notifier).clear();
+      });
+    }
+    _wasCurrent = current;
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

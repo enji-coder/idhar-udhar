@@ -100,15 +100,7 @@ function defaultDocumentStatus(rider, key) {
 
 export function riderDocumentsFor(rider = {}) {
   if (rider.source === 'api') {
-    const status = rider.approval === 'APPROVED' || rider.kyc === 'APPROVED' ? 'Verified' : 'Pending';
-    return [
-      { key: 'drivingLicense', label: 'Driving License', number: NA, status },
-      { key: 'rc', label: 'RC', number: NA, status },
-      { key: 'aadhaar', label: 'Aadhaar', number: NA, status, redacted: true },
-      { key: 'pan', label: 'PAN', number: NA, status },
-      { key: 'bank', label: 'Bank document', number: NA, status },
-      { key: 'photo', label: 'Profile photo', number: NA, status },
-    ];
+    return [];
   }
   const profile = enrichRiderProfile(rider);
   return [

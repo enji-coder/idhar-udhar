@@ -12,6 +12,16 @@ class GeoPoint {
       !(latitude == 0 && longitude == 0);
 }
 
+/// Stable key for a pickup/drop coordinate list. Same points do not change it.
+String routePointKey(List<GeoPoint> points) {
+  return points
+      .map(
+        (GeoPoint point) =>
+            '${point.latitude.toStringAsFixed(5)},${point.longitude.toStringAsFixed(5)}',
+      )
+      .join('|');
+}
+
 class ResolvedAddress {
   const ResolvedAddress({
     required this.latitude,

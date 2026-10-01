@@ -238,7 +238,8 @@ abstract final class MockData {
               ? 'Up to 100 kg'
               : 'Up to 1000 kg',
       etaMinutes: isTwo ? 12 : isAuto ? 15 : 28,
-      baseFare: isTwo ? 79 : isAuto ? 149 : 499,
+      baseFare: category.baseFare,
+      perKm: category.perKm,
       imagePath: artworkFor(type),
     );
   }

@@ -94,6 +94,21 @@ export class OrderPaymentsController {
     return this.payments.verifyOnlinePayment(auth, id, transactionId);
   }
 
+  @Roles('CUSTOMER')
+  @Post(':id/receivable-clearance')
+  @HttpCode(HttpStatus.CREATED)
+  clearReceivable(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.payments.beginReceivableClearance(
+      auth,
+      id,
+      readIdempotencyKey(idempotencyKey),
+    );
+  }
+
   @Roles('CUSTOMER', 'RIDER', 'ADMIN')
   @Get(':id/finance')
   getFinance(

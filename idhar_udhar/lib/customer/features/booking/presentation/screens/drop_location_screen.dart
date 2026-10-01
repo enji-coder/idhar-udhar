@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +7,6 @@ import 'package:idhar_udhar/shared/maps/maps.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_draft_provider.dart';
-import '../../../../core/state/recent_locations_provider.dart';
 import '../../../../core/state/saved_addresses_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
@@ -53,7 +50,6 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   int? _activeDropIndex;
   PlacesSearchSession? _places;
   List<PlaceSuggestion> _placeSuggestions = const <PlaceSuggestion>[];
-  Timer? _geocodeDebounce;
   bool _resolvingPlace = false;
 
   @override
@@ -78,7 +74,6 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
   @override
   void dispose() {
     _places?.dispose();
-    _geocodeDebounce?.cancel();
     _search.dispose();
     _singleFocus.dispose();
     for (final TextEditingController controller in _dropFields) {
@@ -149,7 +144,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Continue',
-        onPressed: _continue,
+        onPressed: () => _continue(context, draft),
       ),
       child: draft.deliveryMode == DeliveryMode.multiple
           ? _buildMultipleBody(draft)
@@ -267,7 +262,9 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               child: GlassContainer(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 child: Text(
-                  draft.locationAddress(draft.drop!),
+                  draft.drop!.address.isNotEmpty
+                      ? draft.drop!.address
+                      : draft.drop!.label,
                   style: AppTextStyles.bodyMedium,
                 ),
               ),
@@ -295,44 +292,6 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               ),
             ),
           ),
-        // Recent searches is hidden for now. Restore this block to show it again.
-        // final List<MockLocation> recents = ref.watch(recentLocationsProvider);
-        // SliverToBoxAdapter(
-        //   child: Padding(
-        //     padding: const EdgeInsets.only(top: AppSpacing.md),
-        //     child: Text('Recent searches', style: AppTextStyles.headingS),
-        //   ),
-        // ),
-        // if (recents.isEmpty)
-        //   SliverToBoxAdapter(
-        //     child: Padding(
-        //       padding: const EdgeInsets.only(top: AppSpacing.md),
-        //       child: GlassContainer(
-        //         child: Text(
-        //           'No recent searches',
-        //           style: AppTextStyles.body.copyWith(
-        //             color: AppColors.textSecondary,
-        //           ),
-        //           textAlign: TextAlign.center,
-        //         ),
-        //       ),
-        //     ),
-        //   )
-        // else
-        //   SliverList.separated(
-        //     itemCount: recents.length,
-        //     separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
-        //     itemBuilder: (context, index) {
-        //       final MockLocation loc = recents[index];
-        //       return _placeTile(
-        //         loc: loc,
-        //         selected: draft.drop?.id == loc.id,
-        //         onTap: () => _finishDrop(loc, null),
-        //         onDelete: () =>
-        //             ref.read(recentLocationsProvider.notifier).forget(loc.id),
-        //       );
-        //     },
-        //   ),
         if (!showSuggestions)
           SliverToBoxAdapter(
             child: Padding(
@@ -521,7 +480,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                               return _placeTile(
                                 loc: loc,
                                 selected: selected,
-                                onTap: () => _selectDrop(index, loc),
+                                onTap: () => _finishDrop(loc, index),
                               );
                             }
                             return _suggestionTile(
@@ -551,7 +510,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  'Pickup: ${draft.pickupAddressText.isNotEmpty ? draft.pickupAddressText : draft.pickup!.label}',
+                  'Pickup: ${draft.pickup!.label}',
                   style: AppTextStyles.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -560,37 +519,14 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
             ],
           ),
         ),
-        _RouteDistanceLabel(points: _distancePoints(draft)),
       ],
     );
-  }
-
-  List<GeoPoint> _distancePoints(BookingDraft draft) {
-    final List<GeoPoint> points = <GeoPoint>[];
-    final MockLocation? pickup = draft.pickup;
-    if (pickup?.latitude == null || pickup?.longitude == null) {
-      return points;
-    }
-    points.add(
-      GeoPoint(latitude: pickup!.latitude!, longitude: pickup.longitude!),
-    );
-    for (int i = 0; i < draft.requiredDropCount; i++) {
-      final MockLocation? drop = draft.dropAt(i);
-      if (drop?.latitude == null || drop?.longitude == null) {
-        break;
-      }
-      points.add(
-        GeoPoint(latitude: drop!.latitude!, longitude: drop.longitude!),
-      );
-    }
-    return points;
   }
 
   Widget _placeTile({
     required MockLocation loc,
     required bool selected,
     required VoidCallback onTap,
-    VoidCallback? onDelete,
   }) {
     return Material(
       color: Colors.transparent,
@@ -621,16 +557,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
                   ],
                 ),
               ),
-              if (onDelete != null)
-                IconButton(
-                  tooltip: 'Delete recent search',
-                  onPressed: onDelete,
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppColors.orange,
-                  ),
-                )
-              else if (selected)
+              if (selected)
                 const Icon(Icons.check_circle, color: AppColors.orange),
             ],
           ),
@@ -641,12 +568,7 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
 
   List<MockLocation> _filteredPlaces(BookingDraft draft, String rawQuery) {
     final String query = rawQuery.trim().toLowerCase();
-    final List<MockLocation> saved = ref.read(savedAddressesProvider).addresses;
-    final List<MockLocation> recents = ref.read(recentLocationsProvider);
-    final List<MockLocation> known = <MockLocation>[
-      ...saved,
-      ...recents.where((MockLocation loc) => !saved.any((s) => s.id == loc.id)),
-    ];
+    final List<MockLocation> known = ref.read(savedAddressesProvider).addresses;
     return known.where((MockLocation loc) {
       if (loc.id == draft.pickup?.id) {
         return false;
@@ -702,16 +624,19 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
         setState(() => _placeSuggestions = suggestions);
       },
     );
-    _scheduleGeocode(null, value);
   }
 
   GeoPoint? _bias() {
     final BookingDraft draft = ref.read(bookingDraftProvider);
-    final MockLocation? loc = draft.drop ?? draft.pickup;
-    if (loc?.latitude != null && loc?.longitude != null) {
-      return GeoPoint(latitude: loc!.latitude!, longitude: loc.longitude!);
+    final MockLocation? pickup = draft.pickup;
+    if (pickup?.latitude != null && pickup?.longitude != null) {
+      return GeoPoint(latitude: pickup!.latitude!, longitude: pickup.longitude!);
     }
-    return MapsDefaults.cityCenter;
+    final MockLocation? device = draft.deviceLocation;
+    if (device?.latitude != null && device?.longitude != null) {
+      return GeoPoint(latitude: device!.latitude!, longitude: device.longitude!);
+    }
+    return null;
   }
 
   Widget _suggestionTile(PlaceSuggestion suggestion, {int? dropIndex}) {
@@ -784,79 +709,27 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     }
   }
 
-  void _scheduleGeocode(int? index, String query) {
-    _geocodeDebounce?.cancel();
-    final String trimmed = query.trim();
-    if (trimmed.length < 5) {
-      return;
-    }
-    _geocodeDebounce = Timer(const Duration(milliseconds: 550), () async {
-      final ResolvedAddress? resolved =
-          await ref.read(deviceLocationServiceProvider).forward(trimmed);
-      if (!mounted || resolved == null) {
-        return;
-      }
-      final MockLocation loc = MockLocation(
-        id: index == null ? 'geocode_drop' : 'geocode_drop_$index',
-        label: trimmed,
-        address: resolved.address,
-        city: resolved.city,
-        iconName: 'place',
-        latitude: resolved.latitude,
-        longitude: resolved.longitude,
-      );
-      if (index == null) {
-        final MockLocation? current = ref.read(bookingDraftProvider).drop;
-        if (current != null &&
-            current.latitude != null &&
-            current.id.startsWith('place_')) {
-          return;
-        }
-        ref.read(bookingDraftProvider.notifier).setDrop(loc);
-      } else {
-        final MockLocation? current = ref.read(bookingDraftProvider).dropAt(index);
-        if (current != null &&
-            current.latitude != null &&
-            !current.id.startsWith('custom_drop_')) {
-          return;
-        }
-        ref.read(bookingDraftProvider.notifier).setDropAt(index, loc);
-      }
-    });
-  }
-
   void _onDropTextChanged(int index, String value) {
     if (_dropErrors[index] != null) {
       _dropErrors[index] = null;
     }
     setState(() {});
     final String trimmed = value.trim();
+    final BookingDraftNotifier notifier =
+        ref.read(bookingDraftProvider.notifier);
     if (trimmed.isEmpty) {
-      ref.read(bookingDraftProvider.notifier).clearDropAt(index);
+      notifier.clearDropAt(index);
       return;
     }
-    final List<MockLocation> matches = _filteredPlaces(
-      ref.read(bookingDraftProvider),
-      trimmed,
-    );
-    MockLocation? exact;
-    for (final MockLocation loc in matches) {
-      if (loc.address.toLowerCase() == trimmed.toLowerCase() ||
-          loc.label.toLowerCase() == trimmed.toLowerCase() ||
-          loc.displayLabel.toLowerCase() == trimmed.toLowerCase()) {
-        exact = loc;
-        break;
+    final MockLocation? current = ref.read(bookingDraftProvider).dropAt(index);
+    if (current != null) {
+      final String committed = current.address.trim().isNotEmpty
+          ? current.address.trim()
+          : current.label.trim();
+      if (committed != trimmed) {
+        notifier.clearDropAt(index);
       }
     }
-    ref.read(bookingDraftProvider.notifier).setDropAt(
-          index,
-          exact ??
-              MockLocation(
-                id: 'custom_drop_$index',
-                label: trimmed,
-                address: trimmed,
-              ),
-        );
     _places?.query(
       text: trimmed,
       bias: _bias(),
@@ -867,45 +740,25 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
         setState(() => _placeSuggestions = suggestions);
       },
     );
-    if (exact == null || exact.latitude == null) {
-      _scheduleGeocode(index, trimmed);
-    }
   }
 
   Future<void> _finishDrop(MockLocation location, int? dropIndex) async {
-    final int index = dropIndex ?? 0;
-    final BookingDraftNotifier notifier =
-        ref.read(bookingDraftProvider.notifier);
-    final BookingDraft draft = ref.read(bookingDraftProvider);
-    MockLocation saved = location;
-    if (draft.needsDropConfirmationFor(location, index)) {
-      if (dropIndex == null) {
-        notifier.setDrop(location);
-      } else {
-        notifier.setDropAt(index, location);
-      }
-      final MockLocation? confirmed =
-          await CompleteAddressScreen.open(context, initial: location);
-      if (!mounted || confirmed == null) {
-        return;
-      }
-      notifier.confirmDropAddress(confirmed, index: index);
-      saved = confirmed;
-      await ref.read(recentLocationsProvider.notifier).remember(confirmed);
-    }
-    if (dropIndex == null) {
-      _search.text = saved.address.isNotEmpty ? saved.address : saved.label;
-    } else {
-      _dropFields[index].text =
-          saved.address.isNotEmpty ? saved.address : saved.label;
-      _dropErrors[index] = null;
-      _dropFocus[index].unfocus();
-    }
-    setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
-    if (!mounted) {
+    final MockLocation? confirmed =
+        await CompleteAddressScreen.open(context, initial: location);
+    if (!mounted || confirmed == null) {
       return;
     }
-    _openRouteIfReady();
+    if (dropIndex == null) {
+      ref.read(bookingDraftProvider.notifier).setDrop(confirmed);
+      _search.text =
+          confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
+    } else {
+      _selectDrop(dropIndex, confirmed);
+    }
+    setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
+    if (dropIndex == null && mounted) {
+      await context.push(AppRoutes.bookPreview);
+    }
   }
 
   Future<void> _openMap([int? dropIndex]) async {
@@ -938,47 +791,14 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     setState(() => _activeDropIndex = null);
   }
 
-  Future<void> _continue() async {
-    final BookingDraft draft = ref.read(bookingDraftProvider);
+  void _continue(BuildContext context, BookingDraft draft) {
     final String? message = draft.incompleteStopMessage;
     if (message != null) {
       _showStopErrors(draft);
       CustomSnackBar.error(context, message);
       return;
     }
-    final BookingDraftNotifier notifier =
-        ref.read(bookingDraftProvider.notifier);
-    for (int i = 0; i < draft.requiredDropCount; i++) {
-      if (!mounted) {
-        return;
-      }
-      final BookingDraft current = ref.read(bookingDraftProvider);
-      final MockLocation? loc = current.dropAt(i);
-      if (loc == null) {
-        return;
-      }
-      if (!current.needsDropConfirmationFor(loc, i)) {
-        continue;
-      }
-      final MockLocation? confirmed =
-          await CompleteAddressScreen.open(context, initial: loc);
-      if (!mounted || confirmed == null) {
-        return;
-      }
-      notifier.confirmDropAddress(confirmed, index: i);
-      await ref.read(recentLocationsProvider.notifier).remember(confirmed);
-    }
-    if (!mounted) {
-      return;
-    }
-    _openRouteIfReady();
-  }
-
-  void _openRouteIfReady() {
-    if (!ref.read(bookingDraftProvider).readyForRoutePreview) {
-      return;
-    }
-    context.push(AppRoutes.bookRoute);
+    context.push(AppRoutes.bookPreview);
   }
 
   void _showStopErrors(BookingDraft draft) {
@@ -1036,105 +856,6 @@ class _ModeTile extends StatelessWidget {
               color: AppColors.navy,
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RouteDistanceLabel extends ConsumerStatefulWidget {
-  const _RouteDistanceLabel({required this.points});
-
-  final List<GeoPoint> points;
-
-  @override
-  ConsumerState<_RouteDistanceLabel> createState() =>
-      _RouteDistanceLabelState();
-}
-
-class _RouteDistanceLabelState extends ConsumerState<_RouteDistanceLabel> {
-  String _key = '';
-  String? _label;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-  }
-
-  @override
-  void didUpdateWidget(covariant _RouteDistanceLabel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (_signature(widget.points) != _key) {
-      unawaited(_load());
-    }
-  }
-
-  String _signature(List<GeoPoint> points) {
-    return points
-        .map(
-          (GeoPoint point) =>
-              '${point.latitude.toStringAsFixed(5)},${point.longitude.toStringAsFixed(5)}',
-        )
-        .join('|');
-  }
-
-  double? _straightKm(List<GeoPoint> points) {
-    if (points.length < 2) {
-      return null;
-    }
-    double total = 0;
-    for (int i = 1; i < points.length; i++) {
-      total += GeoMath.haversineKm(
-        lat1: points[i - 1].latitude,
-        lng1: points[i - 1].longitude,
-        lat2: points[i].latitude,
-        lng2: points[i].longitude,
-      );
-    }
-    return total;
-  }
-
-  Future<void> _load() async {
-    final List<GeoPoint> points = widget.points;
-    final String key = _signature(points);
-    _key = key;
-    if (points.length < 2) {
-      if (mounted && _label != null) {
-        setState(() => _label = null);
-      }
-      return;
-    }
-    final DisplayRoute? route = await ref.read(routesServiceProvider).compute(
-          origin: points.first,
-          destination: points.last,
-          intermediates: points.length > 2
-              ? points.sublist(1, points.length - 1)
-              : const <GeoPoint>[],
-        );
-    if (!mounted || _key != key) {
-      return;
-    }
-    final double? km = route?.distanceKm ?? _straightKm(points);
-    if (km == null) {
-      setState(() => _label = null);
-      return;
-    }
-    setState(() => _label = 'Distance: ${km.toStringAsFixed(1)} km');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_label == null) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.sm),
-      child: Text(
-        _label!,
-        style: AppTextStyles.bodyMedium.copyWith(
-          color: AppColors.navy,
-          fontWeight: FontWeight.w700,
         ),
       ),
     );

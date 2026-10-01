@@ -10,8 +10,9 @@ import '../../features/booking/presentation/screens/drop_location_screen.dart';
 import '../../features/booking/presentation/screens/order_details_screen.dart';
 import '../../features/booking/presentation/screens/package_details_screen.dart';
 import '../../features/booking/presentation/screens/pickup_location_screen.dart';
+import '../../features/booking/presentation/screens/pickup_to_drop_preview_screen.dart';
+import '../../features/booking/presentation/screens/receiver_details_screen.dart';
 import '../../features/booking/presentation/screens/rider_assigned_screen.dart';
-import '../../features/booking/presentation/screens/route_preview_screen.dart';
 import '../../features/booking/presentation/screens/searching_rider_screen.dart';
 import '../../features/booking/presentation/screens/tracking_screen.dart';
 import '../../features/booking/presentation/screens/vehicle_selection_screen.dart';
@@ -174,11 +175,19 @@ abstract final class AppRouter {
         ),
       ),
       GoRoute(
-        path: AppRoutes.bookRoute,
-        name: 'bookRoute',
+        path: AppRoutes.bookPreview,
+        name: 'bookPreview',
         pageBuilder: (context, state) => RouteTransitions.fadeThrough(
           key: state.pageKey,
-          child: const RoutePreviewScreen(),
+          child: const PickupToDropPreviewScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.bookReceiver,
+        name: 'bookReceiver',
+        pageBuilder: (context, state) => RouteTransitions.fadeThrough(
+          key: state.pageKey,
+          child: const ReceiverDetailsScreen(),
         ),
       ),
       GoRoute(

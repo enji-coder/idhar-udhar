@@ -45,7 +45,9 @@ const emptyCategory = {
   baseFare: '',
   perKmCharge: '',
   initialMinimum: '',
-  waitingCharge: '',
+    waitingCharge: '0',
+    initialWaitingMinutes: '',
+    waitingChargePerMinute: '',
   surgeCharge: '',
   tollCharge: '',
   parkingCharge: '',
@@ -210,7 +212,11 @@ export default function VehicleCategories() {
             <Field label="Base Fare" error={panel.errors.baseFare}><input type="number" min="0" className={inputClass} value={panel.form.baseFare ?? ''} onChange={(event) => panel.setForm({ ...panel.form, baseFare: event.target.value })} /></Field>
             <Field label="Per KM Charge" error={panel.errors.perKmCharge}><input type="number" min="0" className={inputClass} value={panel.form.perKmCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, perKmCharge: event.target.value })} /></Field>
             <Field label="Initial Minimum" error={panel.errors.initialMinimum}><input type="number" min="0" className={inputClass} value={panel.form.initialMinimum ?? ''} onChange={(event) => panel.setForm({ ...panel.form, initialMinimum: event.target.value })} /></Field>
-            <Field label="Waiting Charge" error={panel.errors.waitingCharge}><input type="number" min="0" className={inputClass} value={panel.form.waitingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, waitingCharge: event.target.value })} /></Field>
+            <Field label="Free waiting (minutes)" error={panel.errors.initialWaitingMinutes}><input type="number" min="0" max="1440" step="1" className={inputClass} value={panel.form.initialWaitingMinutes ?? ''} onChange={(event) => panel.setForm({ ...panel.form, initialWaitingMinutes: event.target.value })} /></Field>
+            <Field label="Waiting charge (₹/minute)" error={panel.errors.waitingChargePerMinute}>
+              <input type="number" min="0" step="0.01" className={inputClass} value={panel.form.waitingChargePerMinute ?? ''} onChange={(event) => panel.setForm({ ...panel.form, waitingChargePerMinute: event.target.value })} />
+              <p className="mt-1 text-xs text-slate-500">Applied only after the free waiting time at pickup.</p>
+            </Field>
             <Field label="Surge Charge" error={panel.errors.surgeCharge}><input type="number" min="0" className={inputClass} value={panel.form.surgeCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, surgeCharge: event.target.value })} /></Field>
             <Field label="Toll Charge" error={panel.errors.tollCharge}><input type="number" min="0" className={inputClass} value={panel.form.tollCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, tollCharge: event.target.value })} /></Field>
             <Field label="Parking Charge" error={panel.errors.parkingCharge}><input type="number" min="0" className={inputClass} value={panel.form.parkingCharge ?? ''} onChange={(event) => panel.setForm({ ...panel.form, parkingCharge: event.target.value })} /></Field>
@@ -235,7 +241,8 @@ export default function VehicleCategories() {
             <DetailRow label="Base Fare" value={panel.view.baseFare} />
             <DetailRow label="Per KM Charge" value={panel.view.perKmCharge} />
             <DetailRow label="Initial Minimum" value={panel.view.initialMinimum} />
-            <DetailRow label="Waiting Charge" value={panel.view.waitingCharge} />
+            <DetailRow label="Free waiting (minutes)" value={panel.view.initialWaitingMinutes ?? 0} />
+            <DetailRow label="Waiting charge (₹/minute)" value={panel.view.waitingChargePerMinute ?? 0} />
             <DetailRow label="Surge Charge" value={panel.view.surgeCharge} />
             <DetailRow label="Toll Charge" value={panel.view.tollCharge} />
             <DetailRow label="Parking Charge" value={panel.view.parkingCharge} />

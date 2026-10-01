@@ -94,13 +94,6 @@ class _HelpScreenState extends State<HelpScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('We’re here for you', style: AppTextStyles.headingS),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Demo support surface. Live chat and ticketing arrive with backend.',
-                  style: AppTextStyles.body.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                ),
               ],
             ),
           ),

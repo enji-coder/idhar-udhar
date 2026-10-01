@@ -217,6 +217,8 @@ export class VehicleCategoriesService {
       next.surge !== (existing.surge ?? '0.00') ||
       next.toll !== (existing.toll ?? '0.00') ||
       next.parking !== (existing.parking ?? '0.00') ||
+      next.initial_waiting_minutes !== (existing.initial_waiting_minutes ?? 0) ||
+      next.waiting_charge_per_minute !== (existing.waiting_charge_per_minute ?? '0.00') ||
       next.rider_percentage !== (existing.rider_percentage ?? '85.00') ||
       next.company_commission_percentage !==
         (existing.company_commission_percentage ?? '15.00')
@@ -240,6 +242,15 @@ export class VehicleCategoriesService {
     }
     const rates = normalizeFareRates({
       ...incoming,
+      initial_waiting_minutes:
+        incoming.initial_waiting_minutes ??
+        existing?.initial_waiting_minutes ??
+        undefined,
+      waiting_charge_per_minute:
+        incoming.waiting_charge_per_minute ??
+        (existing?.waiting_charge_per_minute != null
+          ? Number(existing.waiting_charge_per_minute)
+          : undefined),
       rider_percentage:
         incoming.rider_percentage ??
         (existing?.rider_percentage != null
@@ -343,6 +354,8 @@ export class VehicleCategoriesService {
         surge: row.surge ?? '0.00',
         toll: row.toll ?? '0.00',
         parking: row.parking ?? '0.00',
+        initial_waiting_minutes: row.initial_waiting_minutes ?? 0,
+        waiting_charge_per_minute: row.waiting_charge_per_minute ?? '0.00',
       },
     };
   }
@@ -368,6 +381,8 @@ export class VehicleCategoriesService {
         surge: row.surge ?? '0.00',
         toll: row.toll ?? '0.00',
         parking: row.parking ?? '0.00',
+        initial_waiting_minutes: row.initial_waiting_minutes ?? 0,
+        waiting_charge_per_minute: row.waiting_charge_per_minute ?? '0.00',
         rider_percentage: row.rider_percentage ?? '85.00',
         company_commission_percentage: row.company_commission_percentage ?? '15.00',
       },

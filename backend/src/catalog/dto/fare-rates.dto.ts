@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, Max, Min } from 'class-validator';
 
 export class FareRatesDto {
   @IsOptional()
@@ -46,6 +46,19 @@ export class FareRatesDto {
 
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  initial_waiting_minutes?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  waiting_charge_per_minute?: number;
+
+  @IsOptional()
+  @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Max(100)
@@ -81,6 +94,8 @@ export function normalizeFareRates(rates?: FareRatesDto | null): {
   surge: string;
   toll: string;
   parking: string;
+  initial_waiting_minutes: number;
+  waiting_charge_per_minute: string;
   rider_percentage: string;
   company_commission_percentage: string;
 } {
@@ -98,6 +113,11 @@ export function normalizeFareRates(rates?: FareRatesDto | null): {
     surge: money(rates?.surge),
     toll: money(rates?.toll),
     parking: money(rates?.parking),
+    initial_waiting_minutes: Math.min(
+      1440,
+      Math.max(0, Math.trunc(Number(rates?.initial_waiting_minutes ?? 0))),
+    ),
+    waiting_charge_per_minute: money(rates?.waiting_charge_per_minute),
     rider_percentage: money(rider),
     company_commission_percentage: money(company),
   };

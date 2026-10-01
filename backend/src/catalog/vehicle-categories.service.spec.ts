@@ -30,6 +30,8 @@ function row(overrides: Partial<VehicleCategoryRow> = {}): VehicleCategoryRow {
     per_km: '8.00',
     initial_minimum: '30.00',
     waiting: '1.00',
+    initial_waiting_minutes: 0,
+    waiting_charge_per_minute: '0.00',
     surge: '2.00',
     toll: '3.00',
     parking: '4.00',

@@ -11,6 +11,7 @@ import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/animations/animations.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
 import '../cancel_trip_flow.dart';
@@ -127,6 +128,7 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
       ref.read(sessionProvider.notifier).updateOrder(cancelled);
     }
     ref.read(bookingDraftProvider.notifier).reset();
+    ref.read(backendQuoteHoldProvider.notifier).state = null;
     context.go(AppRoutes.home);
   }
 

@@ -3,7 +3,8 @@ import 'google_maps_http.dart';
 import 'maps_runtime.dart';
 import 'polyline_codec.dart';
 
-/// Routes API for map polylines / ETA display. Does not affect fare calculation.
+/// Routes API for the pickup-to-drop polyline, distance, and travel time.
+/// The customer booking draft stores that distance for the fare estimate.
 class RoutesService {
   RoutesService(this._http);
 

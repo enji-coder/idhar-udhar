@@ -7,6 +7,7 @@ import { AppConfig } from '../config/configuration';
 import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
 import { AuthContext } from '../auth/types/auth-context';
+import { SettlementService } from '../settlement/settlement.service';
 import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 import { OrderNotificationDispatcher } from '../notifications/order-notification.dispatcher';
 import {
@@ -56,6 +57,7 @@ export class OrdersService {
     @Inject(forwardRef(() => WalletCodService))
     private readonly walletCod: WalletCodService,
     private readonly orderNotifications: OrderNotificationDispatcher,
+    private readonly settlement: SettlementService,
   ) {}
 
   async create(auth: OrderActor, body: CreateOrderDto, idempotencyKey: string) {
@@ -83,6 +85,7 @@ export class OrdersService {
           );
         }
 
+        await this.settlement.assertNoOutstanding(auth.profileId, tx);
         const city = await this.requireCity(body.city_id, tx);
         const category = await this.requireCategory(body.vehicle_category_id, tx);
         assertPackageForVehicle({
@@ -178,16 +181,21 @@ export class OrdersService {
   async getById(auth: OrderActor, orderId: string) {
     const order = await this.requireOrder(orderId);
     await this.assertCanReadOrder(auth, order);
-    const [stops, snapshot] = await Promise.all([
+    const [stops, snapshot, waiting] = await Promise.all([
       this.orders.listStops(order.order_id),
       this.fares.findSnapshotByOrder(order.order_id),
+      auth.role === 'RIDER'
+        ? Promise.resolve(null)
+        : this.settlement.waitingSummary(order.order_id, this.postgres),
     ]);
     return {
       ...this.serializeOrder(order, stops),
       fare_snapshot: snapshot ? serializeSnapshot(snapshot) : null,
-      ...(auth.role === 'RIDER' && snapshot
-        ? { rider_amount: snapshot.rider_amount }
-        : {}),
+      ...(auth.role === 'RIDER'
+        ? snapshot
+          ? { rider_amount: snapshot.rider_amount }
+          : {}
+        : { waiting }),
     };
   }
 
@@ -901,6 +909,15 @@ export class OrdersService {
       },
       tx,
     );
+    if (input.to === 'PICKED_UP') {
+      await this.settlement.onPickedUp(updated.order_id, tx);
+    }
+    if (input.to === 'DELIVERED') {
+      await this.settlement.settleDelivered(updated, tx);
+    }
+    if (input.to === 'CANCELLED') {
+      await this.settlement.onCancelled(updated.order_id, tx);
+    }
     return updated;
   }
 
@@ -1189,6 +1206,9 @@ export class OrdersService {
       per_km: extra?.per_km ?? null,
       distance_charge: extra?.distance_charge ?? null,
       waiting: extra?.waiting ?? null,
+      pickup_waiting_amount: extra?.pickup_waiting_amount ?? null,
+      pickup_waiting_status: extra?.pickup_waiting_status ?? null,
+      receivable_outstanding: extra?.receivable_outstanding ?? null,
       surge: extra?.surge ?? null,
       toll: extra?.toll ?? null,
       parking: extra?.parking ?? null,

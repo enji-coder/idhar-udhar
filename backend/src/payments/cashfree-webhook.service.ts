@@ -16,6 +16,7 @@ import {
 } from './cashfree-webhook.parse';
 import { PaymentGatewayRepository } from './payment-gateway.repository';
 import { PaymentsRepository } from './payments.repository';
+import { SettlementService } from '../settlement/settlement.service';
 
 export type WebhookApplyResult = 'applied' | 'duplicate' | 'ignored' | 'rejected';
 
@@ -29,6 +30,7 @@ export class CashfreeWebhookService {
     private readonly orders: OrdersRepository,
     private readonly notifications: PaymentNotificationDispatcher,
     private readonly logger: AppLogger,
+    private readonly settlement: SettlementService,
   ) {}
 
   async apply(input: {
@@ -170,6 +172,21 @@ export class CashfreeWebhookService {
       tx,
     );
     const order = await this.orders.findById(attempt.order_id, tx);
+    if (
+      nextStatus === 'PAID' &&
+      attempt.charge_purpose === 'RECEIVABLE_CLEARANCE' &&
+      order
+    ) {
+      await this.settlement.creditOnlineClearance(
+        {
+          orderId: order.order_id,
+          customerProfileId: order.customer_profile_id,
+          amount: attempt.transaction_amount,
+          paymentTransactionId: attempt.payment_transaction_id,
+        },
+        tx,
+      );
+    }
     if (order) {
       await this.notifications.onTransactionRecorded(
         {

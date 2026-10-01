@@ -62,6 +62,8 @@ class ApiOrder {
     this.riderAmount,
     this.distanceKm,
     this.fareQuoteId,
+    this.waitingAmount,
+    this.receivableOutstanding,
   });
 
   final String orderId;
@@ -78,8 +80,15 @@ class ApiOrder {
   final double? distanceKm;
   final String? fareQuoteId;
 
+  /// Server pickup-waiting assessment. Null until the backend has assessed it.
+  final double? waitingAmount;
+
+  /// Outstanding post-booking receivable from the server ledger.
+  final double? receivableOutstanding;
+
   factory ApiOrder.fromJson(Map<String, Object?> json) {
     final Map<String, Object?> snapshot = jsonObject(json['fare_snapshot']);
+    final Map<String, Object?> waiting = jsonObject(json['waiting']);
     final Map<String, Object?> quote = json.containsKey('fare_quote_id')
         ? json
         : jsonObject(json['fare_quote']);
@@ -112,6 +121,12 @@ class ApiOrder {
               : null),
       fareQuoteId: jsonString(json['fare_quote_id']) ??
           jsonString(quote['fare_quote_id']),
+      waitingAmount: waiting['amount'] == null
+          ? null
+          : jsonDouble(waiting['amount']),
+      receivableOutstanding: waiting['outstanding_amount'] == null
+          ? null
+          : jsonDouble(waiting['outstanding_amount']),
     );
   }
 }
@@ -128,11 +143,6 @@ class ApiQuote {
     this.distanceCharge = 0,
     this.discount = 0,
     this.waiting = 0,
-    this.surge = 0,
-    this.toll = 0,
-    this.parking = 0,
-    this.rounding = 0,
-    this.tax = 0,
   });
 
   final String orderId;
@@ -145,11 +155,6 @@ class ApiQuote {
   final double distanceCharge;
   final double discount;
   final double waiting;
-  final double surge;
-  final double toll;
-  final double parking;
-  final double rounding;
-  final double tax;
 
   factory ApiQuote.fromJson(Map<String, Object?> json) {
     return ApiQuote(
@@ -163,13 +168,40 @@ class ApiQuote {
       distanceCharge: jsonDouble(json['distance_charge']),
       discount: jsonDouble(json['discount']),
       waiting: jsonDouble(json['waiting']),
-      surge: jsonDouble(json['surge']),
-      toll: jsonDouble(json['toll']),
-      parking: jsonDouble(json['parking']),
-      rounding: jsonDouble(json['rounding']),
-      tax: jsonDouble(json['tax']),
     );
   }
+}
+
+class ReceivableClearance {
+  const ReceivableClearance({
+    required this.paymentTransactionId,
+    required this.amount,
+    required this.paymentSessionId,
+    required this.cashfreeOrderId,
+    required this.environment,
+  });
+
+  final String paymentTransactionId;
+  final String amount;
+  final String paymentSessionId;
+  final String cashfreeOrderId;
+  final String environment;
+
+  factory ReceivableClearance.fromJson(Map<String, Object?> json) {
+    return ReceivableClearance(
+      paymentTransactionId: jsonString(json['payment_transaction_id']) ?? '',
+      amount: jsonString(json['amount']) ?? '',
+      paymentSessionId: jsonString(json['payment_session_id']) ?? '',
+      cashfreeOrderId: jsonString(json['cashfree_order_id']) ?? '',
+      environment: jsonString(json['cashfree_environment']) ?? '',
+    );
+  }
+
+  /// Checkout can open only when Cashfree returned a session for this charge.
+  bool get canOpenCheckout =>
+      paymentSessionId.isNotEmpty &&
+      cashfreeOrderId.isNotEmpty &&
+      (environment == 'sandbox' || environment == 'production');
 }
 
 class OrdersApi {
@@ -178,24 +210,10 @@ class OrdersApi {
   final ApiClient _client;
   final Uuid _uuid = const Uuid();
 
-  Future<Map<String, Object?>> previewVehicleFares({
-    required String cityId,
-    required List<ApiStop> stops,
-  }) {
-    return _client.post(
-      '/v1/orders/vehicle-fares',
-      data: <String, Object?>{
-        'city_id': cityId,
-        'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
-      },
-    );
-  }
-
   Future<ApiOrder> create({
     required String cityId,
     required String vehicleCategoryId,
     required List<ApiStop> stops,
-    double? packageWeightKg,
     String? idempotencyKey,
   }) async {
     final Map<String, Object?> body = await _client.post(
@@ -203,7 +221,6 @@ class OrdersApi {
       data: <String, Object?>{
         'city_id': cityId,
         'vehicle_category_id': vehicleCategoryId,
-        if (packageWeightKg != null) 'package_weight_kg': packageWeightKg,
         'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
       },
       headers: <String, String>{
@@ -224,12 +241,49 @@ class OrdersApi {
     return ApiOrder.fromJson(await _client.get('/v1/orders/$orderId'));
   }
 
+  /// Starts a Cashfree charge for the server-calculated waiting receivable.
+  /// The amount is not sent by the app. Checkout success is not payment success.
+  Future<ReceivableClearance> startReceivableClearance(String orderId) async {
+    final Map<String, Object?> body = await _client.post(
+      '/v1/orders/$orderId/receivable-clearance',
+      data: <String, Object?>{},
+      headers: <String, String>{'Idempotency-Key': _uuid.v4()},
+    );
+    return ReceivableClearance.fromJson(body);
+  }
+
   Future<List<ApiStop>> listStops(String orderId) async {
     final Map<String, Object?> body =
         await _client.get('/v1/orders/$orderId/stops');
     return jsonList(body['stops'])
         .map((Object? item) => ApiStop.fromJson(jsonObject(item)))
         .toList(growable: false);
+  }
+
+  /// Server prices every active category for these stops. Amounts in the
+  /// response are the booking fare. Waiting is not included.
+  Future<Map<String, String>> previewVehicleFares({
+    required String cityId,
+    required List<ApiStop> stops,
+  }) async {
+    final Map<String, Object?> body = await _client.post(
+      '/v1/orders/vehicle-fares',
+      data: <String, Object?>{
+        'city_id': cityId,
+        'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
+      },
+    );
+    final Map<String, String> fares = <String, String>{};
+    for (final Object? item in jsonList(body['vehicles'])) {
+      final Map<String, Object?> vehicle = jsonObject(item);
+      final String? id = jsonString(vehicle['vehicle_category_id']);
+      final Map<String, Object?> fare = jsonObject(vehicle['fare']);
+      final String? payable = jsonString(fare['net_payable']);
+      if (id != null && id.isNotEmpty && payable != null && payable.isNotEmpty) {
+        fares[id] = payable;
+      }
+    }
+    return fares;
   }
 
   Future<ApiQuote> quote(String orderId) async {

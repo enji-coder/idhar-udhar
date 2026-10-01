@@ -14,7 +14,8 @@ abstract final class AppRoutes {
 
   static const String bookPickup = '/book/pickup';
   static const String bookDrop = '/book/drop';
-  static const String bookRoute = '/book/route';
+  static const String bookPreview = '/book/preview';
+  static const String bookReceiver = '/book/receiver';
   static const String bookVehicle = '/book/vehicle';
   static const String bookPackage = '/book/package';
   static const String bookSummary = '/book/summary';

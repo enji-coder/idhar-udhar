@@ -67,7 +67,7 @@ describe('Fare quotes and snapshots (e2e)', () => {
         ROUND(per_km * $3::numeric(10,3), 2)::text AS distance_charge,
         GREATEST(
           initial_minimum,
-          ROUND(base_fare + ROUND(per_km * $3::numeric(10,3), 2) + waiting + surge + toll + parking, 2)
+          ROUND(base_fare + ROUND(per_km * $3::numeric(10,3), 2) + surge + toll + parking, 2)
         )::text AS trip_fare
       FROM fare_config_version_rates
       WHERE fare_config_version_id = $1

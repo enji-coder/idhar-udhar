@@ -23,6 +23,7 @@ import {
 import {
   deriveVerification,
   documentsAreLocked,
+  latestDocuments,
   VerificationSource,
 } from './rider-verification';
 
@@ -51,8 +52,14 @@ export class RiderDocumentsService {
     }
     const rows = await this.files.listRiderDocuments(riderProfileId);
     const rider = await this.files.findRiderVerification(riderProfileId);
+    const currentIds = new Set(
+      latestDocuments(rows).map((row) => row.rider_document_id),
+    );
     return {
-      documents: rows.map((row) => this.serializeDocument(row)),
+      documents: rows.map((row) => ({
+        ...this.serializeDocument(row),
+        is_current: currentIds.has(row.rider_document_id),
+      })),
       approval_status: rider?.approval_status ?? null,
       onboarding_kyc_status: rider?.onboarding_kyc_status ?? null,
       online_status: rider?.online_status ?? null,
@@ -148,7 +155,7 @@ export class RiderDocumentsService {
         403,
       );
     }
-    return this.signedDocument(row);
+    return this.signedDocument(row, 'attachment');
   }
 
   async decideForAdmin(
@@ -164,6 +171,7 @@ export class RiderDocumentsService {
       source: 'ADMIN',
       adminProfileId: auth.profileId,
       rejectionReason,
+      auth,
     });
   }
 
@@ -177,6 +185,7 @@ export class RiderDocumentsService {
     source: VerificationSource;
     adminProfileId: string | null;
     rejectionReason?: string | null;
+    auth?: AuthContext;
   }) {
     if (input.source === 'ADMIN' && !input.adminProfileId) {
       throw new ApiError(
@@ -224,6 +233,37 @@ export class RiderDocumentsService {
         tx,
       );
       const sync = await this.syncVerification(existing.rider_profile_id, tx);
+      if (input.source === 'ADMIN' && input.auth) {
+        await this.audit.record(
+          {
+            auth: input.auth,
+            action:
+              input.decision === 'APPROVED'
+                ? 'RIDER_DOCUMENT_APPROVED'
+                : 'RIDER_DOCUMENT_REJECTED',
+            entityType: 'RIDER_DOCUMENT',
+            entityId: input.documentId,
+            category: 'ADMIN',
+            reason: input.decision === 'REJECTED' ? reason : null,
+            oldValue: {
+              status: existing.status,
+              rejection_reason: existing.rejection_reason,
+            },
+            newValue: {
+              status: updated.status,
+              document_type: updated.document_type,
+              rider_profile_id: updated.rider_profile_id,
+              reviewer_admin_profile_id: updated.reviewer_admin_profile_id,
+              reviewed_at: updated.reviewed_at,
+              rejection_reason: updated.rejection_reason,
+              approval_status: sync.approval_status,
+              onboarding_kyc_status: sync.onboarding_kyc_status,
+              online_status: sync.online_status,
+            },
+          },
+          tx,
+        );
+      }
       return {
         document: updated,
         previousStatus: existing.status,
@@ -384,10 +424,14 @@ export class RiderDocumentsService {
     return this.signedProfilePicture(riderProfileId);
   }
 
-  async downloadForAdmin(auth: AuthContext, documentId: string) {
+  async downloadForAdmin(
+    auth: AuthContext,
+    documentId: string,
+    disposition?: string | string[],
+  ) {
     this.assertAdmin(auth);
     const row = await this.requireDocument(documentId);
-    return this.signedDocument(row);
+    return this.signedDocument(row, this.parseDisposition(disposition));
   }
 
   private async signedProfilePicture(riderProfileId: string) {
@@ -406,15 +450,37 @@ export class RiderDocumentsService {
     };
   }
 
-  private async signedDocument(row: RiderDocumentRow) {
-    const signed = await this.storage.getSignedGetUrl(
-      row.storage_key,
-      fileNameFromStorageKey(row.storage_key),
+  private parseDisposition(
+    value: string | string[] | undefined,
+  ): 'inline' | 'attachment' {
+    const raw = Array.isArray(value) ? value[0] : value;
+    if (raw == null || raw === '' || raw === 'inline') {
+      return 'inline';
+    }
+    if (raw === 'attachment') {
+      return 'attachment';
+    }
+    throw new ApiError(
+      ErrorCodes.VALIDATION_ERROR,
+      'disposition must be inline or attachment',
+      400,
     );
+  }
+
+  private async signedDocument(
+    row: RiderDocumentRow,
+    disposition: 'inline' | 'attachment',
+  ) {
+    const fileName = fileNameFromStorageKey(row.storage_key);
+    const signed = await this.storage.getSignedGetUrl(row.storage_key, fileName, {
+      disposition,
+      contentType: row.content_type ?? undefined,
+    });
     return {
       ...this.serializeDocument(row),
       download_url: signed.url,
       download_url_expires_in: signed.expiresInSeconds,
+      content_disposition: disposition,
     };
   }
 
@@ -440,6 +506,9 @@ export class RiderDocumentsService {
       reviewer_admin_profile_id: row.reviewer_admin_profile_id,
       rejection_reason: row.rejection_reason,
       verification_source: row.verification_source,
+      original_filename: row.storage_key
+        ? fileNameFromStorageKey(row.storage_key)
+        : null,
     };
   }
 

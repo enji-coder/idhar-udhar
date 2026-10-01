@@ -17,6 +17,8 @@ export type VehicleFarePreviewRow = {
   surge: string;
   toll: string;
   parking: string;
+  initial_waiting_minutes?: number;
+  waiting_charge_per_minute?: string;
   trip_fare: string;
   discount: string;
   rounding: string;
@@ -57,6 +59,8 @@ export function serializeCustomerVehicleFare(row: VehicleFarePreviewRow) {
       surge: formatInr(row.surge),
       toll: formatInr(row.toll),
       parking: formatInr(row.parking),
+      initial_waiting_minutes: row.initial_waiting_minutes ?? 0,
+      waiting_charge_per_minute: formatInr(row.waiting_charge_per_minute ?? '0'),
       discount: formatInr(row.discount),
       rounding: formatInr(row.rounding),
       trip_fare: formatInr(row.trip_fare),

@@ -174,6 +174,8 @@ export default function OrderDetailDrawer({
             {order.baseFare != null ? <DetailRow label="Base fare" value={formatINR(order.baseFare)} /> : null}
             {order.distanceCharge != null ? <DetailRow label="Per km component" value={formatINR(order.distanceCharge)} /> : null}
             {order.waitingCharge != null ? <DetailRow label="Waiting" value={formatINR(order.waitingCharge)} /> : null}
+            {order.pickupWaitingAmount != null ? <DetailRow label="Waiting charges" value={formatINR(order.pickupWaitingAmount)} /> : null}
+            {order.receivableOutstanding != null ? <DetailRow label="Receivable outstanding" value={formatINR(order.receivableOutstanding)} /> : null}
             {order.surgeCharge != null ? <DetailRow label="Surge" value={formatINR(order.surgeCharge)} /> : null}
             {order.tollCharge != null ? <DetailRow label="Toll" value={formatINR(order.tollCharge)} /> : null}
             {order.parkingCharge != null ? <DetailRow label="Parking" value={formatINR(order.parkingCharge)} /> : null}

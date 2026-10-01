@@ -20,10 +20,44 @@ import { formatAppDate, formatAppTime, parseAppDate, sortByDateTime } from '../u
 import { maskAadhaar, maskBankAccount } from '../utils/masking';
 import { enrichRiderProfile, enrichVehicleRecord, riderDocumentsFor } from '../services/profileEnrichment';
 import { calculateOrderFinance } from '../services/commission';
-import { approveRiderDocument, fetchAdminRider, fetchRiderCod, fetchRiderDocumentUrl, fetchRiderDocuments, fetchRiderEarnings, fetchRiderProfilePicture, fetchRiderWallet, fetchRiderWalletLedger, rejectRiderDocument, reopenRiderVerification } from '../api/adminApi';
-import { canSubmitReview, documentLabel, documentStatusLabel, documentsLockedLabel, languageLabel, rejectionIssue, verificationSourceLabel } from '../services/documentReview';
+import { approveAdminDocument, fetchAdminDocument, fetchAdminRider, fetchAdminRiderDocuments, fetchRiderCod, fetchRiderEarnings, fetchRiderProfilePicture, fetchRiderWallet, fetchRiderWalletLedger, rejectAdminDocument, reopenRiderVerification } from '../api/adminApi';
+import { canSubmitReview, documentLabel, documentStatusLabel, documentsLockedLabel, languageLabel, mediaPreviewError, previewErrorMessage, previewKind, rejectionIssue, verificationSourceLabel } from '../services/documentReview';
 
-const DOC_STATUSES = ['Pending', 'Verified', 'Rejected'];
+const IDLE_PREVIEW = { status: 'idle', url: '', contentType: '', fileName: '', error: '' };
+
+function DocumentPreview({ preview, broken, onBroken, label }) {
+  if (preview.status === 'loading') {
+    return <p className="rounded-2xl bg-white/70 px-4 py-8 text-center text-sm text-ink-muted">Loading document preview…</p>;
+  }
+  if (preview.status === 'error') {
+    return <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-danger">{preview.error}</p>;
+  }
+  if (preview.status !== 'ready') return null;
+  if (broken) {
+    return <p className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-danger">{mediaPreviewError()}</p>;
+  }
+  const kind = previewKind(preview.contentType);
+  if (kind === 'image') {
+    return (
+      <img
+        src={preview.url}
+        alt={preview.fileName || label}
+        className="max-h-[28rem] w-full rounded-2xl bg-white object-contain"
+        onError={onBroken}
+      />
+    );
+  }
+  if (kind === 'pdf') {
+    return (
+      <iframe
+        title={preview.fileName || label}
+        src={preview.url}
+        className="h-[28rem] w-full rounded-2xl border border-slate-200 bg-white"
+      />
+    );
+  }
+  return <p className="text-sm text-ink-muted">This file type cannot be previewed here. Use download to open the original.</p>;
+}
 
 export default function RiderDetail() {
   const { id } = useParams();
@@ -52,6 +86,9 @@ export default function RiderDetail() {
   const [documentMeta, setDocumentMeta] = useState(null);
   const [reopening, setReopening] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [preview, setPreview] = useState(IDLE_PREVIEW);
+  const [previewBroken, setPreviewBroken] = useState(false);
+  const previewSeq = useRef(0);
 
   useEffect(() => {
     if (!id) return undefined;
@@ -67,7 +104,7 @@ export default function RiderDetail() {
           fetchRiderCod(id),
           fetchRiderEarnings(id),
           fetchRiderWalletLedger(id),
-          fetchRiderDocuments(id),
+          fetchAdminRiderDocuments(id),
         ]);
         if (cancelled) return;
         if (walletResult.status === 'fulfilled') setWalletBalance(walletResult.value);
@@ -135,6 +172,9 @@ export default function RiderDetail() {
   );
   const transactions = ledger;
 
+  const mayApprove = can('riders', 'approve');
+  const mayReject = can('riders', 'reject');
+
   if (loading) return <PageSkeleton />;
   if (loadError && !rider) {
     return <PageContainer><ErrorState title="Couldn't load rider" description={loadError.message || 'The rider API did not respond. Dummy records are not shown.'} /></PageContainer>;
@@ -143,27 +183,102 @@ export default function RiderDetail() {
     return <PageContainer><ErrorState title="Rider not found" description="This rider is not in the current directory." /></PageContainer>;
   }
 
-  function updateDocumentStatus() {
-    setToast('Document verification is not available on the server yet.');
+  function closeDocument() {
+    if (reviewingRef.current) return;
+    previewSeq.current += 1;
+    setDocView(null);
+    setPreview(IDLE_PREVIEW);
+    setPreviewBroken(false);
+    setRejectReason('');
   }
 
-  async function viewServerDocument(doc) {
-    if (!canSubmitReview(openingRef.current || reviewingRef.current)) return;
+  async function openDocument(doc) {
+    setRejectReason('');
+    setPreviewBroken(false);
+    setDocView(doc);
+    if (!doc?.rider_document_id) {
+      setPreview(IDLE_PREVIEW);
+      return;
+    }
+    const seq = previewSeq.current + 1;
+    previewSeq.current = seq;
+    setPreview({
+      status: 'loading',
+      url: '',
+      contentType: doc.content_type || '',
+      fileName: doc.original_filename || '',
+      error: '',
+    });
+    try {
+      const signed = await fetchAdminDocument(doc.rider_document_id, { disposition: 'inline' });
+      if (previewSeq.current !== seq) return;
+      if (!signed?.download_url) {
+        setPreview({
+          status: 'error',
+          url: '',
+          contentType: signed?.content_type || doc.content_type || '',
+          fileName: signed?.original_filename || doc.original_filename || '',
+          error: 'The document link was not returned.',
+        });
+        return;
+      }
+      setPreview({
+        status: 'ready',
+        url: signed.download_url,
+        contentType: signed.content_type || doc.content_type || '',
+        fileName: signed.original_filename || doc.original_filename || '',
+        error: '',
+      });
+      setDocView((current) => (
+        current?.rider_document_id === doc.rider_document_id
+          ? {
+            ...current,
+            status: signed.status ?? current.status,
+            rejection_reason: signed.rejection_reason,
+            verification_source: signed.verification_source,
+            reviewed_at: signed.reviewed_at,
+            original_filename: signed.original_filename || current.original_filename,
+            content_type: signed.content_type || current.content_type,
+          }
+          : current
+      ));
+    } catch (error) {
+      if (previewSeq.current !== seq) return;
+      setPreview({
+        status: 'error',
+        url: '',
+        contentType: doc.content_type || '',
+        fileName: doc.original_filename || '',
+        error: previewErrorMessage(error),
+      });
+    }
+  }
+
+  async function downloadOriginal(doc) {
+    if (!doc?.rider_document_id || !canSubmitReview(openingRef.current || reviewingRef.current)) return;
     openingRef.current = true;
     setOpeningDoc(true);
     try {
-      const signed = await fetchRiderDocumentUrl(doc.rider_document_id);
+      const signed = await fetchAdminDocument(doc.rider_document_id, { disposition: 'attachment' });
       if (!signed?.download_url) {
         setToast('The document link was not returned.');
         return;
       }
       window.open(signed.download_url, '_blank', 'noopener,noreferrer');
     } catch (error) {
-      setToast(error.message || 'Could not open the document.');
+      setToast(error.message || 'Could not download the document.');
     } finally {
       openingRef.current = false;
       setOpeningDoc(false);
     }
+  }
+
+  async function refreshRiderDocuments() {
+    const listed = await fetchAdminRiderDocuments(id);
+    setServerDocuments(listed?.documents || []);
+    setDocumentMeta(listed || null);
+    const profile = await fetchAdminRider(id);
+    setRider(profile);
   }
 
   async function submitDocumentDecision(decision) {
@@ -179,22 +294,34 @@ export default function RiderDetail() {
     setReviewing(true);
     try {
       const result = decision === 'APPROVED'
-        ? await approveRiderDocument(docView.rider_document_id)
-        : await rejectRiderDocument(docView.rider_document_id, rejectReason.trim());
+        ? await approveAdminDocument(docView.rider_document_id)
+        : await rejectAdminDocument(docView.rider_document_id, rejectReason.trim());
       setServerDocuments((current) => current.map((row) => (
-        row.rider_document_id === result.document.rider_document_id ? result.document : row
+        row.rider_document_id === result.document.rider_document_id ? { ...row, ...result.document } : row
       )));
       setDocumentMeta((current) => ({
         ...(current || {}),
         approval_status: result.approval_status,
         onboarding_kyc_status: result.onboarding_kyc_status,
+        online_status: result.online_status ?? current?.online_status,
         documents_locked: result.approval_status === 'APPROVED',
       }));
-      const profile = await fetchAdminRider(id);
-      setRider(profile);
+      setRider((current) => (current ? {
+        ...current,
+        approval: result.approval_status,
+        kyc: result.onboarding_kyc_status,
+      } : current));
+      try {
+        await refreshRiderDocuments();
+      } catch {
+        // The decision response already updated the document and rider verification state.
+      }
+      previewSeq.current += 1;
       setDocView(null);
+      setPreview(IDLE_PREVIEW);
+      setPreviewBroken(false);
       setRejectReason('');
-      setToast(decision === 'APPROVED' ? 'Document approved.' : 'Document rejected.');
+      setToast(decision === 'APPROVED' ? 'Document approved successfully.' : 'Document rejected successfully.');
     } catch (error) {
       setToast(error.message || 'Could not save the document decision.');
     } finally {
@@ -284,13 +411,15 @@ export default function RiderDetail() {
                   <div className="min-w-0">
                     <p className="font-medium">{documentLabel(doc.document_type)}</p>
                     <p className="truncate text-xs text-ink-muted">
+                      {doc.original_filename ? `${doc.original_filename} · ` : ''}
+                      {doc.is_current === false ? 'Previous version · ' : 'Current · '}
                       {verificationSourceLabel(doc.verification_source)} · {formatAppDate(parseAppDate(doc.created_at))} {formatAppTime(doc.created_at)}
                     </p>
                     {doc.rejection_reason ? <p className="truncate text-xs text-danger">{doc.rejection_reason}</p> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <StatusBadge status={documentStatusLabel(doc.status)} />
-                    <ActionButton icon={Eye} tone="view" disabled={openingDoc || reviewing} onClick={() => { setRejectReason(''); setDocView(doc); }}>View</ActionButton>
+                    <ActionButton icon={Eye} tone="view" disabled={openingDoc || reviewing} onClick={() => openDocument(doc)}>View</ActionButton>
                   </div>
                 </li>
               ))
@@ -302,7 +431,7 @@ export default function RiderDetail() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <StatusBadge status={doc.status} />
-                    <ActionButton icon={Eye} tone="view" onClick={() => setDocView(doc)}>View</ActionButton>
+                    <ActionButton icon={Eye} tone="view" onClick={() => openDocument(doc)}>View</ActionButton>
                   </div>
                 </li>
               ))}
@@ -386,35 +515,45 @@ export default function RiderDetail() {
       </section>
       <Modal
         open={Boolean(docView)}
+        size={docView?.rider_document_id ? 'xl' : 'md'}
         title={docView?.rider_document_id ? documentLabel(docView.document_type) : (docView?.label || 'Document')}
-        onClose={() => { if (!reviewing) setDocView(null); }}
+        onClose={closeDocument}
         footer={docView?.rider_document_id ? (
           <>
-            <Button variant="ghost" disabled={reviewing} onClick={() => setDocView(null)}>Close</Button>
-            <Button variant="approve" loading={reviewing} disabled={reviewing || openingDoc} onClick={() => submitDocumentDecision('APPROVED')}>Approve</Button>
-            <Button variant="reject" loading={reviewing} disabled={reviewing || openingDoc} onClick={() => submitDocumentDecision('REJECTED')}>Reject</Button>
+            <Button variant="ghost" disabled={reviewing} onClick={closeDocument}>Close</Button>
+            {mayApprove ? <Button variant="approve" loading={reviewing} disabled={reviewing || openingDoc} onClick={() => submitDocumentDecision('APPROVED')}>Approve</Button> : null}
+            {mayReject ? <Button variant="reject" loading={reviewing} disabled={reviewing || openingDoc} onClick={() => submitDocumentDecision('REJECTED')}>Reject</Button> : null}
           </>
-        ) : <Button onClick={() => setDocView(null)}>Close</Button>}
+        ) : <Button onClick={closeDocument}>Close</Button>}
       >
         {docView?.rider_document_id ? (
           <div className="space-y-4">
             <div className="rounded-2xl bg-white/70 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-soft">{documentLabel(docView.document_type)}</p>
+              {docView.original_filename ? <p className="mt-2 text-sm font-medium">{docView.original_filename}</p> : null}
               <p className="mt-2 text-sm text-ink-muted">Status {documentStatusLabel(docView.status)} · {verificationSourceLabel(docView.verification_source)}</p>
               <p className="mt-1 text-sm text-ink-muted">Uploaded {formatAppDate(parseAppDate(docView.created_at))} {formatAppTime(docView.created_at)}</p>
               {docView.rejection_reason ? <p className="mt-2 text-sm text-danger">{docView.rejection_reason}</p> : null}
             </div>
-            <Button variant="view" loading={openingDoc} disabled={reviewing} onClick={() => viewServerDocument(docView)}>Open document</Button>
-            <Field label="Rejection reason">
-              <textarea
-                className={inputClass}
-                rows={3}
-                value={rejectReason}
-                disabled={reviewing}
-                onChange={(event) => setRejectReason(event.target.value)}
-                placeholder="Required only when rejecting"
-              />
-            </Field>
+            <DocumentPreview
+              preview={preview}
+              broken={previewBroken}
+              onBroken={() => setPreviewBroken(true)}
+              label={documentLabel(docView.document_type)}
+            />
+            <Button variant="view" loading={openingDoc} disabled={reviewing} onClick={() => downloadOriginal(docView)}>Download original</Button>
+            {mayReject ? (
+              <Field label="Rejection reason">
+                <textarea
+                  className={inputClass}
+                  rows={3}
+                  value={rejectReason}
+                  disabled={reviewing}
+                  onChange={(event) => setRejectReason(event.target.value)}
+                  placeholder="Required when rejecting"
+                />
+              </Field>
+            ) : null}
           </div>
         ) : docView ? (
           <div className="space-y-4">
@@ -423,15 +562,6 @@ export default function RiderDetail() {
               <p className="mt-2 text-lg font-semibold">{docView.number}</p>
               <p className="mt-1 text-sm text-ink-muted">Rider: {rider.name} · {rider.id}</p>
             </div>
-            <Field label="Verification status">
-              <select
-                className={inputClass}
-                value={docView.status}
-                onChange={(event) => updateDocumentStatus(docView.key, event.target.value)}
-              >
-                {DOC_STATUSES.map((status) => <option key={status}>{status}</option>)}
-              </select>
-            </Field>
             <StatusBadge status={docView.status} />
           </div>
         ) : null}

@@ -5,8 +5,8 @@ import 'package:idhar_udhar/shared/maps/maps.dart';
 import '../data/mock/mock_models.dart';
 import 'booking_draft_provider.dart';
 
-/// Reads the device location once when the customer app opens and, unless the
-/// customer has already chosen a pickup, stores it on the booking draft.
+/// Reads the device GPS once when the customer app opens and stores it as
+/// the device location. It does not replace the selected pickup.
 class StartupDevicePickup extends ConsumerStatefulWidget {
   const StartupDevicePickup({required this.child, super.key});
 

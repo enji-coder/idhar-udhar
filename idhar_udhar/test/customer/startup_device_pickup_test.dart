@@ -12,7 +12,9 @@ import 'package:idhar_udhar/shared/maps/maps.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('startup stores the device location as the pickup', (tester) async {
+  testWidgets('startup stores GPS separately from the selected pickup', (
+    tester,
+  ) async {
     final ProviderContainer container = ProviderContainer(
       overrides: [
         deviceLocationServiceProvider.overrideWithValue(
@@ -41,13 +43,13 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    final MockLocation? pickup = container.read(bookingDraftProvider).pickup;
-    expect(pickup?.latitude, 19.076);
-    expect(pickup?.longitude, 72.877);
-    expect(pickup?.address, 'Colaba, Mumbai');
-    expect(pickup?.id, isNot(MockData.locations[4].id));
-    expect(container.read(bookingDraftProvider).pickupAddressConfirmed, isFalse);
-    expect(find.text('Complete Your Address'), findsNothing);
+    final BookingDraft draft = container.read(bookingDraftProvider);
+    expect(draft.deviceLocation?.latitude, 19.076);
+    expect(draft.deviceLocation?.longitude, 72.877);
+    expect(draft.deviceLocation?.address, 'Colaba, Mumbai');
+    expect(draft.deviceLocation?.id, 'gps_pickup');
+    expect(draft.pickup?.id, MockData.locations[4].id);
+    expect(draft.pickup?.latitude, isNot(19.076));
   });
 
   testWidgets('a manual pickup is kept when GPS returns later', (tester) async {
@@ -74,8 +76,8 @@ void main() {
       id: 'chosen',
       label: 'Office',
       address: 'CG Road',
-      latitude: 23.03,
-      longitude: 72.57,
+      latitude: 12.9716,
+      longitude: 77.5946,
     );
 
     await tester.pumpWidget(
@@ -90,10 +92,13 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    final MockLocation? pickup = container.read(bookingDraftProvider).pickup;
-    expect(pickup?.id, 'chosen');
-    expect(pickup?.latitude, 23.03);
-    expect(pickup?.longitude, 72.57);
+    final BookingDraft draft = container.read(bookingDraftProvider);
+    expect(draft.pickup?.id, 'chosen');
+    expect(draft.pickup?.latitude, 12.9716);
+    expect(draft.pickup?.longitude, 77.5946);
+    expect(draft.deviceLocation?.latitude, 19.076);
+    expect(draft.deviceLocation?.longitude, 72.877);
+    expect(draft.deviceLocation?.id, isNot('chosen'));
   });
 }
 
@@ -121,7 +126,9 @@ class _ScriptedLocation extends DeviceLocationService {
   final _Gate? gate;
 
   @override
-  Future<LocationResult> currentLocation({bool requestPermission = true}) async {
+  Future<LocationResult> currentLocation({
+    bool requestPermission = true,
+  }) async {
     final _Gate? pending = gate;
     if (pending != null) {
       await pending.ready;

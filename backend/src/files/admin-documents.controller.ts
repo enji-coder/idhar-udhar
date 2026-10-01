@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UuidParamPipe } from '../common/uuid-param.pipe';
@@ -69,7 +69,8 @@ export class AdminDocumentsController {
   download(
     @CurrentAuth() auth: AuthContext,
     @Param('documentId', UuidParamPipe) documentId: string,
+    @Query('disposition') disposition?: string,
   ) {
-    return this.documents.downloadForAdmin(auth, documentId);
+    return this.documents.downloadForAdmin(auth, documentId, disposition);
   }
 }

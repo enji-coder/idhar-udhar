@@ -213,6 +213,7 @@ describe('RiderDocumentsService', () => {
     expect(storage.getSignedGetUrl).toHaveBeenCalledWith(
       `riders/${riderId}/documents/${documentId}/aadhaar.jpg`,
       'aadhaar.jpg',
+      { disposition: 'attachment', contentType: 'image/jpeg' },
     );
     expect(result.download_url_expires_in).toBe(300);
     expect(result.download_url).toContain('X-Amz-Signature');
@@ -266,7 +267,18 @@ describe('RiderDocumentsService', () => {
       }),
       {},
     );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'RIDER_DOCUMENT_APPROVED',
+        entityType: 'RIDER_DOCUMENT',
+        entityId: documentId,
+        category: 'ADMIN',
+      }),
+      {},
+    );
     expect(result.approval_status).toBe('APPROVED');
+    expect(result.document.reviewer_admin_profile_id).toBe(adminId);
+    expect(result.document).not.toHaveProperty('storage_key');
     expect(notifications.notifyIfRecipient).toHaveBeenCalledTimes(1);
     expect(notifications.notifyIfRecipient).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'RIDER_PROFILE_VERIFIED' }),
@@ -345,6 +357,13 @@ describe('RiderDocumentsService', () => {
         reason: 'Photo is blurry',
       }),
       postgres,
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'RIDER_DOCUMENT_REJECTED',
+        reason: 'Photo is blurry',
+      }),
+      {},
     );
   });
 
@@ -720,5 +739,199 @@ describe('RiderDocumentsService', () => {
     const adminView = await service.viewProfilePictureForAdmin(adminAuth(), riderId);
     expect(adminView.download_url).toContain('X-Amz-Signature');
     expect(storage.getSignedGetUrl).toHaveBeenCalled();
+  });
+
+  it('lists real document ids and marks only the latest row of each type current', async () => {
+    const older = {
+      ...documentRow(),
+      rider_document_id: 'older-aadhaar',
+      created_at: new Date('2026-09-18T08:00:00.000Z'),
+      status: 'REJECTED' as const,
+      rejection_reason: 'Blurry',
+      verification_source: 'ADMIN' as const,
+      reviewer_admin_profile_id: adminId,
+      reviewed_at: new Date('2026-09-18T09:00:00.000Z'),
+    };
+    const newer = {
+      ...documentRow(),
+      created_at: new Date('2026-09-20T08:00:00.000Z'),
+    };
+    files.riderExists.mockResolvedValue(true);
+    files.listRiderDocuments.mockResolvedValue([newer, older]);
+    files.findRiderVerification.mockResolvedValue({
+      approval_status: 'PENDING',
+      onboarding_kyc_status: 'SUBMITTED',
+      online_status: 'OFFLINE',
+      verification_reopened_at: null,
+      preferred_language: 'en',
+      profile_picture_file_id: null,
+    });
+
+    const listed = await service.listForAdmin(adminAuth(), riderId);
+
+    expect(listed.documents.map((row) => row.rider_document_id)).toEqual([
+      documentId,
+      'older-aadhaar',
+    ]);
+    expect(listed.documents[0].is_current).toBe(true);
+    expect(listed.documents[1].is_current).toBe(false);
+    expect(listed.documents[0].original_filename).toBe('aadhaar.jpg');
+    expect(listed.documents[0]).not.toHaveProperty('storage_key');
+    expect(listed.approval_status).toBe('PENDING');
+  });
+
+  it('returns an inline signed preview for an admin and attachment when asked', async () => {
+    files.findRiderDocument.mockResolvedValue(documentRow());
+
+    const preview = await service.downloadForAdmin(adminAuth(), documentId);
+    expect(preview.download_url).toContain('X-Amz-Signature');
+    expect(preview.content_disposition).toBe('inline');
+    expect(preview.content_type).toBe('image/jpeg');
+    expect(preview.original_filename).toBe('aadhaar.jpg');
+    expect(preview).not.toHaveProperty('storage_key');
+    expect(storage.getSignedGetUrl).toHaveBeenCalledWith(
+      `riders/${riderId}/documents/${documentId}/aadhaar.jpg`,
+      'aadhaar.jpg',
+      { disposition: 'inline', contentType: 'image/jpeg' },
+    );
+
+    await service.downloadForAdmin(adminAuth(), documentId, 'attachment');
+    expect(storage.getSignedGetUrl).toHaveBeenLastCalledWith(
+      `riders/${riderId}/documents/${documentId}/aadhaar.jpg`,
+      'aadhaar.jpg',
+      { disposition: 'attachment', contentType: 'image/jpeg' },
+    );
+  });
+
+  it('returns 404 for a missing admin document and 400 for a bad disposition', async () => {
+    files.findRiderDocument.mockResolvedValue(null);
+    await expect(
+      service.downloadForAdmin(adminAuth(), documentId),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+
+    files.findRiderDocument.mockResolvedValue(documentRow());
+    await expect(
+      service.downloadForAdmin(adminAuth(), documentId, 'public'),
+    ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+  });
+
+  it('reports unconfigured storage when an admin preview cannot be signed', async () => {
+    files.findRiderDocument.mockResolvedValue(documentRow());
+    storage.getSignedGetUrl.mockRejectedValue(
+      new ApiError('STORAGE_UNAVAILABLE', 'Document storage is unavailable. Try again shortly.', 503),
+    );
+    await expect(
+      service.downloadForAdmin(adminAuth(), documentId, 'inline'),
+    ).rejects.toMatchObject({ code: 'STORAGE_UNAVAILABLE', status: 503 });
+  });
+
+  it('refuses a non-admin preview', async () => {
+    await expect(
+      service.downloadForAdmin(riderAuth(), documentId),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
+    expect(storage.getSignedGetUrl).not.toHaveBeenCalled();
+  });
+
+  it('keeps the rider pending when one required document is still uploaded', async () => {
+    files.findRiderDocument.mockResolvedValue(documentRow());
+    files.recordDocumentDecision.mockResolvedValue({
+      ...documentRow(),
+      status: 'APPROVED',
+      verification_source: 'ADMIN',
+      reviewer_admin_profile_id: adminId,
+      reviewed_at: new Date('2026-09-21T10:00:00.000Z'),
+    });
+    files.listRiderDocuments.mockResolvedValue(
+      catalog('APPROVED').map((row) =>
+        row.document_type === 'BANK_PROOF'
+          ? {
+              ...row,
+              status: 'UPLOADED' as const,
+              verification_source: null,
+              reviewer_admin_profile_id: null,
+              reviewed_at: null,
+              rejection_reason: null,
+            }
+          : row,
+      ),
+    );
+    files.lockRiderProfile.mockResolvedValue({
+      approval_status: 'APPROVED',
+      onboarding_kyc_status: 'APPROVED',
+      online_status: 'ONLINE',
+    });
+
+    const result = await service.decideForAdmin(adminAuth(), documentId, 'APPROVED');
+
+    expect(result.approval_status).toBe('PENDING');
+    expect(result.onboarding_kyc_status).toBe('SUBMITTED');
+    expect(files.updateRiderVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalStatus: 'PENDING',
+        onboardingKycStatus: 'SUBMITTED',
+        onlineStatus: 'OFFLINE',
+      }),
+      {},
+    );
+  });
+
+  it('approves from the latest replacement and ignores an older rejection', async () => {
+    const older = new Date('2026-09-18T08:00:00.000Z');
+    const newer = new Date('2026-09-22T08:00:00.000Z');
+    files.findRiderDocument.mockResolvedValue({
+      ...documentRow(),
+      document_type: 'PAN_FRONT',
+      status: 'UPLOADED',
+      created_at: newer,
+    });
+    files.recordDocumentDecision.mockResolvedValue({
+      ...documentRow(),
+      document_type: 'PAN_FRONT',
+      status: 'APPROVED',
+      verification_source: 'ADMIN',
+      reviewer_admin_profile_id: adminId,
+      reviewed_at: newer,
+      created_at: newer,
+    });
+    files.listRiderDocuments.mockResolvedValue([
+      ...catalog('APPROVED', older.toISOString()).filter((row) => row.document_type !== 'PAN_FRONT'),
+      {
+        ...documentRow(),
+        document_type: 'PAN_FRONT',
+        status: 'REJECTED',
+        created_at: older,
+        verification_source: 'ADMIN',
+        reviewer_admin_profile_id: adminId,
+        reviewed_at: older,
+        rejection_reason: 'Expired',
+      },
+      {
+        ...documentRow(),
+        document_type: 'PAN_FRONT',
+        status: 'APPROVED',
+        created_at: newer,
+        verification_source: 'ADMIN',
+        reviewer_admin_profile_id: adminId,
+        reviewed_at: newer,
+        rejection_reason: null,
+      },
+    ]);
+    files.lockRiderProfile.mockResolvedValue({
+      approval_status: 'REJECTED',
+      onboarding_kyc_status: 'REJECTED',
+      online_status: 'OFFLINE',
+    });
+
+    const result = await service.decideForAdmin(adminAuth(), documentId, 'APPROVED');
+
+    expect(result.approval_status).toBe('APPROVED');
+    expect(result.onboarding_kyc_status).toBe('APPROVED');
+    expect(files.updateRiderVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalStatus: 'APPROVED',
+        onboardingKycStatus: 'APPROVED',
+      }),
+      {},
+    );
   });
 });

@@ -103,7 +103,7 @@ describe('Routing and rider location (e2e)', () => {
         GREATEST(
           initial_minimum,
           ROUND(
-            base_fare + ROUND(per_km * $3::numeric(10,3), 2) + waiting + surge + toll + parking,
+            base_fare + ROUND(per_km * $3::numeric(10,3), 2) + surge + toll + parking,
             2
           )
         )::text AS trip_fare

@@ -35,6 +35,7 @@ import {
   WhoPays,
 } from './payment-status';
 import { PaymentsRepository, PlanRow, ResponsibilityRow, serializePlan, serializeResponsibility, serializeTransaction } from './payments.repository';
+import { SettlementService } from '../settlement/settlement.service';
 import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 import { PaymentNotificationDispatcher } from '../notifications/payment-notification.dispatcher';
 import { IdentityRepository } from '../auth/identity/identity.repository';
@@ -52,12 +53,111 @@ export class PaymentsService {
     private readonly identities: IdentityRepository,
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
     private readonly gateway: PaymentGatewayRepository,
+    private readonly settlement: SettlementService,
   ) {}
 
   async getPayment(auth: AuthContext, orderId: string) {
     return this.postgres.transaction(async (tx) => {
       const order = await this.requireReadableOrder(auth, orderId, tx);
-      return this.buildPaymentView(order, tx);
+      const view = await this.buildPaymentView(order, tx);
+      const waiting = await this.settlement.waitingSummary(order.order_id, tx);
+      return { ...view, waiting };
+    });
+  }
+
+  async beginReceivableClearance(
+    auth: AuthContext,
+    orderId: string,
+    idempotencyKey: string,
+  ) {
+    this.assertCustomer(auth);
+    const scopedKey = `${auth.identityId}:${orderId}:clearance:${idempotencyKey}`;
+    return this.postgres.transaction(async (tx) => {
+      const replay = await this.idempotency.find('payment', scopedKey, tx);
+      if (replay) {
+        return replay.result_payload;
+      }
+      const order = await this.orders.lockById(orderId, tx);
+      if (!order) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
+      }
+      this.assertCustomerOwns(auth, order);
+      const outstanding = await this.settlement.orderOutstanding(order.order_id, tx);
+      if (outstanding === '0.00') {
+        throw new ApiError(
+          ErrorCodes.PAYMENT_NOT_READY,
+          'This order has no outstanding receivable',
+          409,
+        );
+      }
+      const openClearance = await this.reuseOrRetirePendingClearance(
+        order.order_id,
+        outstanding,
+        tx,
+      );
+      if (openClearance) {
+        return openClearance;
+      }
+      const onlineRefs = await this.provider.beginOnlineCharge({
+        orderId: order.order_id,
+        amount: outstanding,
+        payerType: 'CUSTOMER',
+      });
+      const row = await this.payments.insertTransaction(
+        {
+          orderId: order.order_id,
+          payerType: 'CUSTOMER',
+          method: 'ONLINE',
+          amount: outstanding,
+          direction: 'CHARGE',
+          status: 'PENDING',
+          providerTxnId: onlineRefs.providerTxnId,
+          providerEventId: onlineRefs.providerEventId,
+          idempotencyKey: scopedKey,
+          createdByType: 'CUSTOMER',
+          createdByProfileId: auth.profileId,
+          chargePurpose: 'RECEIVABLE_CLEARANCE',
+        },
+        tx,
+      );
+      if (
+        onlineRefs.paymentSessionId &&
+        onlineRefs.gatewayOrderId &&
+        onlineRefs.providerTxnId &&
+        onlineRefs.environment
+      ) {
+        await this.gateway.insertAttempt(
+          {
+            paymentTransactionId: row.payment_transaction_id,
+            environment: onlineRefs.environment,
+            gatewayOrderId: onlineRefs.gatewayOrderId,
+            cfOrderId: onlineRefs.providerTxnId,
+            paymentSessionId: onlineRefs.paymentSessionId,
+            amount: outstanding,
+          },
+          tx,
+        );
+      }
+      const payload = {
+        payment_transaction_id: row.payment_transaction_id,
+        amount: outstanding,
+        charge_purpose: 'RECEIVABLE_CLEARANCE',
+        payment_session_id: onlineRefs.paymentSessionId,
+        cashfree_order_id: onlineRefs.gatewayOrderId,
+        cashfree_environment: onlineRefs.environment,
+      };
+      await this.idempotency.insert(
+        {
+          scope: 'payment',
+          key: scopedKey,
+          actorIdentityId: auth.identityId,
+          requestHash: hashRequest({ order_id: orderId, amount: outstanding }),
+          resultEntityId: row.payment_transaction_id,
+          resultPayload: payload,
+        },
+        tx,
+      );
+      return payload;
     });
   }
 
@@ -560,6 +660,55 @@ export class PaymentsService {
         amount_matches: amountMatches,
       };
     });
+  }
+
+  /**
+   * One live Cashfree session per outstanding receivable.
+   * A matching pending session is returned as-is. A failed or expired
+   * attempt is closed, then the caller may start a new one.
+   * A still-live session for a different amount is a conflict.
+   */
+  private async reuseOrRetirePendingClearance(
+    orderId: string,
+    outstanding: string,
+    tx: Queryable,
+  ): Promise<{
+    payment_transaction_id: string;
+    amount: string;
+    charge_purpose: 'RECEIVABLE_CLEARANCE';
+    payment_session_id: string;
+    cashfree_order_id: string;
+    cashfree_environment: 'sandbox' | 'production';
+  } | null> {
+    const pending = await this.gateway.findPendingReceivableClearances(orderId, tx);
+    for (const row of pending) {
+      if (clearanceGatewayUnusable(row.gateway_status)) {
+        await this.payments.markPendingFailed(row.payment_transaction_id, tx);
+        continue;
+      }
+      const amount = formatInr(row.amount);
+      const sessionReady =
+        amount === outstanding &&
+        Boolean(row.payment_session_id) &&
+        Boolean(row.gateway_order_id) &&
+        (row.environment === 'sandbox' || row.environment === 'production');
+      if (!sessionReady || !row.payment_session_id || !row.gateway_order_id || !row.environment) {
+        throw new ApiError(
+          ErrorCodes.PAYMENT_ALREADY_PENDING,
+          'A waiting payment is already in progress',
+          409,
+        );
+      }
+      return {
+        payment_transaction_id: row.payment_transaction_id,
+        amount,
+        charge_purpose: 'RECEIVABLE_CLEARANCE',
+        payment_session_id: row.payment_session_id,
+        cashfree_order_id: row.gateway_order_id,
+        cashfree_environment: row.environment,
+      };
+    }
+    return null;
   }
 
   private async refundCapturedOnline(
@@ -1093,4 +1242,18 @@ export class PaymentsService {
     }
     return payload;
   }
+}
+
+/** Gateway rows we already know cannot be checked out again. */
+function clearanceGatewayUnusable(status: string | null): boolean {
+  if (!status) {
+    return false;
+  }
+  return (
+    status.toUpperCase() === 'FAILED' ||
+    status.toUpperCase() === 'EXPIRED' ||
+    status.toUpperCase() === 'CANCELLED' ||
+    status.toUpperCase() === 'TERMINATED' ||
+    status.toUpperCase() === 'USER_DROPPED'
+  );
 }

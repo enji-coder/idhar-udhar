@@ -46,3 +46,45 @@ export function languageLabel(code) {
 export function documentsLockedLabel(locked) {
   return locked ? 'Locked' : 'Unlocked';
 }
+
+export function adminRiderDocumentsPath(riderId) {
+  return `/v1/admin/riders/${encodeURIComponent(riderId)}/documents`;
+}
+
+export function adminDocumentPath(documentId, disposition = 'inline') {
+  const mode = disposition === 'attachment' ? 'attachment' : 'inline';
+  return `/v1/admin/documents/${encodeURIComponent(documentId)}?disposition=${mode}`;
+}
+
+export function adminApproveDocumentPath(documentId) {
+  return `/v1/admin/documents/${encodeURIComponent(documentId)}/approve`;
+}
+
+export function adminRejectDocumentPath(documentId) {
+  return `/v1/admin/documents/${encodeURIComponent(documentId)}/reject`;
+}
+
+export function previewKind(contentType) {
+  if (contentType === 'image/jpeg' || contentType === 'image/png') return 'image';
+  if (contentType === 'application/pdf') return 'pdf';
+  return 'unsupported';
+}
+
+export const PREVIEW_UNAVAILABLE = 'Document preview is temporarily unavailable.';
+
+export function previewErrorMessage(error) {
+  const status = Number(error?.status);
+  const code = error?.code;
+  if (code === 'STORAGE_UNAVAILABLE' || status === 503) return PREVIEW_UNAVAILABLE;
+  if (status === 404 || code === 'NOT_FOUND') return 'This document was not found.';
+  if (status === 401 || code === 'UNAUTHENTICATED' || code === 'SESSION_EXPIRED') return 'Please sign in again.';
+  if (status === 403 || code === 'FORBIDDEN') return 'You do not have access to this document.';
+  if (status === 400 || code === 'VALIDATION_ERROR') return error?.message || 'The document request was not valid.';
+  if (status === 409) return error?.message || 'This document cannot be previewed in its current state.';
+  if (!status || code === 'NETWORK_ERROR') return 'Could not load the document preview.';
+  return error?.message || 'Could not load the document preview.';
+}
+
+export function mediaPreviewError() {
+  return 'The document could not be displayed. It may have expired or is missing from storage. Open the preview again.';
+}
