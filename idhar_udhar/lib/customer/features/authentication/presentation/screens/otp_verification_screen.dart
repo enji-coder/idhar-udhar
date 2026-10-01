@@ -15,6 +15,7 @@ import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
+import '../../otp_autofill.dart';
 
 /// Premium OTP verification — 4 glass boxes, timer, resend (dummy auth).
 ///
@@ -49,9 +50,23 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   void initState() {
     super.initState();
     _startTimer();
+    CustomerOtpAutofill.listen(_onSmsConsent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showCapturedOtpIfAvailable();
     });
+  }
+
+  void _onSmsConsent(String message) {
+    if (!mounted || _verifying || _navigating) {
+      return;
+    }
+    final String? code =
+        CustomerOtpAutofill.exactOtpDigits(message, _otpLength);
+    if (code == null) {
+      return;
+    }
+    _otp.value = code;
+    _otpKey.currentState?.fillFromAutofill(code);
   }
 
   void _showCapturedOtpIfAvailable() {
@@ -91,6 +106,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    CustomerOtpAutofill.stop();
     _otp.dispose();
     _secondsLeft.dispose();
     super.dispose();
@@ -166,6 +182,10 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       return;
     }
     _navigating = true;
+    await CustomerOtpAutofill.stop();
+    if (!mounted) {
+      return;
+    }
     setState(() => _verifying = false);
     context.go(nextRoute);
   }
@@ -177,6 +197,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     unawaited(HapticFeedback.selectionClick());
     _resetOtpBoxes();
     _startTimer();
+    await CustomerOtpAutofill.arm();
     try {
       await ref.read(sessionProvider.notifier).requestOtp();
       if (!mounted) {

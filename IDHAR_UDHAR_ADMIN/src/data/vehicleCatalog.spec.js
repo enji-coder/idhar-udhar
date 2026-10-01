@@ -90,6 +90,19 @@ describe('admin vehicle hierarchy', () => {
     assert.equal(issues.weightCapacityKg, 'Weight capacity must be 0 or more.');
   });
 
+  it('rejects free waiting outside 0 to 1440 whole minutes', () => {
+    const issues = issuesForVehicleCategoryForm({
+      vehicleType: 'two_wheeler',
+      vehicle: 'scooty',
+      riderSharePercent: '85',
+      companyCommissionPercent: '15',
+      initialWaitingMinutes: '1441',
+      waitingChargePerMinute: '-1',
+    }).issues;
+    assert.equal(issues.initialWaitingMinutes, 'Free waiting must be a whole number from 0 to 1440 minutes.');
+    assert.equal(issues.waitingChargePerMinute, 'Waiting charge must be 0 or more.');
+  });
+
   it('rejects a second Bike and keeps an unrelated text weight', () => {
     const duplicate = issuesForVehicleCategoryForm(
       {

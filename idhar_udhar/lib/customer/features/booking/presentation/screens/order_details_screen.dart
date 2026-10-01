@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
@@ -14,6 +16,7 @@ import '../../../../shared/widgets/custom_dialog.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
+import '../widgets/waiting_charge_prompt.dart';
 
 class OrderDetailsScreen extends ConsumerWidget {
   const OrderDetailsScreen({required this.orderId, super.key});
@@ -44,6 +47,10 @@ class OrderDetailsScreen extends ConsumerWidget {
     }
 
     final MockOrder current = order;
+    final String? serverId = current.backendOrderId;
+    final ApiOrder? serverOrder = serverId == null
+        ? null
+        : ref.watch(orderServerViewProvider(serverId)).asData?.value;
 
     return GlassPageScaffold(
       bottom: Column(
@@ -152,6 +159,22 @@ class OrderDetailsScreen extends ConsumerWidget {
                 _row('Weight', '${order.weightKg.toStringAsFixed(0)} kg'),
                 _row('Rider', order.rider?.name ?? '—'),
                 _row('Trip Fare', '₹${order.confirmedTripFare.toStringAsFixed(0)}'),
+                if (serverOrder?.waitingAmount != null)
+                  _row(
+                    'Waiting charges',
+                    '₹${serverOrder!.waitingAmount!.toStringAsFixed(0)}',
+                  ),
+                if (serverOrder?.receivableOutstanding != null)
+                  _row(
+                    'Previous payment due',
+                    '₹${serverOrder!.receivableOutstanding!.toStringAsFixed(0)}',
+                  ),
+                if (serverId != null &&
+                    (serverOrder?.receivableOutstanding ?? 0) > 0)
+                  WaitingChargePrompt(
+                    orderId: serverId,
+                    outstanding: serverOrder!.receivableOutstanding!,
+                  ),
                 if (order.additionalCharge > 0)
                   _row(
                     'Additional charge',

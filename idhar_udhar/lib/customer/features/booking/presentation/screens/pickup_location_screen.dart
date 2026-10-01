@@ -7,10 +7,10 @@ import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_draft_provider.dart';
-import '../../../../core/state/recent_locations_provider.dart';
 import '../../../../core/state/saved_addresses_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
+import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
@@ -54,26 +54,78 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   }
 
   Future<void> _finishPickup(MockLocation location) async {
-    final BookingDraftNotifier notifier =
-        ref.read(bookingDraftProvider.notifier);
-    final BookingDraft draft = ref.read(bookingDraftProvider);
-    if (draft.needsPickupConfirmationFor(location)) {
-      notifier.setPickup(location);
-      final MockLocation? confirmed =
-          await CompleteAddressScreen.open(context, initial: location);
-      if (!mounted || confirmed == null) {
-        return;
-      }
-      notifier.confirmPickupAddress(confirmed);
-      _search.text =
-          confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
-      setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
-      await ref.read(recentLocationsProvider.notifier).remember(confirmed);
+    final MockLocation? confirmed = await CompleteAddressScreen.open(
+      context,
+      initial: location,
+      forPickup: true,
+    );
+    if (!mounted || confirmed == null) {
+      return;
     }
+    ref.read(bookingDraftProvider.notifier).setPickup(confirmed);
+    ref.read(bookingDraftProvider.notifier).setPickupUnit(
+          house: confirmed.unit,
+          society: confirmed.premises,
+        );
+    _search.text =
+        confirmed.address.isNotEmpty ? confirmed.address : confirmed.label;
+    setState(() => _placeSuggestions = const <PlaceSuggestion>[]);
     if (!mounted) {
       return;
     }
     await context.push(AppRoutes.bookDrop);
+  }
+
+  Future<void> _chooseCurrentLocation() async {
+    try {
+      final DeviceLocationService service =
+          ref.read(deviceLocationServiceProvider);
+      final LocationResult result = await service.currentLocation();
+      if (!mounted) {
+        return;
+      }
+      if (!result.isOk || result.location == null) {
+        CustomSnackBar.error(
+          context,
+          locationFailureMessage(
+            result.failure ?? LocationFailure.unavailable,
+          ),
+        );
+        return;
+      }
+      final DeviceLocation gps = result.location!;
+      final ResolvedAddress? resolved = await service.reverse(gps.point);
+      if (!mounted) {
+        return;
+      }
+      final String formatted = resolved?.address.trim() ?? '';
+      final MockLocation device = MockLocation(
+        id: 'device_gps',
+        label: formatted.isNotEmpty ? formatted : 'Current location',
+        address: formatted,
+        city: resolved?.city ?? '',
+        iconName: 'my_location',
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+      );
+      ref.read(bookingDraftProvider.notifier).setDeviceLocation(device);
+      await _finishPickup(
+        device.copyWith(
+          id: 'pickup_current',
+          unit: '',
+          premises: '',
+          landmark: '',
+        ),
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      CustomSnackBar.error(
+        context,
+        'Current location is temporarily unavailable.',
+      );
+    }
   }
 
   IconData _iconFor(MockLocation loc) {
@@ -94,11 +146,12 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   }
 
   GeoPoint? _bias() {
-    final MockLocation? pickup = ref.read(bookingDraftProvider).pickup;
-    if (pickup?.latitude != null && pickup?.longitude != null) {
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    final MockLocation? device = draft.deviceLocation;
+    if (device?.latitude != null && device?.longitude != null) {
       return GeoPoint(
-        latitude: pickup!.latitude!,
-        longitude: pickup.longitude!,
+        latitude: device!.latitude!,
+        longitude: device.longitude!,
       );
     }
     return null;
@@ -176,14 +229,6 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
     await _finishPickup(picked);
   }
 
-  Future<void> _continue() async {
-    final MockLocation? pickup = ref.read(bookingDraftProvider).pickup;
-    if (!_pickupChosen(pickup)) {
-      return;
-    }
-    await _finishPickup(pickup!);
-  }
-
   Future<void> _openSaved() async {
     final MockLocation? picked = await showSavedAddressPicker(context);
     if (!mounted || picked == null) {
@@ -204,7 +249,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
       bottom: AnimatedPrimaryButton(
         label: 'Continue',
         enabled: pickupChosen,
-        onPressed: _continue,
+        onPressed: () => context.push(AppRoutes.bookDrop),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -250,7 +295,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
-              onPressed: _openMap,
+              onPressed: _chooseCurrentLocation,
               icon: const Icon(Icons.my_location_rounded, color: AppColors.orange),
               label: Text(
                 'Current location',
@@ -323,11 +368,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
     );
   }
 
-  Widget _catalogTile(
-    MockLocation loc,
-    bool selected, {
-    VoidCallback? onDelete,
-  }) {
+  Widget _catalogTile(MockLocation loc, bool selected) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -357,16 +398,7 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
                   ],
                 ),
               ),
-              if (onDelete != null)
-                IconButton(
-                  tooltip: 'Delete recent search',
-                  onPressed: onDelete,
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppColors.orange,
-                  ),
-                )
-              else if (selected)
+              if (selected)
                 const Icon(Icons.check_circle, color: AppColors.orange),
             ],
           ),

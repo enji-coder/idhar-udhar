@@ -74,6 +74,8 @@ function quote(overrides: Partial<FareQuoteRow> = {}): FareQuoteRow {
     distance_charge: '120.00',
     initial_minimum: '50.00',
     waiting: '0.00',
+    initial_waiting_minutes: 0,
+    waiting_charge_per_minute: '0.00',
     surge: '0.00',
     toll: '0.00',
     parking: '0.00',
@@ -104,6 +106,8 @@ function snapshot(tripFare = '819.00'): FareSnapshotRow {
     distance_charge: '120.00',
     initial_minimum: '50.00',
     waiting: '0.00',
+    initial_waiting_minutes: 0,
+    waiting_charge_per_minute: '0.00',
     surge: '0.00',
     toll: '0.00',
     parking: '0.00',
@@ -221,6 +225,12 @@ function build() {
     { getOrThrow: jest.fn() } as never,
     {} as never,
     { onStatusChange: jest.fn(async () => undefined) } as never,
+    {
+      assertNoOutstanding: jest.fn(async () => undefined),
+      onPickedUp: jest.fn(async () => undefined),
+      onCancelled: jest.fn(async () => undefined),
+      settleDelivered: jest.fn(async () => undefined),
+    } as never,
   );
   return { service, orders, catalog, fares, routing };
 }

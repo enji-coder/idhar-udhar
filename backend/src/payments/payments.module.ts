@@ -6,6 +6,7 @@ import { AppConfig } from '../config/configuration';
 import { FareModule } from '../fare/fare.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OrdersModule } from '../orders/orders.module';
+import { SettlementModule } from '../settlement/settlement.module';
 import { WalletCodModule } from '../wallet-cod/wallet-cod.module';
 import { AdminFinanceController } from './admin-finance.controller';
 import { AdminLedgerController } from './admin-ledger.controller';
@@ -30,6 +31,7 @@ import { CashfreeWebhookService } from './cashfree-webhook.service';
     AuthModule,
     FareModule,
     OrdersModule,
+    SettlementModule,
     WalletCodModule,
     NotificationsModule,
     AuditModule,

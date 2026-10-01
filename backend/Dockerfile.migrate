@@ -1,0 +1,19 @@
+# One-off migration image. Build from the repository root:
+#   docker build -f backend/Dockerfile.migrate -t idhar-udhar-migrate .
+# Do not use this image for the API service. The API Dockerfile is unchanged.
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY backend/scripts/migrate.mjs ./scripts/migrate.mjs
+COPY backend/rds-global-bundle.pem /app/certs/rds-global-bundle.pem
+COPY records_database/migrations /app/migrations
+
+ENV NODE_ENV=production
+ENV MIGRATIONS_DIR=/app/migrations
+ENV DATABASE_SSL_ROOT_CERT=/app/certs/rds-global-bundle.pem
+
+CMD ["node", "scripts/migrate.mjs"]

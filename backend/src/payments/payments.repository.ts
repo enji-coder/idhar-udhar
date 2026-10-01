@@ -199,6 +199,23 @@ export class PaymentsRepository {
     return result.rows[0];
   }
 
+  async markPendingFailed(
+    paymentTransactionId: string,
+    db: Queryable,
+  ): Promise<boolean> {
+    const result = await db.query<{ payment_transaction_id: string }>(
+      `
+      UPDATE payment_transactions
+      SET transaction_status = 'FAILED'
+      WHERE payment_transaction_id = $1
+        AND transaction_status = 'PENDING'
+      RETURNING payment_transaction_id
+      `,
+      [paymentTransactionId],
+    );
+    return Boolean(result.rows[0]);
+  }
+
   async findTransaction(
     paymentTransactionId: string,
     db: Queryable = this.postgres,
@@ -226,13 +243,16 @@ export class PaymentsRepository {
             ELSE 0
           END)
           FROM payment_transactions t
-          WHERE t.order_id = r.order_id AND t.payer_type = $2
+          WHERE t.order_id = r.order_id
+            AND t.payer_type = $2
+            AND t.charge_purpose = 'BOOKING'
         ), 0)
         - COALESCE((
           SELECT SUM(amount)
           FROM payment_transactions t
           WHERE t.order_id = r.order_id
             AND t.payer_type = $2
+            AND t.charge_purpose = 'BOOKING'
             AND method = 'ONLINE'
             AND direction = 'CHARGE'
             AND transaction_status = 'PENDING'
@@ -343,6 +363,7 @@ export class PaymentsRepository {
       idempotencyKey: string;
       createdByType: TransactionRow['created_by_type'];
       createdByProfileId: string | null;
+      chargePurpose?: 'BOOKING' | 'RECEIVABLE_CLEARANCE';
     },
     db: Queryable,
   ): Promise<TransactionRow> {
@@ -359,10 +380,11 @@ export class PaymentsRepository {
         provider_event_id,
         idempotency_key,
         created_by_type,
-        created_by_profile_id
+        created_by_profile_id,
+        charge_purpose
       )
       VALUES (
-        $1, $2, $3, $4::numeric(12,2), $5, $6, $7, $8, $9, $10, $11
+        $1, $2, $3, $4::numeric(12,2), $5, $6, $7, $8, $9, $10, $11, $12
       )
       RETURNING ${TX_COLUMNS}
       `,
@@ -378,6 +400,7 @@ export class PaymentsRepository {
         input.idempotencyKey,
         input.createdByType,
         input.createdByProfileId,
+        input.chargePurpose ?? 'BOOKING',
       ],
     );
     return result.rows[0];
@@ -411,6 +434,7 @@ export class PaymentsRepository {
         END), 0)::text AS overall_paid
       FROM payment_transactions
       WHERE order_id = $1
+        AND charge_purpose = 'BOOKING'
       `,
       [orderId],
     );
@@ -433,7 +457,9 @@ export class PaymentsRepository {
             ELSE 0
           END)
           FROM payment_transactions t
-          WHERE t.order_id = r.order_id AND t.payer_type = $2
+          WHERE t.order_id = r.order_id
+            AND t.payer_type = $2
+            AND t.charge_purpose = 'BOOKING'
         ), 0)
       )::text AS remaining
       FROM order_payment_responsibilities r

@@ -57,6 +57,9 @@ describe('S3ObjectStorage', () => {
       expect(command).toBeInstanceOf(GetObjectCommand);
       expect(command.input.Bucket).toBe('idhar-udhar-prod-documents');
       expect(command.input.ResponseCacheControl).toBe('private, no-store');
+      expect(command.input.ResponseContentDisposition).toBe(
+        'attachment; filename="pod.jpg"',
+      );
       expect(options.expiresIn).toBe(300);
       return 'https://example.invalid/obj?X-Amz-Signature=secret';
     });
@@ -72,6 +75,34 @@ describe('S3ObjectStorage', () => {
     expect((logger.error as jest.Mock).mock.calls.join(' ')).not.toContain(
       'X-Amz-Signature',
     );
+  });
+
+  it('signs an inline preview and an attachment download separately', async () => {
+    const sign = jest.fn(async (_client, command: GetObjectCommand) => {
+      return `https://example.invalid/${command.input.ResponseContentDisposition}`;
+    });
+    const preview = await storage(jest.fn(), sign).getSignedGetUrl(
+      'riders/r/documents/d/licence.pdf',
+      'licence.pdf',
+      { disposition: 'inline', contentType: 'application/pdf' },
+    );
+    const download = await storage(jest.fn(), sign).getSignedGetUrl(
+      'riders/r/documents/d/licence.pdf',
+      'licence.pdf',
+      { disposition: 'attachment', contentType: 'application/pdf' },
+    );
+    const previewCommand = sign.mock.calls[0][1] as GetObjectCommand;
+    const downloadCommand = sign.mock.calls[1][1] as GetObjectCommand;
+    expect(previewCommand.input.ResponseContentDisposition).toBe(
+      'inline; filename="licence.pdf"',
+    );
+    expect(previewCommand.input.ResponseContentType).toBe('application/pdf');
+    expect(downloadCommand.input.ResponseContentDisposition).toBe(
+      'attachment; filename="licence.pdf"',
+    );
+    expect(preview.url).toContain('inline');
+    expect(download.url).toContain('attachment');
+    expect(previewCommand.input.Bucket).toBe('idhar-udhar-prod-documents');
   });
 
   it('maps S3 PutObject failures to STORAGE_UNAVAILABLE without logging bytes', async () => {
@@ -112,6 +143,9 @@ describe('UnconfiguredObjectStorage', () => {
         body: Buffer.from('x'),
         contentType: 'image/jpeg',
       }),
+    ).rejects.toMatchObject({ code: 'STORAGE_UNAVAILABLE', status: 503 });
+    await expect(
+      storage.getSignedGetUrl('k', 'file.jpg', { disposition: 'inline' }),
     ).rejects.toMatchObject({ code: 'STORAGE_UNAVAILABLE', status: 503 });
   });
 });

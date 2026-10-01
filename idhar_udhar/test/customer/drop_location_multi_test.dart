@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
+import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
 import 'package:idhar_udhar/customer/core/widgets/animated_primary_button.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/drop_location_screen.dart';
@@ -14,20 +16,17 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  Future<void> selectPlace(
-    WidgetTester tester, {
-    required int index,
-    required String query,
-    required String label,
-  }) async {
-    final Finder field = find.byKey(ValueKey<String>('drop-field-$index'));
-    await tester.ensureVisible(field);
-    await tester.tap(field);
+  MockLocation named(String id) =>
+      MockData.locations.firstWhere((MockLocation loc) => loc.id == id);
+
+  Future<void> chooseDrop(
+    ProviderContainer container,
+    WidgetTester tester,
+    int index,
+    String id,
+  ) async {
+    container.read(bookingDraftProvider.notifier).setDropAt(index, named(id));
     await tester.pump();
-    await tester.enterText(field, query);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text(label).last);
-    await tester.pumpAndSettle();
   }
 
   Future<ProviderContainer> pumpDrop(WidgetTester tester) async {
@@ -101,12 +100,12 @@ void main() {
     await tester.tap(find.text('Multiple Locations'));
     await tester.pumpAndSettle();
 
-    await selectPlace(tester, index: 0, query: 'Paldi', label: 'Paldi');
+    await chooseDrop(container, tester, 0, 'loc_paldi');
 
     expect(container.read(bookingDraftProvider).dropAt(0)?.label, 'Paldi');
     expect(container.read(bookingDraftProvider).dropAt(1), isNull);
 
-    await selectPlace(tester, index: 1, query: 'Bopal', label: 'Bopal');
+    await chooseDrop(container, tester, 1, 'loc_bopal');
 
     expect(container.read(bookingDraftProvider).dropAt(0)?.label, 'Paldi');
     expect(container.read(bookingDraftProvider).dropAt(1)?.label, 'Bopal');
@@ -124,7 +123,7 @@ void main() {
     await tester.tap(find.text('Multiple Locations'));
     await tester.pumpAndSettle();
 
-    await selectPlace(tester, index: 0, query: 'Paldi', label: 'Paldi');
+    await chooseDrop(container, tester, 0, 'loc_paldi');
 
     await tester.tap(find.byType(AnimatedPrimaryButton));
     await tester.pumpAndSettle();
@@ -149,8 +148,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey<String>('drop-count-3')));
     await tester.pumpAndSettle();
 
-    await selectPlace(tester, index: 0, query: 'Paldi', label: 'Paldi');
-    await selectPlace(tester, index: 1, query: 'Bopal', label: 'Bopal');
+    await chooseDrop(container, tester, 0, 'loc_paldi');
+    await chooseDrop(container, tester, 1, 'loc_bopal');
 
     await tester.tap(find.byType(AnimatedPrimaryButton));
     await tester.pumpAndSettle();
@@ -193,6 +192,28 @@ void main() {
 
     expect(field, findsOneWidget);
     expect(find.text('Continue'), findsOneWidget);
+  });
+
+  testWidgets('typing a drop does not create a location without a pin', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final ProviderContainer container = await pumpDrop(tester);
+    await tester.tap(find.text('Multiple Locations'));
+    await tester.pumpAndSettle();
+
+    final Finder field = find.byKey(const ValueKey<String>('drop-field-0'));
+    await tester.ensureVisible(field);
+    await tester.enterText(field, 'Somewhere new');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(container.read(bookingDraftProvider).dropAt(0), isNull);
+    expect(find.text('Recent searches'), findsNothing);
   });
 
   testWidgets('single location flow still shows the place list', (tester) async {

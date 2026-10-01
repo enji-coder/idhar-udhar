@@ -613,6 +613,7 @@ export class WalletCodRepository {
       ), 0)::text AS cash
       FROM payment_transactions
       WHERE order_id = $1
+        AND charge_purpose = 'BOOKING'
       `,
       [orderId],
     );

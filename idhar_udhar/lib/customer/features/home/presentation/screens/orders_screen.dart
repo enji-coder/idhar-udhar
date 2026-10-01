@@ -7,6 +7,8 @@ import 'package:idhar_udhar/shared/api/order_mapper.dart';
 
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
+import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
@@ -98,8 +100,15 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                           subtitle: 'Book a delivery to see it here.',
                           action: AnimatedPrimaryButton(
                             label: 'Book Now',
-                            onPressed: () =>
-                                context.push(AppRoutes.bookPickup),
+                            onPressed: () {
+                              ref
+                                  .read(bookingDraftProvider.notifier)
+                                  .beginNewBooking();
+                              ref
+                                  .read(backendQuoteHoldProvider.notifier)
+                                  .state = null;
+                              context.push(AppRoutes.bookVehicle);
+                            },
                           ),
                         ),
                       )

@@ -25,6 +25,15 @@ function makeService(opts?: {
   remainingOwed?: string;
   availableForPending?: string;
   beginOnlineCharge?: jest.Mock;
+  orderOutstanding?: string;
+  pendingClearances?: Array<{
+    payment_transaction_id: string;
+    amount: string;
+    payment_session_id: string | null;
+    gateway_order_id: string | null;
+    environment: 'sandbox' | 'production' | null;
+    gateway_status: string | null;
+  }>;
 }) {
   const remaining = opts?.remainingOwed ?? '100.00';
   const available = opts?.availableForPending ?? remaining;
@@ -69,6 +78,7 @@ function makeService(opts?: {
         Number.parseInt(b.replace('.', ''), 10);
     }),
     findActiveMethodPolicy: jest.fn(async () => null),
+    markPendingFailed: jest.fn(async () => true),
     insertTransaction: jest.fn(async (input: Record<string, unknown>) => {
       const row = {
         payment_transaction_id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
@@ -109,7 +119,12 @@ function makeService(opts?: {
       ),
     );
   const provider = { beginOnlineCharge };
-  const gateway = { insertAttempt: jest.fn(async () => undefined) };
+  const gateway = {
+    insertAttempt: jest.fn(async () => undefined),
+    findPendingReceivableClearances: jest.fn(
+      async () => opts?.pendingClearances ?? [],
+    ),
+  };
   const service = new PaymentsService(
     postgres as never,
     orders as never,
@@ -121,6 +136,10 @@ function makeService(opts?: {
     identities as never,
     provider as never,
     gateway as never,
+    {
+      waitingSummary: jest.fn(async () => null),
+      orderOutstanding: jest.fn(async () => opts?.orderOutstanding ?? '0.00'),
+    } as never,
   );
   return {
     service,
@@ -129,6 +148,7 @@ function makeService(opts?: {
     beginOnlineCharge,
     inserted,
     walletCod,
+    gateway,
   };
 }
 
@@ -256,6 +276,130 @@ describe('PaymentsService createTransaction', () => {
     ).rejects.toMatchObject({
       code: ErrorCodes.FORBIDDEN,
       status: 403,
+    });
+  });
+});
+
+describe('PaymentsService receivable clearance', () => {
+  const session = {
+    providerTxnId: 'cf-1',
+    providerEventId: null,
+    paymentSessionId: 'session-1',
+    gatewayOrderId: 'iu-order-1',
+    environment: 'sandbox' as const,
+  };
+
+  it('creates one pending clearance for the server outstanding amount', async () => {
+    const beginOnlineCharge = jest.fn(async () => session);
+    const { service, inserted, gateway } = makeService({
+      orderOutstanding: '5.00',
+      beginOnlineCharge,
+    });
+    const payload = await service.beginReceivableClearance(
+      customerAuth,
+      ORDER_ID,
+      'clear-1',
+    );
+    expect(beginOnlineCharge).toHaveBeenCalledTimes(1);
+    expect(beginOnlineCharge).toHaveBeenCalledWith({
+      orderId: ORDER_ID,
+      amount: '5.00',
+      payerType: 'CUSTOMER',
+    });
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({
+      amount: '5.00',
+      transaction_status: 'PENDING',
+    });
+    expect(gateway.insertAttempt).toHaveBeenCalledTimes(1);
+    expect(payload).toMatchObject({
+      amount: '5.00',
+      charge_purpose: 'RECEIVABLE_CLEARANCE',
+      payment_session_id: 'session-1',
+      cashfree_order_id: 'iu-order-1',
+    });
+  });
+
+  it('reuses the pending clearance instead of opening a second Cashfree session', async () => {
+    const beginOnlineCharge = jest.fn(async () => session);
+    const { service, inserted } = makeService({
+      orderOutstanding: '5.00',
+      beginOnlineCharge,
+      pendingClearances: [
+        {
+          payment_transaction_id: 'pay-open',
+          amount: '5.00',
+          payment_session_id: 'session-1',
+          gateway_order_id: 'iu-order-1',
+          environment: 'sandbox',
+          gateway_status: 'ACTIVE',
+        },
+      ],
+    });
+    const payload = await service.beginReceivableClearance(
+      customerAuth,
+      ORDER_ID,
+      'clear-2',
+    );
+    expect(beginOnlineCharge).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+    expect(payload).toMatchObject({
+      payment_transaction_id: 'pay-open',
+      amount: '5.00',
+      payment_session_id: 'session-1',
+      cashfree_order_id: 'iu-order-1',
+      cashfree_environment: 'sandbox',
+    });
+  });
+
+  it('rejects another clearance after the receivable is already clear', async () => {
+    const beginOnlineCharge = jest.fn(async () => session);
+    const { service, inserted } = makeService({
+      orderOutstanding: '0.00',
+      beginOnlineCharge,
+    });
+    await expect(
+      service.beginReceivableClearance(customerAuth, ORDER_ID, 'clear-3'),
+    ).rejects.toMatchObject({
+      code: ErrorCodes.PAYMENT_NOT_READY,
+      status: 409,
+    });
+    expect(beginOnlineCharge).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('starts a new clearance after the previous session failed or expired', async () => {
+    const beginOnlineCharge = jest.fn(async () => ({
+      ...session,
+      paymentSessionId: 'session-2',
+      gatewayOrderId: 'iu-order-2',
+    }));
+    const { service, inserted, payments } = makeService({
+      orderOutstanding: '5.00',
+      beginOnlineCharge,
+      pendingClearances: [
+        {
+          payment_transaction_id: 'pay-old',
+          amount: '5.00',
+          payment_session_id: 'session-old',
+          gateway_order_id: 'iu-order-old',
+          environment: 'sandbox',
+          gateway_status: 'EXPIRED',
+        },
+      ],
+    });
+    const payload = await service.beginReceivableClearance(
+      customerAuth,
+      ORDER_ID,
+      'clear-4',
+    );
+    expect(payments.markPendingFailed).toHaveBeenCalledWith('pay-old', expect.anything());
+    expect(beginOnlineCharge).toHaveBeenCalledTimes(1);
+    expect(inserted).toHaveLength(1);
+    expect(payload).toMatchObject({
+      payment_session_id: 'session-2',
+      cashfree_order_id: 'iu-order-2',
+      amount: '5.00',
     });
   });
 });

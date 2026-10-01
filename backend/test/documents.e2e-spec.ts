@@ -117,6 +117,62 @@ describe('Rider documents and private S3 (e2e)', () => {
       .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
     expect(adminView.status).toBe(200);
     expect(adminView.body.rider_profile_id).toBe(rider.profileId);
+    expect(adminView.body.content_disposition).toBe('inline');
+    expect(adminView.body.rider_document_id).toBe(uploaded.body.rider_document_id);
+    expect(adminView.body.storage_key).toBeUndefined();
+    expect(adminView.body.original_filename).toBe('aadhaar.jpg');
+
+    const attachment = await request(app.getHttpServer())
+      .get(`/v1/admin/documents/${uploaded.body.rider_document_id}?disposition=attachment`)
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
+    expect(attachment.status).toBe(200);
+    expect(attachment.body.content_disposition).toBe('attachment');
+
+    const badDisposition = await request(app.getHttpServer())
+      .get(`/v1/admin/documents/${uploaded.body.rider_document_id}?disposition=public`)
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
+    expect(badDisposition.status).toBe(400);
+
+    const missing = await request(app.getHttpServer())
+      .get('/v1/admin/documents/99999999-9999-4999-8999-999999999999')
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
+    expect(missing.status).toBe(404);
+
+    const listed = await request(app.getHttpServer())
+      .get(`/v1/admin/riders/${rider.profileId}/documents`)
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body.documents[0].rider_document_id).toBe(uploaded.body.rider_document_id);
+    expect(listed.body.documents[0].is_current).toBe(true);
+    expect(listed.body.documents[0].storage_key).toBeUndefined();
+
+    const emptyReject = await request(app.getHttpServer())
+      .post(`/v1/admin/documents/${uploaded.body.rider_document_id}/reject`)
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`)
+      .send({ rejection_reason: '   ' });
+    expect(emptyReject.status).toBe(400);
+
+    const approved = await request(app.getHttpServer())
+      .post(`/v1/admin/documents/${uploaded.body.rider_document_id}/approve`)
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`)
+      .send({});
+    expect(approved.status).toBe(200);
+    expect(approved.body.document.status).toBe('APPROVED');
+    expect(approved.body.document.reviewer_admin_profile_id).toBe(admin.profileId);
+    expect(approved.body.document.reviewed_at).toBeTruthy();
+    expect(approved.body.document.rejection_reason).toBeNull();
+    expect(approved.body.approval_status).toBe('PENDING');
+
+    const rejected = await request(app.getHttpServer())
+      .post(`/v1/admin/documents/${uploaded.body.rider_document_id}/reject`)
+      .set('Authorization', `Bearer ${admin.tokens.accessToken}`)
+      .send({ rejection_reason: 'Driving licence image is unclear' });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.document.status).toBe('REJECTED');
+    expect(rejected.body.document.rejection_reason).toBe('Driving licence image is unclear');
+    expect(rejected.body.document.reviewer_admin_profile_id).toBe(admin.profileId);
+    expect(rejected.body.approval_status).toBe('REJECTED');
+    expect(rejected.body.onboarding_kyc_status).toBe('REJECTED');
   });
 
   it('rejects executable uploads', async () => {

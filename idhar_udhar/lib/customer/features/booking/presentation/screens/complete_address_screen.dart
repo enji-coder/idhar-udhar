@@ -11,17 +11,28 @@ import '../../../../shared/widgets/iu_back_button.dart';
 /// Reviews the map or saved pin and lets the customer complete the address
 /// without dropping the selected coordinates.
 class CompleteAddressScreen extends ConsumerStatefulWidget {
-  const CompleteAddressScreen({required this.initial, super.key});
+  const CompleteAddressScreen({
+    required this.initial,
+    this.forPickup = false,
+    super.key,
+  });
 
   final MockLocation initial;
+
+  /// Pickup and drop keep separate forms. Drop never reads pickup fields.
+  final bool forPickup;
 
   static Future<MockLocation?> open(
     BuildContext context, {
     required MockLocation initial,
+    bool forPickup = false,
   }) {
     return Navigator.of(context).push<MockLocation>(
       MaterialPageRoute<MockLocation>(
-        builder: (_) => CompleteAddressScreen(initial: initial),
+        builder: (_) => CompleteAddressScreen(
+          initial: initial,
+          forPickup: forPickup,
+        ),
       ),
     );
   }
@@ -35,33 +46,34 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
   final ScrollController _scroll = ScrollController();
   final FocusNode _houseFocus = FocusNode();
   final FocusNode _societyFocus = FocusNode();
+  final FocusNode _streetFocus = FocusNode();
   final FocusNode _addressFocus = FocusNode();
   final GlobalKey _houseKey = GlobalKey();
   final GlobalKey _societyKey = GlobalKey();
+  final GlobalKey _streetKey = GlobalKey();
   final GlobalKey _addressKey = GlobalKey();
   late final TextEditingController _house;
   late final TextEditingController _society;
+  late final TextEditingController _street;
   late final TextEditingController _address;
-  String? _addressError;
 
   @override
   void initState() {
     super.initState();
     final BookingDraft draft = ref.read(bookingDraftProvider);
     final MockLocation initial = widget.initial;
-    final bool samePickup = draft.pickup?.id == initial.id;
+    final bool editingPickup = widget.forPickup && identical(draft.pickup, initial);
     _house = TextEditingController(
       text: initial.unit.trim().isNotEmpty
           ? initial.unit
-          : (samePickup ? draft.pickupHouse : ''),
+          : (editingPickup ? draft.pickupHouse : ''),
     );
     _society = TextEditingController(
       text: initial.premises.trim().isNotEmpty
           ? initial.premises
-          : initial.landmark.trim().isNotEmpty
-              ? initial.landmark
-              : (samePickup ? draft.pickupSociety : ''),
+          : (editingPickup ? draft.pickupSociety : ''),
     );
+    _street = TextEditingController(text: initial.landmark.trim());
     _address = TextEditingController(
       text: initial.address.trim().isNotEmpty
           ? initial.address
@@ -69,6 +81,7 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
     );
     _houseFocus.addListener(() => _reveal(_houseFocus, _houseKey));
     _societyFocus.addListener(() => _reveal(_societyFocus, _societyKey));
+    _streetFocus.addListener(() => _reveal(_streetFocus, _streetKey));
     _addressFocus.addListener(() => _reveal(_addressFocus, _addressKey));
   }
 
@@ -77,9 +90,11 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
     _scroll.dispose();
     _houseFocus.dispose();
     _societyFocus.dispose();
+    _streetFocus.dispose();
     _addressFocus.dispose();
     _house.dispose();
     _society.dispose();
+    _street.dispose();
     _address.dispose();
     super.dispose();
   }
@@ -106,27 +121,26 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
       widget.initial.latitude != null && widget.initial.longitude != null;
 
   void _confirm() {
-    final String house = _house.text.trim();
-    final String building = _society.text.trim();
     final String address = _address.text.trim();
-    setState(() {
-      _addressError = address.isEmpty ? 'Enter Full Location' : null;
-    });
     if (!_hasPin || address.isEmpty) {
       return;
     }
+    final String house = _house.text.trim();
+    final String society = _society.text.trim();
+    final String street = _street.text.trim();
     Navigator.of(context).pop(
       widget.initial.copyWith(
         address: address,
         unit: house,
-        premises: building,
+        premises: society,
+        landmark: street,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool canConfirm = _hasPin;
+    final bool canConfirm = _hasPin && _address.text.trim().isNotEmpty;
     final double keyboard = MediaQuery.viewInsetsOf(context).bottom;
 
     return GlassPageScaffold(
@@ -155,7 +169,7 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
           ),
           const SizedBox(height: AppSpacing.lg),
           Text(
-            'Add the address details, then confirm this pickup or drop.',
+            'Add any house or building details, then confirm this pickup or drop.',
             style: AppTextStyles.bodyMedium.copyWith(
               color: AppColors.textSecondary,
             ),
@@ -173,7 +187,8 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
             child: GlassTextField(
               controller: _house,
               focusNode: _houseFocus,
-              hint: 'House / Flat / Floor / Office No.',
+              label: 'House No / Floor No / Block No / Office No',
+              hint: '101, Floor 3, Block B, Office 402',
               leadingIcon: Icons.home_outlined,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) => _societyFocus.requestFocus(),
@@ -185,8 +200,22 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
             child: GlassTextField(
               controller: _society,
               focusNode: _societyFocus,
-              hint: 'Building / Flat / Office Name',
+              label: 'Building Name / Society Name / Office Name',
+              hint: 'Shreyansh Tower, Shree Residency',
               leadingIcon: Icons.apartment_outlined,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) => _streetFocus.requestFocus(),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          KeyedSubtree(
+            key: _streetKey,
+            child: GlassTextField(
+              controller: _street,
+              focusNode: _streetFocus,
+              label: 'Street Name / Near Location',
+              hint: 'Satellite Road',
+              leadingIcon: Icons.signpost_outlined,
               textInputAction: TextInputAction.next,
               onSubmitted: (_) => _addressFocus.requestFocus(),
             ),
@@ -197,12 +226,12 @@ class _CompleteAddressScreenState extends ConsumerState<CompleteAddressScreen> {
             child: GlassTextField(
               controller: _address,
               focusNode: _addressFocus,
-              hint: 'Full Location',
+              label: 'Complete Address',
+              hint: 'Satellite, Ahmedabad, Gujarat',
               leadingIcon: Icons.place_outlined,
               maxLines: 3,
               textInputAction: TextInputAction.done,
-              errorText: _addressError,
-              onChanged: (_) => setState(() => _addressError = null),
+              onChanged: (_) => setState(() {}),
             ),
           ),
           SizedBox(height: keyboard > 0 ? keyboard : AppSpacing.xl),

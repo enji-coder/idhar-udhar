@@ -128,4 +128,5 @@ gradle.taskGraph.whenReady { graph ->
 
 dependencies {
     implementation "com.google.android.gms:play-services-location:21.3.0"
+    customerImplementation "com.google.android.gms:play-services-auth-api-phone:18.2.0"
 }

@@ -54,6 +54,7 @@
     intl: ^0.19.0
     logger: ^2.0.2+1
     get: ^4.7.3
+    flutter_cashfree_pg_sdk: ^2.4.0+52
 
   dev_dependencies:
     flutter_test:

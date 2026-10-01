@@ -18,7 +18,7 @@ const MONEY_FIELDS = [
   ['baseFare', 'Base fare'],
   ['perKmCharge', 'Per KM charge'],
   ['initialMinimum', 'Initial minimum'],
-  ['waitingCharge', 'Waiting charge'],
+  ['waitingChargePerMinute', 'Waiting charge'],
   ['surgeCharge', 'Surge charge'],
   ['tollCharge', 'Toll charge'],
   ['parkingCharge', 'Parking charge'],
@@ -76,6 +76,14 @@ export function issuesForVehicleCategoryForm(form, rows = []) {
   if (!Number.isFinite(company) || company < 0) issues.companyCommissionPercent = 'Company commission must be 0 or more.';
   if (Number.isFinite(rider) && Number.isFinite(company) && Math.round((rider + company) * 100) !== 10000) {
     issues.companyCommissionPercent = 'Rider percentage and company commission must add up to 100%.';
+  }
+
+  const minutesRaw = form.initialWaitingMinutes;
+  if (minutesRaw !== '' && minutesRaw != null) {
+    const minutes = Number(minutesRaw);
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1440) {
+      issues.initialWaitingMinutes = 'Free waiting must be a whole number from 0 to 1440 minutes.';
+    }
   }
 
   for (const [key, label] of MONEY_FIELDS) {

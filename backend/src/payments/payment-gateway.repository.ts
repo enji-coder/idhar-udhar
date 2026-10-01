@@ -20,6 +20,7 @@ export type GatewayAttemptRow = {
   payer_type: PayerType;
   transaction_status: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
   transaction_amount: string;
+  charge_purpose: 'BOOKING' | 'RECEIVABLE_CLEARANCE';
 };
 
 export type RefundableChargeRow = {
@@ -107,7 +108,8 @@ export class PaymentGatewayRepository {
         t.order_id,
         t.payer_type,
         t.transaction_status,
-        t.amount::text AS transaction_amount
+        t.amount::text AS transaction_amount,
+        t.charge_purpose
       FROM payment_gateway_attempts g
       JOIN payment_transactions t ON t.payment_transaction_id = g.payment_transaction_id
       WHERE g.provider = 'cashfree' AND g.gateway_order_id = $1
@@ -116,6 +118,56 @@ export class PaymentGatewayRepository {
       [gatewayOrderId],
     );
     return result.rows[0] ?? null;
+  }
+
+  /**
+   * Open receivable-clearance charges for one order, oldest first.
+   * Caller holds the order row lock, then locks these transaction rows.
+   */
+  async findPendingReceivableClearances(
+    orderId: string,
+    db: Queryable,
+  ): Promise<
+    Array<{
+      payment_transaction_id: string;
+      amount: string;
+      payment_session_id: string | null;
+      gateway_order_id: string | null;
+      environment: 'sandbox' | 'production' | null;
+      gateway_status: string | null;
+    }>
+  > {
+    const result = await db.query<{
+      payment_transaction_id: string;
+      amount: string;
+      payment_session_id: string | null;
+      gateway_order_id: string | null;
+      environment: 'sandbox' | 'production' | null;
+      gateway_status: string | null;
+    }>(
+      `
+      SELECT
+        t.payment_transaction_id,
+        t.amount::text AS amount,
+        g.payment_session_id,
+        g.gateway_order_id,
+        g.environment,
+        g.gateway_status
+      FROM payment_transactions t
+      LEFT JOIN payment_gateway_attempts g
+        ON g.payment_transaction_id = t.payment_transaction_id
+      WHERE t.order_id = $1
+        AND t.payer_type = 'CUSTOMER'
+        AND t.method = 'ONLINE'
+        AND t.direction = 'CHARGE'
+        AND t.charge_purpose = 'RECEIVABLE_CLEARANCE'
+        AND t.transaction_status = 'PENDING'
+      ORDER BY t.created_at ASC, t.payment_transaction_id ASC
+      FOR UPDATE OF t
+      `,
+      [orderId],
+    );
+    return result.rows;
   }
 
   async findByTransaction(
@@ -140,7 +192,8 @@ export class PaymentGatewayRepository {
         t.order_id,
         t.payer_type,
         t.transaction_status,
-        t.amount::text AS transaction_amount
+        t.amount::text AS transaction_amount,
+        t.charge_purpose
       FROM payment_gateway_attempts g
       JOIN payment_transactions t ON t.payment_transaction_id = g.payment_transaction_id
       WHERE g.payment_transaction_id = $1

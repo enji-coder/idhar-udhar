@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
-import 'package:idhar_udhar/customer/core/state/vehicle_fare.dart';
 import 'package:idhar_udhar/shared/api/api_config.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
@@ -14,33 +13,39 @@ class BackendQuoteHold {
     required this.orderId,
     required this.quote,
     required this.vehicleCategoryId,
-    required this.routeKey,
-    required this.packageWeightKg,
+    required this.bookingKey,
   });
 
   final String orderId;
   final ApiQuote quote;
   final String vehicleCategoryId;
-  final String routeKey;
-  final double packageWeightKg;
+
+  /// Vehicle plus pickup/drop coordinates and route distance.
+  final String bookingKey;
 }
 
-bool quoteHoldMatches(BookingDraft draft, BackendQuoteHold? hold) {
-  if (hold == null) {
-    return false;
-  }
-  final String? routeKey = draft.fareRouteKey;
-  if (routeKey == null || hold.routeKey != routeKey) {
-    return false;
-  }
-  if (hold.vehicleCategoryId != draft.vehicle?.id) {
-    return false;
-  }
-  return (hold.packageWeightKg - draft.weightKg).abs() < 0.001;
-}
+final backendQuoteHoldProvider =
+    StateProvider<BackendQuoteHold?>((ref) => null);
 
-List<ApiStop> stopsForDraft(BookingDraft draft) {
-  final MockLocation pickup = draft.pickup!;
+final orderServerViewProvider =
+    FutureProvider.autoDispose.family<ApiOrder, String>((ref, String orderId) {
+  return ref.watch(ordersApiProvider).getById(orderId);
+});
+
+/// Booking fares from POST /v1/orders/vehicle-fares, keyed by category id.
+/// Empty when the route or city is not ready. Waiting is not part of these amounts.
+final vehicleFarePreviewProvider =
+    FutureProvider.autoDispose<Map<String, String>>((Ref ref) async {
+  final BookingDraft draft = ref.watch(bookingDraftProvider);
+  if (!draft.hasRouteForCurrentStops || ApiConfig.cityId.trim().isEmpty) {
+    return const <String, String>{};
+  }
+  final MockLocation? pickup = draft.pickup;
+  final double? pickupLat = pickup?.latitude;
+  final double? pickupLng = pickup?.longitude;
+  if (pickup == null || pickupLat == null || pickupLng == null) {
+    return const <String, String>{};
+  }
   final List<ApiStop> stops = <ApiStop>[
     ApiStop(
       sequence: 0,
@@ -48,13 +53,16 @@ List<ApiStop> stopsForDraft(BookingDraft draft) {
       addressText: draft.pickupAddressText.isEmpty
           ? (pickup.address.isEmpty ? pickup.label : pickup.address)
           : draft.pickupAddressText,
-      latitude: pickup.latitude!,
-      longitude: pickup.longitude!,
+      latitude: pickupLat,
+      longitude: pickupLng,
     ),
   ];
   final List<MockLocation> drops = draft.allDrops;
   for (int i = 0; i < drops.length; i++) {
     final MockLocation drop = drops[i];
+    if (drop.latitude == null || drop.longitude == null) {
+      return const <String, String>{};
+    }
     stops.add(
       ApiStop(
         sequence: i + 1,
@@ -65,39 +73,11 @@ List<ApiStop> stopsForDraft(BookingDraft draft) {
       ),
     );
   }
-  return stops;
-}
-
-final vehicleFarePreviewProvider =
-    FutureProvider.autoDispose<VehicleFarePreview>((ref) async {
-  final String routeKey = ref.watch(
-    bookingDraftProvider.select(
-      (BookingDraft draft) => draft.fareRouteKey ?? '',
-    ),
-  );
-  if (routeKey.isEmpty) {
-    throw const ApiException(
-      code: 'INVALID_STOPS',
-      message: 'Confirm pickup and drop before choosing a vehicle.',
-    );
-  }
-  if (ApiConfig.cityId.trim().isEmpty) {
-    throw const ApiException(
-      code: 'CITY_INVALID',
-      message: 'Delivery city is not configured for this build. Set IU_CITY_ID.',
-    );
-  }
-  final BookingDraft draft = ref.read(bookingDraftProvider);
-  final Map<String, Object?> body =
-      await ref.read(ordersApiProvider).previewVehicleFares(
-            cityId: ApiConfig.cityId,
-            stops: stopsForDraft(draft),
-          );
-  return VehicleFarePreview.parse(body);
+  return ref.read(ordersApiProvider).previewVehicleFares(
+        cityId: ApiConfig.cityId,
+        stops: stops,
+      );
 });
-
-final backendQuoteHoldProvider =
-    StateProvider<BackendQuoteHold?>((ref) => null);
 
 Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
   final BookingDraft draft = ref.read(bookingDraftProvider);
@@ -109,15 +89,10 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
     );
   }
   final BackendQuoteHold? existing = ref.read(backendQuoteHoldProvider);
-  if (quoteHoldMatches(draft, existing)) {
-    return existing!;
-  }
-  final String? routeKey = draft.fareRouteKey;
-  if (routeKey == null) {
-    throw const ApiException(
-      code: 'INVALID_STOPS',
-      message: 'Confirm pickup and drop before booking.',
-    );
+  if (existing != null &&
+      existing.vehicleCategoryId == vehicleCategoryId &&
+      existing.bookingKey == draft.quoteBookingKey) {
+    return existing;
   }
   if (ApiConfig.cityId.trim().isEmpty) {
     throw const ApiException(
@@ -136,21 +111,41 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
       message: 'Pickup needs a map pin before booking.',
     );
   }
+  final List<ApiStop> stops = <ApiStop>[
+    ApiStop(
+      sequence: 0,
+      stopType: 'PICKUP',
+      addressText: draft.pickupAddressText.isEmpty
+          ? (pickup.address.isEmpty ? pickup.label : pickup.address)
+          : draft.pickupAddressText,
+      latitude: pickup.latitude!,
+      longitude: pickup.longitude!,
+    ),
+  ];
   final List<MockLocation> drops = draft.allDrops;
-  for (final MockLocation drop in drops) {
+  for (int i = 0; i < drops.length; i++) {
+    final MockLocation drop = drops[i];
     if (drop.latitude == null || drop.longitude == null) {
       throw const ApiException(
         code: 'INVALID_COORDINATES',
         message: 'Each drop needs a map pin before booking.',
       );
     }
+    stops.add(
+      ApiStop(
+        sequence: i + 1,
+        stopType: 'DROP',
+        addressText: draft.locationAddress(drop),
+        latitude: drop.latitude!,
+        longitude: drop.longitude!,
+      ),
+    );
   }
   final OrdersApi api = ref.read(ordersApiProvider);
   final ApiOrder created = await api.create(
     cityId: ApiConfig.cityId,
     vehicleCategoryId: vehicleCategoryId,
-    stops: stopsForDraft(draft),
-    packageWeightKg: draft.weightKg,
+    stops: stops,
     idempotencyKey: const Uuid().v4(),
   );
   final ApiQuote quote = await api.quote(created.orderId);
@@ -158,8 +153,7 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
     orderId: created.orderId,
     quote: quote,
     vehicleCategoryId: vehicleCategoryId,
-    routeKey: routeKey,
-    packageWeightKg: draft.weightKg,
+    bookingKey: draft.quoteBookingKey,
   );
   ref.read(backendQuoteHoldProvider.notifier).state = hold;
   ref.read(bookingDraftProvider.notifier).applyQuotedPayable(quote.netPayable);

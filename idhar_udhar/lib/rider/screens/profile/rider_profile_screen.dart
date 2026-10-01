@@ -7,9 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
-import '../../../shared/api/api_providers.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
-import '../../data/models/rider_language.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -21,7 +19,7 @@ import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_section_header.dart';
 import '../../widgets/rider_text_field.dart';
 
-class RiderProfileScreen extends ConsumerStatefulWidget {
+class RiderProfileScreen extends ConsumerWidget {
   const RiderProfileScreen({
     super.key,
     this.showAppBar = true,
@@ -30,34 +28,7 @@ class RiderProfileScreen extends ConsumerStatefulWidget {
   final bool showAppBar;
 
   @override
-  ConsumerState<RiderProfileScreen> createState() => _RiderProfileScreenState();
-}
-
-class _RiderProfileScreenState extends ConsumerState<RiderProfileScreen> {
-  @override
-  void initState() {
-    super.initState();
-    Future<void>.microtask(_loadServerProfile);
-  }
-
-  Future<void> _loadServerProfile() async {
-    try {
-      final api = ref.read(profilesApiProvider);
-      final server = await api.rider();
-      String? photoUrl;
-      if (server.hasProfilePicture) {
-        photoUrl = (await api.riderProfilePicture()).downloadUrl;
-      }
-      final current = ref.read(riderProfileStateProvider);
-      ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
-        language: riderLanguageLabel(server.preferredLanguage),
-        photoUrl: photoUrl ?? current.photoUrl,
-      );
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(riderProfileStateProvider);
     final String displayName =
         profile.name.trim().isEmpty ? 'Rider' : profile.name;
@@ -67,21 +38,19 @@ class _RiderProfileScreenState extends ConsumerState<RiderProfileScreen> {
     String show(String value) => value.trim().isEmpty ? '—' : value;
 
     final body = SingleChildScrollView(
-      padding: widget.showAppBar
+      padding: showAppBar
           ? EdgeInsets.zero
           : const EdgeInsets.all(RiderSpacing.screenH),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!widget.showAppBar) ...[
+          if (!showAppBar) ...[
             Text('Profile', style: RiderTextStyles.heading),
             const SizedBox(height: RiderSpacing.xl),
           ],
           RiderGlassCard(
             child: Column(
               children: [
-                RiderProfileAvatar(photoUrl: profile.photoUrl, radius: 40),
-                const SizedBox(height: RiderSpacing.md),
                 const _RiderPersonaVisual(),
                 const SizedBox(height: RiderSpacing.md),
                 Text(
@@ -119,7 +88,7 @@ class _RiderProfileScreenState extends ConsumerState<RiderProfileScreen> {
               _RowData('Mobile', show(profile.mobile)),
               _RowData('Email', show(profile.email)),
               _RowData('Date of birth', dob),
-              _RowData('Language', show(riderLanguageLabel(profile.language))),
+              _RowData('Language', show(profile.language)),
             ],
           ),
           const SizedBox(height: RiderSpacing.xl),
@@ -127,7 +96,7 @@ class _RiderProfileScreenState extends ConsumerState<RiderProfileScreen> {
       ),
     );
 
-    if (!widget.showAppBar) return body;
+    if (!showAppBar) return body;
 
     return RiderScaffold(
       appBar: AppBar(
@@ -292,9 +261,7 @@ class _EditProfileSheet extends ConsumerStatefulWidget {
 class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
   late final TextEditingController _name;
   String? _photoUrl;
-  String? _language;
   String? _nameError;
-  bool _saving = false;
 
   @override
   void initState() {
@@ -302,8 +269,6 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
     final profile = ref.read(riderProfileStateProvider);
     _name = TextEditingController(text: profile.name);
     _photoUrl = profile.photoUrl;
-    final String language = riderLanguageLabel(profile.language);
-    _language = language.isEmpty ? null : language;
   }
 
   @override
@@ -338,59 +303,30 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
     setState(() => _photoUrl = photo.path);
   }
 
-  Future<void> _save() async {
+  void _save() {
     final name = _name.text.trim();
     if (name.length < 2) {
       setState(() => _nameError = 'Enter your name');
       return;
     }
-    if (_saving) return;
-    setState(() => _saving = true);
-    try {
-      final api = ref.read(profilesApiProvider);
-      String? photo = _photoUrl;
-      final String? localPhoto = _photoUrl;
-      if (localPhoto != null &&
-          localPhoto.isNotEmpty &&
-          !localPhoto.startsWith('http')) {
-        photo = (await api.uploadRiderProfilePicture(localPhoto)).downloadUrl;
-      }
-      final String? languageCode = riderLanguageCode(_language);
-      if (languageCode != null) {
-        await api.updateRiderLanguage(languageCode);
-      }
-      final current = ref.read(riderProfileStateProvider);
-      ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
-        name: name,
-        photoUrl: photo,
-        language: languageCode != null
-            ? riderLanguageLabel(languageCode)
-            : current.language,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          backgroundColor: RiderColors.secondary,
-          content: Text(
-            'Profile updated',
-            style: RiderTextStyles.bodyMedium.copyWith(
-              color: RiderColors.textOnPrimary,
-            ),
+    final current = ref.read(riderProfileStateProvider);
+    ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
+      name: name,
+      photoUrl: _photoUrl,
+    );
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: RiderColors.secondary,
+        content: Text(
+          'Name updated',
+          style: RiderTextStyles.bodyMedium.copyWith(
+            color: RiderColors.textOnPrimary,
           ),
         ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text('Could not save profile'),
-        ),
-      );
-    }
+      ),
+    );
   }
 
   @override
@@ -475,30 +411,10 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
                         }
                       },
                     ),
-                    const SizedBox(height: RiderSpacing.lg),
-                    DropdownButtonFormField<String>(
-                      initialValue: _language,
-                      decoration: const InputDecoration(
-                        labelText: 'Preferred language',
-                        prefixIcon: Icon(Icons.language_rounded),
-                      ),
-                      items: riderLanguageOptions
-                          .map(
-                            (RiderLanguageOption option) =>
-                                DropdownMenuItem<String>(
-                              value: option.label,
-                              child: Text(option.label),
-                            ),
-                          )
-                          .toList(growable: false),
-                      onChanged: _saving
-                          ? null
-                          : (String? value) => setState(() => _language = value),
-                    ),
                     const SizedBox(height: RiderSpacing.xl),
                     RiderPrimaryButton(
-                      label: _saving ? 'Saving' : 'Save',
-                      onPressed: _saving ? null : _save,
+                      label: 'Save',
+                      onPressed: _save,
                     ),
                   ],
                 ),

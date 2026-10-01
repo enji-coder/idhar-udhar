@@ -8,7 +8,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { AppLogger } from '../common/logger/app-logger';
-import { ObjectStorage, PutObjectInput } from './object-storage';
+import { ObjectStorage, PutObjectInput, SignedGetOptions } from './object-storage';
 
 export type S3StorageOptions = {
   bucket: string;
@@ -26,6 +26,37 @@ export type SignGetUrl = (
 
 const UNAVAILABLE =
   'Document storage is unavailable. Try again shortly.';
+
+const SIGNED_CONTENT_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+]);
+
+function signedHeaders(
+  downloadFileName: string | undefined,
+  options?: SignedGetOptions,
+): { ResponseContentDisposition?: string; ResponseContentType?: string } {
+  const disposition = options?.disposition === 'inline' ? 'inline' : 'attachment';
+  const safeName = downloadFileName?.replace(/["\r\n\\]/g, '');
+  let responseContentDisposition: string | undefined;
+  if (disposition === 'inline') {
+    responseContentDisposition = safeName
+      ? `inline; filename="${safeName}"`
+      : 'inline';
+  } else if (safeName) {
+    responseContentDisposition = `attachment; filename="${safeName}"`;
+  }
+  const contentType = options?.contentType;
+  const responseContentType =
+    contentType && SIGNED_CONTENT_TYPES.has(contentType) ? contentType : undefined;
+  return {
+    ...(responseContentDisposition
+      ? { ResponseContentDisposition: responseContentDisposition }
+      : {}),
+    ...(responseContentType ? { ResponseContentType: responseContentType } : {}),
+  };
+}
 
 export class S3ObjectStorage implements ObjectStorage {
   constructor(
@@ -76,8 +107,10 @@ export class S3ObjectStorage implements ObjectStorage {
   async getSignedGetUrl(
     key: string,
     downloadFileName?: string,
+    options?: SignedGetOptions,
   ): Promise<{ url: string; expiresInSeconds: number }> {
     const expiresIn = this.options.signedUrlTtlSeconds;
+    const headers = signedHeaders(downloadFileName, options);
     try {
       const url = await this.sign(
         this.client,
@@ -85,9 +118,7 @@ export class S3ObjectStorage implements ObjectStorage {
           Bucket: this.options.bucket,
           Key: key,
           ResponseCacheControl: 'private, no-store',
-          ResponseContentDisposition: downloadFileName
-            ? `attachment; filename="${downloadFileName}"`
-            : undefined,
+          ...headers,
         }),
         { expiresIn },
       );

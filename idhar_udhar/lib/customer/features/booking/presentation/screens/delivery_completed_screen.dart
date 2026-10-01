@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/orders_api.dart';
+
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
+import '../widgets/waiting_charge_prompt.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/glass_container.dart';
@@ -17,6 +21,10 @@ class DeliveryCompletedScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final order = ref.watch(bookingDraftProvider).activeOrder;
+    final String? serverId = order?.backendOrderId;
+    final ApiOrder? serverOrder = serverId == null
+        ? null
+        : ref.watch(orderServerViewProvider(serverId)).asData?.value;
     final profileEmail = ref.watch(sessionProvider).user?.email.trim() ?? '';
     final invoiceEmail =
         (order?.invoiceEmail.isNotEmpty == true)
@@ -40,6 +48,7 @@ class DeliveryCompletedScreen extends ConsumerWidget {
             label: 'Back to Home',
             onPressed: () {
               ref.read(bookingDraftProvider.notifier).reset();
+              ref.read(backendQuoteHoldProvider.notifier).state = null;
               context.go(AppRoutes.home);
             },
           ),
@@ -68,6 +77,11 @@ class DeliveryCompletedScreen extends ConsumerWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppSpacing.xl),
+          if (serverId != null && (serverOrder?.receivableOutstanding ?? 0) > 0)
+            WaitingChargePrompt(
+              orderId: serverId,
+              outstanding: serverOrder!.receivableOutstanding!,
+            ),
           GlassContainer(
             hero: true,
             showAmbientGlow: true,

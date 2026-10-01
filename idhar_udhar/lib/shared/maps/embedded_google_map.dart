@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -40,6 +42,9 @@ class EmbeddedGoogleMap extends StatefulWidget {
     this.onCameraIdle,
     this.onMyLocation,
     this.onMapTap,
+    this.fitRouteOnce = false,
+    this.deferFitUntilRoute = false,
+    this.expanded = false,
   });
 
   final double height;
@@ -55,6 +60,17 @@ class EmbeddedGoogleMap extends StatefulWidget {
   final ValueChanged<GeoPoint>? onCameraIdle;
   final VoidCallback? onMyLocation;
   final ValueChanged<GeoPoint>? onMapTap;
+
+  /// Frames pickup and drop immediately, then fits the route once.
+  /// Later rebuilds with the same coordinates do not move the camera.
+  final bool fitRouteOnce;
+
+  /// Fit the camera once, after a route exists. Marker-only rebuilds do not
+  /// move the camera.
+  final bool deferFitUntilRoute;
+
+  /// Fill the parent. [height] is ignored.
+  final bool expanded;
 
   @override
   State<EmbeddedGoogleMap> createState() => _EmbeddedGoogleMapState();
@@ -79,10 +95,38 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     super.dispose();
   }
 
-  CameraPosition get _initialCamera => CameraPosition(
-        target: LatLng(widget.initial.latitude, widget.initial.longitude),
-        zoom: 15.2,
+  CameraPosition get _initialCamera {
+    final List<GeoPoint> framed = widget.markers
+        .map((MapMarkerSpec spec) => spec.point)
+        .toList(growable: false);
+    if (framed.length < 2) {
+      final GeoPoint point = framed.isEmpty ? widget.initial : framed.first;
+      return CameraPosition(
+        target: LatLng(point.latitude, point.longitude),
+        zoom: 15,
       );
+    }
+    double minLat = framed.first.latitude;
+    double maxLat = framed.first.latitude;
+    double minLng = framed.first.longitude;
+    double maxLng = framed.first.longitude;
+    for (final GeoPoint point in framed) {
+      minLat = math.min(minLat, point.latitude);
+      maxLat = math.max(maxLat, point.latitude);
+      minLng = math.min(minLng, point.longitude);
+      maxLng = math.max(maxLng, point.longitude);
+    }
+    final double span = math.max(maxLat - minLat, maxLng - minLng);
+    final double zoom = span <= 0
+        ? 14
+        : (math.log(360 / math.max(span, 0.002)) / math.ln2 - 1.4)
+            .clamp(11, 15)
+            .toDouble();
+    return CameraPosition(
+      target: LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2),
+      zoom: zoom,
+    );
+  }
 
   Set<Marker> get _markers {
     return widget.markers.map((MapMarkerSpec spec) {
@@ -118,6 +162,9 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     if (controller == null || !mounted) {
       return;
     }
+    if (widget.deferFitUntilRoute && widget.route.length < 2) {
+      return;
+    }
     if (widget.follow) {
       final String key =
           '${widget.initial.latitude.toStringAsFixed(5)},${widget.initial.longitude.toStringAsFixed(5)}';
@@ -131,6 +178,9 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
         );
         _movingProgrammatically = false;
       }
+      return;
+    }
+    if (widget.fitRouteOnce && widget.route.length < 2) {
       return;
     }
     final List<LatLng> fit = <LatLng>[
@@ -156,9 +206,14 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     }
     _lastFitKey = key;
     _movingProgrammatically = true;
-    await controller.animateCamera(
-      CameraUpdate.newLatLngBounds(_boundsOf(fit), 36),
-    );
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngBounds(_boundsOf(fit), 36),
+      );
+    } catch (_) {
+      // The map view is not ready for a bounds fit yet. The opening camera
+      // already frames the stops, and the same coordinates are not fitted again.
+    }
     _movingProgrammatically = false;
   }
 
@@ -198,7 +253,7 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
       child: ClipRRect(
         borderRadius: radius,
         child: SizedBox(
-          height: widget.height,
+          height: widget.expanded ? double.infinity : widget.height,
           width: double.infinity,
           child: Stack(
             children: [

@@ -1,23 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:idhar_udhar/shared/api/api_exception.dart';
 
+import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
+import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../../../core/constants/app_copy.dart';
 import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
-import '../../../../core/state/vehicle_fare.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 
-VehicleType _typeForVehicle(String vehicle) {
-  switch (vehicle) {
+/// Family from the admin `vehicle_type`, then from the category name.
+ServiceFamily? serviceFamilyForCategory(VehicleCategory category) {
+  switch ((category.vehicleTypeCode ?? '').toLowerCase()) {
+    case 'two_wheeler':
+      return ServiceFamily.twoWheeler;
+    case 'three_wheeler':
+      return ServiceFamily.threeWheeler;
+    case 'truck':
+      return ServiceFamily.truck;
+  }
+  final String name = category.name.toLowerCase();
+  if (name.contains('scoot') ||
+      name.contains('bike') ||
+      name.contains('2 wheeler') ||
+      name.contains('2-wheeler') ||
+      name.contains('two wheeler')) {
+    return ServiceFamily.twoWheeler;
+  }
+  if (name.contains('auto') ||
+      name.contains('riksha') ||
+      name.contains('rikshaw') ||
+      name.contains('3 wheeler') ||
+      name.contains('3-wheeler') ||
+      name.contains('three wheeler')) {
+    return ServiceFamily.threeWheeler;
+  }
+  if (name.contains('truck') || name.contains('tempo')) {
+    return ServiceFamily.truck;
+  }
+  return null;
+}
+
+VehicleType vehicleTypeForCategory(VehicleCategory category) {
+  switch ((category.vehicleCode ?? '').toLowerCase()) {
     case 'bike':
       return VehicleType.bike;
     case 'scooty':
@@ -30,22 +62,77 @@ VehicleType _typeForVehicle(String vehicle) {
       return VehicleType.pickup;
     case 'truck':
       return VehicleType.truck;
-    default:
-      return VehicleType.truck;
   }
+  final String name = category.name.toLowerCase();
+  if (name.contains('scoot')) {
+    return VehicleType.scooty;
+  }
+  if (name.contains('bike')) {
+    return VehicleType.bike;
+  }
+  if (name.contains('auto') || name.contains('rik')) {
+    return VehicleType.auto;
+  }
+  final ServiceFamily? family = serviceFamilyForCategory(category);
+  if (family == ServiceFamily.threeWheeler) {
+    return VehicleType.auto;
+  }
+  if (family == ServiceFamily.twoWheeler) {
+    return VehicleType.bike;
+  }
+  return VehicleType.truck;
 }
 
-MockVehicle _mockVehicle(VehicleFareOption option) {
-  final VehicleType type = _typeForVehicle(option.vehicle);
-  final String size = (option.size ?? '').trim();
+List<MockVehicle> vehiclesForBookingFamily(
+  List<MockVehicle> vehicles,
+  ServiceFamily? family,
+) {
+  if (family == null) {
+    return vehicles;
+  }
+  return vehicles
+      .where((MockVehicle vehicle) {
+        if (vehicle.serviceFamily != null) {
+          return vehicle.serviceFamily == family;
+        }
+        switch (family) {
+          case ServiceFamily.twoWheeler:
+            return vehicle.type == VehicleType.bike ||
+                vehicle.type == VehicleType.scooty;
+          case ServiceFamily.threeWheeler:
+            return vehicle.type == VehicleType.auto;
+          case ServiceFamily.truck:
+            return vehicle.type == VehicleType.truck ||
+                vehicle.type == VehicleType.pickup ||
+                vehicle.type == VehicleType.car;
+        }
+      })
+      .toList(growable: false);
+}
+
+MockVehicle customerVehicleFromCategory(VehicleCategory category) {
+  final VehicleType type = vehicleTypeForCategory(category);
   return MockVehicle(
-    id: option.vehicleCategoryId,
+    id: category.id,
     type: type,
-    name: option.name,
-    description: size.isEmpty ? 'Available for deliveries' : size,
-    capacity: option.capacityLabel,
+    name: category.name,
+    description: (category.size ?? '').trim().isEmpty
+        ? 'Available for deliveries'
+        : category.size!.trim(),
+    capacity: (category.weightCapacity ?? '').trim().isEmpty
+        ? 'Capacity set by admin'
+        : category.weightCapacity!.trim(),
     etaMinutes: 0,
-    baseFare: option.tripFare,
+    baseFare: category.baseFare,
+    perKm: category.perKm,
+    initialMinimum: category.initialMinimum,
+    configuredWaiting: category.waiting,
+    initialWaitingMinutes: category.initialWaitingMinutes,
+    waitingPerMinute: category.waitingPerMinute,
+    surge: category.surge,
+    toll: category.toll,
+    parking: category.parking,
+    serviceFamily: serviceFamilyForCategory(category),
     imagePath: MockData.artworkFor(type),
   );
 }
@@ -55,27 +142,26 @@ class VehicleSelectionScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final preview = ref.watch(vehicleFarePreviewProvider);
+    final catalog = ref.watch(vehicleCategoryCatalogProvider);
     final draft = ref.watch(bookingDraftProvider);
-    final bool calculating = preview.isLoading;
-    final VehicleFareSelection selection = VehicleFareSelection(
-      calculating: calculating,
-      options: preview.asData?.value.vehicles ?? const <VehicleFareOption>[],
-      selectedId: draft.vehicle?.id,
-      family: draft.serviceFamily,
-      packageWeightKg: draft.weightKg,
+    final AsyncValue<Map<String, String>> farePreview =
+        ref.watch(vehicleFarePreviewProvider);
+    final List<MockVehicle> options = catalog.maybeWhen(
+      data: (rows) => vehiclesForBookingFamily(
+        rows.map(customerVehicleFromCategory).toList(growable: false),
+        draft.serviceFamily,
+      ),
+      orElse: () => const <MockVehicle>[],
     );
-    final List<VehicleFareOption> options = selection.visible;
-    final bool showTwoWheelerNote = options.any(
-      (VehicleFareOption option) =>
-          option.vehicle == 'bike' || option.vehicle == 'scooty',
-    );
+    final bool showTwoWheelerNote = options.any(MockData.isTwoWheeler) &&
+        (draft.serviceFamily == ServiceFamily.twoWheeler ||
+            draft.serviceFamily == null);
 
     return GlassPageScaffold(
       bottom: AnimatedPrimaryButton(
         label: 'Continue',
-        enabled: selection.canContinueSelection,
-        onPressed: () => context.push(AppRoutes.bookPackage),
+        enabled: draft.vehicle != null,
+        onPressed: () => context.push(AppRoutes.bookPickup),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -113,11 +199,7 @@ class VehicleSelectionScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            calculating
-                ? 'Calculating fare for this route...'
-                : preview.asData == null
-                    ? AppCopy.estimatedPrice
-                    : 'Estimated distance ${preview.requireValue.distanceLabel}',
+            AppCopy.estimatedPrice,
             style: AppTextStyles.caption.copyWith(
               color: AppColors.textSecondary,
             ),
@@ -149,144 +231,165 @@ class VehicleSelectionScreen extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.lg),
-          Expanded(child: _body(context, ref, preview, selection, options, draft)),
-        ],
-      ),
-    );
-  }
-
-  Widget _body(
-    BuildContext context,
-    WidgetRef ref,
-    AsyncValue<VehicleFarePreview> preview,
-    VehicleFareSelection selection,
-    List<VehicleFareOption> options,
-    BookingDraft draft,
-  ) {
-    if (selection.calculating) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: AppSpacing.md),
-            Text('Calculating fare for this route...'),
-          ],
-        ),
-      );
-    }
-    if (preview.hasError) {
-      final Object error = preview.error!;
-      final String message = error is ApiException
-          ? error.message
-          : 'Vehicle fares could not be loaded.';
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              style: AppTextStyles.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-            TextButton(
-              onPressed: () => ref.invalidate(vehicleFarePreviewProvider),
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
-    if (options.isEmpty) {
-      return Center(
-        child: Text(
-          'No vehicles are currently available for this route.',
-          style: AppTextStyles.bodyMedium,
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-    return ListView.separated(
-      itemCount: options.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
-      itemBuilder: (context, index) {
-        final VehicleFareOption option = options[index];
-        final MockVehicle vehicle = _mockVehicle(option);
-        final bool selected = draft.vehicle?.id == option.vehicleCategoryId;
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: AppRadius.xlAll,
-            onTap: () {
-              if (draft.vehicle?.id != option.vehicleCategoryId) {
-                ref.read(backendQuoteHoldProvider.notifier).state = null;
-              }
-              ref.read(bookingDraftProvider.notifier).setVehicle(vehicle);
-            },
-            child: GlassContainer(
-              hero: selected,
-              showAmbientGlow: selected,
-              ambientColor: AppColors.orange,
-              depth: selected ? GlassDepthLevel.hero : GlassDepthLevel.normal,
-              borderColor: selected ? AppColors.orange : AppColors.borderGlass,
-              child: Row(
-                children: [
-                  AmbientGlow(
-                    diameter: 100,
-                    opacity: selected ? 0.28 : 0.12,
-                    child: SafeAssetImage(
-                      path: vehicle.imagePath,
-                      width: 88,
-                      height: 72,
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
+          Expanded(
+            child: catalog.isLoading
+                ? const Center(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(option.name, style: AppTextStyles.headingS),
-                        Text(
-                          vehicle.description,
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          option.capacityLabel,
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.navy,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        CircularProgressIndicator(),
+                        SizedBox(height: AppSpacing.md),
+                        Text('Loading available vehicles...'),
                       ],
                     ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        selection.fareLabelFor(option.vehicleCategoryId),
-                        style: AppTextStyles.headingS.copyWith(
-                          color: AppColors.orange,
+                  )
+                : catalog.hasError
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Vehicle categories could not be loaded.',
+                              style: AppTextStyles.bodyMedium,
+                              textAlign: TextAlign.center,
+                            ),
+                            TextButton(
+                              onPressed: () => ref.invalidate(
+                                vehicleCategoryCatalogProvider,
+                              ),
+                              child: const Text('Retry'),
+                            ),
+                          ],
                         ),
+                      )
+                    : options.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No vehicle categories are currently available.',
+                              style: AppTextStyles.bodyMedium,
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : ListView.separated(
+              itemCount: options.length,
+              separatorBuilder: (_, __) =>
+                  const SizedBox(height: AppSpacing.md),
+              itemBuilder: (context, index) {
+                final v = options[index];
+                final selected = draft.vehicle?.id == v.id;
+                final String? serverFare = farePreview.asData?.value[v.id];
+                final String priceLabel = serverFare != null &&
+                        serverFare.isNotEmpty
+                    ? '₹$serverFare'
+                    : farePreview.hasError && draft.hasRouteForCurrentStops
+                        ? 'Fare unavailable'
+                        : draft.hasRouteForCurrentStops
+                            ? 'Fare after route'
+                            : 'Fare calculated after pickup & drop';
+                final String waitingNote = v.waitingPerMinute > 0
+                    ? 'Waiting: ₹${v.waitingPerMinute.toStringAsFixed(v.waitingPerMinute == v.waitingPerMinute.roundToDouble() ? 0 : 2)}/min after ${v.initialWaitingMinutes} min'
+                    : '';
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: AppRadius.xlAll,
+                    onTap: () =>
+                        ref.read(bookingDraftProvider.notifier).setVehicle(v),
+                    child: GlassContainer(
+                      hero: selected,
+                      showAmbientGlow: selected,
+                      ambientColor: AppColors.orange,
+                      depth: selected
+                          ? GlassDepthLevel.hero
+                          : GlassDepthLevel.normal,
+                      borderColor:
+                          selected ? AppColors.orange : AppColors.borderGlass,
+                      child: Row(
+                        children: [
+                          AmbientGlow(
+                            diameter: 100,
+                            opacity: selected ? 0.28 : 0.12,
+                            child: SafeAssetImage(
+                              path: v.imagePath,
+                              width: 88,
+                              height: 72,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(v.name, style: AppTextStyles.headingS),
+                                Text(
+                                  v.description,
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(height: AppSpacing.xs),
+                                Text(
+                                  v.etaMinutes > 0
+                                      ? '${v.capacity} · ${v.etaMinutes} min'
+                                      : v.capacity,
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (MockData.isTwoWheeler(v)) ...[
+                                  const SizedBox(height: AppSpacing.xs),
+                                  Text(
+                                    AppCopy.bikeScootyParcelLimit,
+                                    style: AppTextStyles.caption.copyWith(
+                                      color: AppColors.orange,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                priceLabel,
+                                textAlign: TextAlign.end,
+                                style: AppTextStyles.caption.copyWith(
+                                  color: AppColors.orange,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (waitingNote.isNotEmpty)
+                                Text(
+                                  waitingNote,
+                                  textAlign: TextAlign.end,
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              if (selected)
+                                const Icon(
+                                  Icons.check_circle,
+                                  color: AppColors.orange,
+                                  size: 22,
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
-                      if (selected)
-                        const Icon(
-                          Icons.check_circle,
-                          color: AppColors.orange,
-                          size: 22,
-                        ),
-                    ],
+                    ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 }

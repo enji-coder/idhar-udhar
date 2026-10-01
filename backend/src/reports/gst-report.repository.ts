@@ -236,6 +236,7 @@ export class GstReportRepository {
             COALESCE(bool_or(t.method = 'ONLINE' AND t.transaction_status = 'PAID'), FALSE) AS has_online_paid
           FROM payment_transactions t
           WHERE t.order_id = b.order_id
+            AND t.charge_purpose = 'BOOKING'
         ) pay ON TRUE
       ),
       scoped AS (

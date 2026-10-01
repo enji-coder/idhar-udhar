@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
@@ -150,6 +151,7 @@ class RiderAssignedScreen extends ConsumerWidget {
       ref.read(sessionProvider.notifier).updateOrder(cancelled);
     }
     ref.read(bookingDraftProvider.notifier).reset();
+    ref.read(backendQuoteHoldProvider.notifier).state = null;
     if (context.mounted) context.go(AppRoutes.home);
   }
 

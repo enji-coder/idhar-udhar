@@ -23,6 +23,8 @@ function quote(overrides: Partial<FareQuoteRow> = {}): FareQuoteRow {
     surge: '0.00',
     toll: '0.00',
     parking: '0.00',
+    initial_waiting_minutes: 0,
+    waiting_charge_per_minute: '0.00',
     trip_fare: '220.00',
     discount: '0.00',
     rounding: '0.00',

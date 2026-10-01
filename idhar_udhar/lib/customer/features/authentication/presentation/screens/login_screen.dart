@@ -13,6 +13,7 @@ import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
+import '../../otp_autofill.dart';
 
 /// Phone-only login — mobile number → OTP (dummy auth).
 class LoginScreen extends ConsumerStatefulWidget {
@@ -117,9 +118,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     final String phone = _phoneController.text.trim();
     ref.read(sessionProvider.notifier).startLogin(phone);
+    // Consent is optional. A failure must not block sending or typing the OTP.
+    await CustomerOtpAutofill.arm();
     try {
       await ref.read(sessionProvider.notifier).requestOtp();
     } catch (error) {
+      await CustomerOtpAutofill.stop();
       if (!mounted) {
         return;
       }

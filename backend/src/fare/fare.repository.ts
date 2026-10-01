@@ -19,6 +19,8 @@ export type FareQuoteRow = {
   surge: string;
   toll: string;
   parking: string;
+  initial_waiting_minutes: number;
+  waiting_charge_per_minute: string;
   trip_fare: string;
   discount: string;
   rounding: string;
@@ -46,6 +48,8 @@ export type FareSnapshotRow = {
   surge: string;
   toll: string;
   parking: string;
+  initial_waiting_minutes: number;
+  waiting_charge_per_minute: string;
   trip_fare: string;
   discount: string;
   rounding: string;
@@ -61,7 +65,7 @@ export type FareSnapshotRow = {
 const TRIP_FARE_SQL = `GREATEST(
   initial_minimum,
   ROUND(
-    base_fare + distance_charge + waiting + surge + toll + parking,
+    base_fare + distance_charge + surge + toll + parking,
     2
   )
 )`;
@@ -81,6 +85,8 @@ const QUOTE_COLUMNS = `
   surge::text AS surge,
   toll::text AS toll,
   parking::text AS parking,
+  initial_waiting_minutes,
+  waiting_charge_per_minute::text AS waiting_charge_per_minute,
   trip_fare::text AS trip_fare,
   discount::text AS discount,
   rounding::text AS rounding,
@@ -120,6 +126,8 @@ export class FareRepository {
           r.surge,
           r.toll,
           r.parking,
+          r.initial_waiting_minutes,
+          r.waiting_charge_per_minute,
           r.rider_percentage,
           r.company_commission_percentage
         FROM fare_config_versions v
@@ -140,6 +148,8 @@ export class FareRepository {
           surge,
           toll,
           parking,
+          initial_waiting_minutes,
+          waiting_charge_per_minute,
           rider_percentage,
           company_commission_percentage,
           ${TRIP_FARE_SQL} AS trip_fare
@@ -159,6 +169,8 @@ export class FareRepository {
         surge,
         toll,
         parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute,
         trip_fare,
         discount,
         rounding,
@@ -182,6 +194,8 @@ export class FareRepository {
         surge,
         toll,
         parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute,
         trip_fare,
         0,
         ROUND(trip_fare, 2) - trip_fare,
@@ -244,6 +258,8 @@ export class FareRepository {
         surge,
         toll,
         parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute,
         trip_fare,
         discount,
         rounding,
@@ -268,6 +284,8 @@ export class FareRepository {
         surge,
         toll,
         parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute,
         trip_fare,
         discount,
         rounding,
@@ -294,6 +312,8 @@ export class FareRepository {
         surge::text AS surge,
         toll::text AS toll,
         parking::text AS parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute::text AS waiting_charge_per_minute,
         trip_fare::text AS trip_fare,
         discount::text AS discount,
         rounding::text AS rounding,
@@ -332,6 +352,8 @@ export class FareRepository {
         surge::text AS surge,
         toll::text AS toll,
         parking::text AS parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute::text AS waiting_charge_per_minute,
         trip_fare::text AS trip_fare,
         discount::text AS discount,
         rounding::text AS rounding,
@@ -373,6 +395,8 @@ export class FareRepository {
       surge: string;
       toll: string;
       parking: string;
+      initial_waiting_minutes: number;
+      waiting_charge_per_minute: string;
       trip_fare: string;
       discount: string;
       rounding: string;
@@ -395,6 +419,8 @@ export class FareRepository {
       surge: string;
       toll: string;
       parking: string;
+      initial_waiting_minutes: number;
+      waiting_charge_per_minute: string;
       trip_fare: string;
       discount: string;
       rounding: string;
@@ -418,7 +444,9 @@ export class FareRepository {
           r.waiting,
           r.surge,
           r.toll,
-          r.parking
+          r.parking,
+          r.initial_waiting_minutes,
+          r.waiting_charge_per_minute
         FROM vehicle_categories c
         JOIN fare_config_versions v
           ON v.status = 'ACTIVE'
@@ -446,6 +474,8 @@ export class FareRepository {
           surge,
           toll,
           parking,
+          initial_waiting_minutes,
+          waiting_charge_per_minute,
           ${TRIP_FARE_SQL} AS trip_fare
         FROM rates
       )
@@ -464,6 +494,8 @@ export class FareRepository {
         surge::money_inr::text AS surge,
         toll::money_inr::text AS toll,
         parking::money_inr::text AS parking,
+        initial_waiting_minutes,
+        waiting_charge_per_minute::text AS waiting_charge_per_minute,
         trip_fare::money_inr::text AS trip_fare,
         '0.00'::text AS discount,
         (ROUND(trip_fare, 2) - trip_fare)::money_inr::text AS rounding,
@@ -526,6 +558,8 @@ export function serializeQuote(row: FareQuoteRow) {
     surge: formatInr(row.surge),
     toll: formatInr(row.toll),
     parking: formatInr(row.parking),
+    initial_waiting_minutes: row.initial_waiting_minutes ?? 0,
+    waiting_charge_per_minute: formatInr(row.waiting_charge_per_minute ?? '0'),
     trip_fare: formatInr(row.trip_fare),
     discount: formatInr(row.discount),
     rounding: formatInr(row.rounding),
@@ -553,6 +587,8 @@ export function serializeSnapshot(row: FareSnapshotRow) {
     surge: formatInr(row.surge),
     toll: formatInr(row.toll),
     parking: formatInr(row.parking),
+    initial_waiting_minutes: row.initial_waiting_minutes ?? 0,
+    waiting_charge_per_minute: formatInr(row.waiting_charge_per_minute ?? '0'),
     trip_fare: formatInr(row.trip_fare),
     discount: formatInr(row.discount),
     rounding: formatInr(row.rounding),
