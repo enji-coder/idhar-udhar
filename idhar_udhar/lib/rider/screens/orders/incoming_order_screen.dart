@@ -258,6 +258,22 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                     label: 'Drop',
                     value: order.drop,
                   ),
+                  if (order.receiverName.trim().isNotEmpty) ...[
+                    const Divider(height: RiderSpacing.xl),
+                    _InfoRow(
+                      icon: Icons.person_outline_rounded,
+                      label: 'Receiver',
+                      value: order.receiverName.trim(),
+                    ),
+                  ],
+                  if (order.receiverPhone.trim().isNotEmpty) ...[
+                    const Divider(height: RiderSpacing.xl),
+                    _InfoRow(
+                      icon: Icons.phone_iphone_rounded,
+                      label: 'Receiver contact',
+                      value: order.receiverPhone.trim(),
+                    ),
+                  ],
                   const Divider(height: RiderSpacing.xl),
                   _InfoRow(
                     icon: Icons.route_rounded,

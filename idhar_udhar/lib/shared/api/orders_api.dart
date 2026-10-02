@@ -214,6 +214,8 @@ class OrdersApi {
     required String cityId,
     required String vehicleCategoryId,
     required List<ApiStop> stops,
+    double? packageWeightKg,
+    double? packageSizeCm,
     String? idempotencyKey,
   }) async {
     final Map<String, Object?> body = await _client.post(
@@ -222,6 +224,8 @@ class OrdersApi {
         'city_id': cityId,
         'vehicle_category_id': vehicleCategoryId,
         'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
+        if (packageWeightKg != null) 'package_weight_kg': packageWeightKg,
+        if (packageSizeCm != null) 'package_size_cm': packageSizeCm,
       },
       headers: <String, String>{
         'Idempotency-Key': idempotencyKey ?? _uuid.v4(),

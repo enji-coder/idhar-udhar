@@ -73,6 +73,13 @@ export class CreateOrderDto {
   @Max(100000)
   package_weight_kg?: number;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 1 })
+  @Min(1)
+  @Max(10000)
+  package_size_cm?: number;
+
   @IsArray()
   @ArrayMinSize(2)
   @ArrayMaxSize(4)

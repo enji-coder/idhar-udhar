@@ -694,11 +694,15 @@ class MockParcelSize {
     required this.label,
     required this.subtitle,
     required this.imagePath,
+    this.maxCm,
   });
 
   final String id;
   final String label;
   final String subtitle;
   final String imagePath;
+
+  /// Upper bound in cm for this preset. Null means unbounded (e.g. Extra Large).
+  final double? maxCm;
 }
 

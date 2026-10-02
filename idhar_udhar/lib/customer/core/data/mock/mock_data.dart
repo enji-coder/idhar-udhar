@@ -215,31 +215,80 @@ abstract final class MockData {
   }
 
   static MockVehicle _synthesized(VehicleCategory category) {
-    final lower = category.name.toLowerCase();
-    final bool isScooty = lower.contains('scoot');
-    final bool isBike = lower.contains('bike') && !isScooty;
-    final bool isTwo = isScooty || isBike;
-    final isAuto = lower.contains('auto');
-    final VehicleType type = isScooty
-        ? VehicleType.scooty
-        : isBike
-            ? VehicleType.bike
-            : isAuto
-                ? VehicleType.auto
-                : VehicleType.truck;
+    // Prefer admin vehicle_type / vehicle codes over name heuristics so
+    // "Loading Riksha" (three_wheeler / loader_riksha) is never a truck.
+    final String typeCode = (category.vehicleTypeCode ?? '').toLowerCase();
+    final String vehicleCode = (category.vehicleCode ?? '').toLowerCase();
+    final String lower = category.name.toLowerCase();
+
+    VehicleType type;
+    switch (vehicleCode) {
+      case 'bike':
+        type = VehicleType.bike;
+        break;
+      case 'scooty':
+        type = VehicleType.scooty;
+        break;
+      case 'loader_riksha':
+        type = VehicleType.auto;
+        break;
+      case 'mini_truck':
+      case 'tempo':
+      case 'large_tempo':
+        type = VehicleType.pickup;
+        break;
+      case 'truck':
+        type = VehicleType.truck;
+        break;
+      default:
+        if (typeCode == 'three_wheeler' ||
+            lower.contains('auto') ||
+            lower.contains('rik')) {
+          type = VehicleType.auto;
+        } else if (typeCode == 'two_wheeler' ||
+            lower.contains('scoot') ||
+            lower.contains('bike')) {
+          type = lower.contains('scoot') ? VehicleType.scooty : VehicleType.bike;
+        } else if (typeCode == 'truck') {
+          type = VehicleType.truck;
+        } else if (lower.contains('truck') || lower.contains('tempo')) {
+          type = VehicleType.truck;
+        } else {
+          type = VehicleType.truck;
+        }
+    }
+
+    final bool isTwo =
+        type == VehicleType.bike || type == VehicleType.scooty;
+    final bool isAuto = type == VehicleType.auto;
     return MockVehicle(
       id: 'v_${category.id.toLowerCase()}',
       type: type,
       name: category.name,
-      description: 'Admin-managed vehicle type',
-      capacity: isTwo
-          ? 'Up to 20 kg'
-          : isAuto
-              ? 'Up to 100 kg'
-              : 'Up to 1000 kg',
+      description: (category.size ?? '').trim().isEmpty
+          ? 'Admin-managed vehicle type'
+          : category.size!.trim(),
+      capacity: (category.weightCapacity ?? '').trim().isEmpty
+          ? (isTwo
+              ? 'Up to 20 kg'
+              : isAuto
+                  ? 'Up to 100 kg'
+                  : 'Up to 1000 kg')
+          : category.weightCapacity!.trim(),
       etaMinutes: isTwo ? 12 : isAuto ? 15 : 28,
       baseFare: category.baseFare,
       perKm: category.perKm,
+      serviceFamily: typeCode == 'two_wheeler'
+          ? ServiceFamily.twoWheeler
+          : typeCode == 'three_wheeler'
+              ? ServiceFamily.threeWheeler
+              : typeCode == 'truck'
+                  ? ServiceFamily.truck
+                  : (isTwo
+                      ? ServiceFamily.twoWheeler
+                      : isAuto
+                          ? ServiceFamily.threeWheeler
+                          : ServiceFamily.truck),
       imagePath: artworkFor(type),
     );
   }
@@ -400,18 +449,21 @@ abstract final class MockData {
       label: 'Small',
       subtitle: 'Up to 30 cm',
       imagePath: AssetPaths.parcel,
+      maxCm: 30,
     ),
     const MockParcelSize(
       id: 's_md',
       label: 'Medium',
       subtitle: 'Up to 60 cm',
       imagePath: AssetPaths.parcel,
+      maxCm: 60,
     ),
     const MockParcelSize(
       id: 's_lg',
       label: 'Large',
       subtitle: 'Up to 90 cm',
       imagePath: AssetPaths.parcelStack,
+      maxCm: 90,
     ),
     const MockParcelSize(
       id: 's_xl',

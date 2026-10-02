@@ -164,6 +164,90 @@ class BookingDraft {
         .label;
   }
 
+  /// Selected parcel size upper bound in cm for backend validation.
+  double? get selectedParcelSizeCm {
+    for (final MockParcelSize size in MockData.parcelSizes) {
+      if (size.id == sizeId) {
+        return size.maxCm;
+      }
+    }
+    return null;
+  }
+
+  /// Max kilograms from the selected vehicle capacity string, if numeric.
+  double? get vehicleMaxWeightKg {
+    final String? raw = vehicle?.capacity;
+    if (raw == null) {
+      return null;
+    }
+    final Match? match = RegExp(
+      r'(\d+(?:\.\d+)?)\s*(kg)?',
+      caseSensitive: false,
+    ).firstMatch(raw.trim());
+    if (match == null) {
+      return null;
+    }
+    final double? value = double.tryParse(match.group(1)!);
+    if (value == null || value <= 0) {
+      return null;
+    }
+    return value;
+  }
+
+  /// Max parcel size in cm from vehicle description (admin category size).
+  double? get vehicleMaxSizeCm {
+    final String? raw = vehicle?.description;
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    final Match? match = RegExp(
+      r'(\d+(?:\.\d+)?)\s*(cm)?',
+      caseSensitive: false,
+    ).firstMatch(raw.trim());
+    if (match == null) {
+      return null;
+    }
+    final double? value = double.tryParse(match.group(1)!);
+    if (value == null || value <= 0) {
+      return null;
+    }
+    return value;
+  }
+
+  bool parcelSizeAllowed(MockParcelSize size) {
+    final double? maxCm = vehicleMaxSizeCm;
+    if (maxCm == null) {
+      return true;
+    }
+    if (size.maxCm == null) {
+      return false;
+    }
+    return size.maxCm! <= maxCm + 0.0001;
+  }
+
+  bool weightAllowed(double kg) {
+    final double? maxKg = vehicleMaxWeightKg;
+    if (maxKg == null) {
+      return true;
+    }
+    return kg <= maxKg + 0.0001;
+  }
+
+  String? get packageValidationError {
+    if (!parcelSizeAllowed(
+      MockData.parcelSizes.firstWhere(
+        (MockParcelSize s) => s.id == sizeId,
+        orElse: () => MockData.parcelSizes.first,
+      ),
+    )) {
+      return 'Selected parcel size exceeds this vehicle limit';
+    }
+    if (!weightAllowed(weightKg)) {
+      return 'Package weight exceeds this vehicle capacity';
+    }
+    return null;
+  }
+
   int get requiredDropCount =>
       deliveryMode == DeliveryMode.multiple ? dropCount : 1;
 
@@ -779,7 +863,33 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
   }
 
   void setVehicle(MockVehicle vehicle) {
-    state = state.copyWith(vehicle: vehicle, clearQuotedNetPayable: true);
+    BookingDraft next = state.copyWith(
+      vehicle: vehicle,
+      clearQuotedNetPayable: true,
+    );
+    final MockParcelSize currentSize = MockData.parcelSizes.firstWhere(
+      (MockParcelSize item) => item.id == next.sizeId,
+      orElse: () => MockData.parcelSizes.first,
+    );
+    if (!next.parcelSizeAllowed(currentSize)) {
+      MockParcelSize? fallback;
+      for (final MockParcelSize candidate in MockData.parcelSizes) {
+        if (next.parcelSizeAllowed(candidate)) {
+          fallback = candidate;
+          break;
+        }
+      }
+      if (fallback != null) {
+        next = next.copyWith(sizeId: fallback.id);
+      }
+    }
+    if (!next.weightAllowed(next.weightKg)) {
+      final double? maxKg = next.vehicleMaxWeightKg;
+      if (maxKg != null) {
+        next = next.copyWith(weightKg: maxKg.clamp(0.5, 1000));
+      }
+    }
+    state = next;
   }
 
   void setServiceFamily(ServiceFamily family) {
@@ -795,10 +905,24 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
 
   void setCategory(String id) => state = state.copyWith(categoryId: id);
 
-  void setSize(String id) => state = state.copyWith(sizeId: id);
+  void setSize(String id) {
+    final MockParcelSize size = MockData.parcelSizes.firstWhere(
+      (MockParcelSize item) => item.id == id,
+      orElse: () => MockData.parcelSizes.first,
+    );
+    if (!state.parcelSizeAllowed(size)) {
+      return;
+    }
+    state = state.copyWith(sizeId: id);
+  }
 
-  void setWeight(double kg) =>
-      state = state.copyWith(weightKg: kg.clamp(0.5, 1000));
+  void setWeight(double kg) {
+    final double clamped = kg.clamp(0.5, 1000);
+    if (!state.weightAllowed(clamped)) {
+      return;
+    }
+    state = state.copyWith(weightKg: clamped);
+  }
 
   void setInstructions(String value) =>
       state = state.copyWith(instructions: value);

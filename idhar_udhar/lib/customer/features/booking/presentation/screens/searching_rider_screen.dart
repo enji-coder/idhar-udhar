@@ -44,17 +44,8 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
       unawaited(_poll());
       return;
     }
-    _timer = Timer(const Duration(seconds: 3), () {
-      if (!mounted || _cancelled) {
-        return;
-      }
-      ref.read(bookingDraftProvider.notifier).assignRider();
-      final MockOrder? assigned = ref.read(bookingDraftProvider).activeOrder;
-      if (assigned != null) {
-        ref.read(sessionProvider.notifier).updateOrder(assigned);
-      }
-      context.go(AppRoutes.bookRiderAssigned);
-    });
+    // Cash/COD confirm always attaches a backend order id. Without it we wait
+    // for status refresh instead of inventing a local rider assignment.
   }
 
   Future<void> _poll() async {

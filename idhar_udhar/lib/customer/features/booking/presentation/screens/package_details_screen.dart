@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,9 +8,11 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
+import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
+import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
@@ -27,6 +31,7 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
   late final TextEditingController _notes;
   late final TextEditingController _customWeight;
   late bool _useCustomWeight;
+  String? _weightError;
 
   @override
   void initState() {
@@ -38,10 +43,22 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
     );
     _useCustomWeight = !isPreset;
     _customWeight = TextEditingController(
-      text: _useCustomWeight
-          ? _formatWeight(draft.weightKg)
-          : '',
+      text: _useCustomWeight ? _formatWeight(draft.weightKg) : '',
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_prefetchQuote());
+    });
+  }
+
+  Future<void> _prefetchQuote() async {
+    try {
+      await ensureCustomerQuote(ref);
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (_) {
+      // Summary confirm path surfaces quote errors; keep parcel layout usable.
+    }
   }
 
   @override
@@ -76,7 +93,17 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
   }
 
   void _selectPreset(double kg) {
-    setState(() => _useCustomWeight = false);
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    if (!draft.weightAllowed(kg)) {
+      setState(() {
+        _weightError = 'Weight exceeds this vehicle capacity';
+      });
+      return;
+    }
+    setState(() {
+      _useCustomWeight = false;
+      _weightError = null;
+    });
     ref.read(bookingDraftProvider.notifier).setWeight(kg);
   }
 
@@ -84,8 +111,20 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
     setState(() => _useCustomWeight = true);
     final parsed = double.tryParse(_customWeight.text.trim());
     if (parsed != null && parsed > 0) {
-      ref.read(bookingDraftProvider.notifier).setWeight(parsed);
+      _applyCustomWeight(parsed);
     }
+  }
+
+  void _applyCustomWeight(double parsed) {
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    if (!draft.weightAllowed(parsed)) {
+      setState(() {
+        _weightError = 'Weight exceeds this vehicle capacity';
+      });
+      return;
+    }
+    setState(() => _weightError = null);
+    ref.read(bookingDraftProvider.notifier).setWeight(parsed);
   }
 
   void _onCustomWeightChanged(String raw) {
@@ -97,13 +136,40 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
     if (parsed == null || parsed <= 0) {
       return;
     }
-    ref.read(bookingDraftProvider.notifier).setWeight(parsed);
+    _applyCustomWeight(parsed);
+  }
+
+  void _continue() {
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    final String? packageError = draft.packageValidationError;
+    if (packageError != null) {
+      CustomSnackBar.error(context, packageError);
+      return;
+    }
+    if (_useCustomWeight) {
+      final double? parsed = double.tryParse(_customWeight.text.trim());
+      if (parsed == null || parsed <= 0) {
+        setState(() => _weightError = 'Enter a valid weight');
+        return;
+      }
+      if (!draft.weightAllowed(parsed)) {
+        setState(() {
+          _weightError = 'Weight exceeds this vehicle capacity';
+        });
+        return;
+      }
+    }
+    context.push(AppRoutes.bookSummary);
   }
 
   @override
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
     final notifier = ref.read(bookingDraftProvider.notifier);
+    final double? maxKg = draft.vehicleMaxWeightKg;
+    final List<MockParcelSize> sizes = MockData.parcelSizes
+        .where(draft.parcelSizeAllowed)
+        .toList(growable: false);
 
     return GlassPageScaffold(
       bottom: Column(
@@ -146,7 +212,7 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
           const SizedBox(height: AppSpacing.md),
           AnimatedPrimaryButton(
             label: 'Continue',
-            onPressed: () => context.push(AppRoutes.bookSummary),
+            onPressed: _continue,
           ),
         ],
       ),
@@ -230,16 +296,25 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
           ),
           const SizedBox(height: AppSpacing.xl),
           Text('2. Parcel Size', style: AppTextStyles.headingS),
+          if (draft.vehicleMaxSizeCm != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Max ${draft.vehicleMaxSizeCm!.toStringAsFixed(0)} cm for this vehicle',
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           SizedBox(
             height: 130,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: MockData.parcelSizes.length,
+              itemCount: sizes.length,
               separatorBuilder: (_, __) =>
                   const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, index) {
-                final s = MockData.parcelSizes[index];
+                final s = sizes[index];
                 final selected = draft.sizeId == s.id;
                 return SizedBox(
                   width: 100,
@@ -259,9 +334,11 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
                               fit: BoxFit.contain,
                             ),
                           ),
-                          Text(s.label,
-                              style: AppTextStyles.caption
-                                  .copyWith(fontWeight: FontWeight.w700)),
+                          Text(
+                            s.label,
+                            style: AppTextStyles.caption
+                                .copyWith(fontWeight: FontWeight.w700),
+                          ),
                           Text(
                             s.subtitle,
                             style: AppTextStyles.caption.copyWith(fontSize: 9),
@@ -277,12 +354,21 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
           ),
           const SizedBox(height: AppSpacing.xl),
           Text('3. Weight (Actual)', style: AppTextStyles.headingS),
+          if (maxKg != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Max ${maxKg.toStringAsFixed(0)} kg for this vehicle',
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.md),
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
             children: [
-              ..._presetWeights.map((kg) {
+              ..._presetWeights.where(draft.weightAllowed).map((kg) {
                 final bool selected = !_useCustomWeight &&
                     (draft.weightKg - kg).abs() < 0.001;
                 return ChoiceChip(
@@ -305,6 +391,7 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
             GlassTextField(
               controller: _customWeight,
               hint: 'Enter parcel weight',
+              errorText: _weightError,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
@@ -333,11 +420,17 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
               ),
               onChanged: _onCustomWeightChanged,
             ),
+          ] else if (_weightError != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _weightError!,
+              style: AppTextStyles.caption.copyWith(color: AppColors.danger),
+            ),
           ],
           const SizedBox(height: AppSpacing.md),
           GlassContainer(
             padding: const EdgeInsets.all(AppSpacing.md),
-            backgroundColor: AppColors.softPeach.withOpacity(0.55),
+            backgroundColor: AppColors.softPeach.withValues(alpha: 0.55),
             child: Text(
               'Accurate weight helps better price estimation.',
               style: AppTextStyles.caption,

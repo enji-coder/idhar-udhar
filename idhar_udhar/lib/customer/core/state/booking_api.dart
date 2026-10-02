@@ -70,6 +70,8 @@ final vehicleFarePreviewProvider =
         addressText: draft.locationAddress(drop),
         latitude: drop.latitude!,
         longitude: drop.longitude!,
+        contactName: draft.hasReceiver ? draft.receiverName.trim() : null,
+        contactPhone: draft.hasReceiver ? draft.receiverMobile.trim() : null,
       ),
     );
   }
@@ -79,6 +81,37 @@ final vehicleFarePreviewProvider =
       );
 });
 
+List<ApiStop> buildBookingStops(BookingDraft draft) {
+  final MockLocation pickup = draft.pickup!;
+  final List<ApiStop> stops = <ApiStop>[
+    ApiStop(
+      sequence: 0,
+      stopType: 'PICKUP',
+      addressText: draft.pickupAddressText.isEmpty
+          ? (pickup.address.isEmpty ? pickup.label : pickup.address)
+          : draft.pickupAddressText,
+      latitude: pickup.latitude!,
+      longitude: pickup.longitude!,
+    ),
+  ];
+  final List<MockLocation> drops = draft.allDrops;
+  for (int i = 0; i < drops.length; i++) {
+    final MockLocation drop = drops[i];
+    stops.add(
+      ApiStop(
+        sequence: i + 1,
+        stopType: 'DROP',
+        addressText: draft.locationAddress(drop),
+        latitude: drop.latitude!,
+        longitude: drop.longitude!,
+        contactName: draft.receiverName.trim(),
+        contactPhone: draft.receiverMobile.trim(),
+      ),
+    );
+  }
+  return stops;
+}
+
 Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
   final BookingDraft draft = ref.read(bookingDraftProvider);
   final String? vehicleCategoryId = draft.vehicle?.id;
@@ -86,6 +119,12 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
     throw const ApiException(
       code: 'VALIDATION_ERROR',
       message: 'Select a vehicle category before booking.',
+    );
+  }
+  if (!draft.hasReceiver) {
+    throw const ApiException(
+      code: 'VALIDATION_ERROR',
+      message: 'Receiver name and mobile are required before booking.',
     );
   }
   final BackendQuoteHold? existing = ref.read(backendQuoteHoldProvider);
@@ -111,41 +150,22 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
       message: 'Pickup needs a map pin before booking.',
     );
   }
-  final List<ApiStop> stops = <ApiStop>[
-    ApiStop(
-      sequence: 0,
-      stopType: 'PICKUP',
-      addressText: draft.pickupAddressText.isEmpty
-          ? (pickup.address.isEmpty ? pickup.label : pickup.address)
-          : draft.pickupAddressText,
-      latitude: pickup.latitude!,
-      longitude: pickup.longitude!,
-    ),
-  ];
-  final List<MockLocation> drops = draft.allDrops;
-  for (int i = 0; i < drops.length; i++) {
-    final MockLocation drop = drops[i];
+  for (final MockLocation drop in draft.allDrops) {
     if (drop.latitude == null || drop.longitude == null) {
       throw const ApiException(
         code: 'INVALID_COORDINATES',
         message: 'Each drop needs a map pin before booking.',
       );
     }
-    stops.add(
-      ApiStop(
-        sequence: i + 1,
-        stopType: 'DROP',
-        addressText: draft.locationAddress(drop),
-        latitude: drop.latitude!,
-        longitude: drop.longitude!,
-      ),
-    );
   }
+  final List<ApiStop> stops = buildBookingStops(draft);
   final OrdersApi api = ref.read(ordersApiProvider);
   final ApiOrder created = await api.create(
     cityId: ApiConfig.cityId,
     vehicleCategoryId: vehicleCategoryId,
     stops: stops,
+    packageWeightKg: draft.weightKg,
+    packageSizeCm: draft.selectedParcelSizeCm,
     idempotencyKey: const Uuid().v4(),
   );
   final ApiQuote quote = await api.quote(created.orderId);
@@ -161,13 +181,19 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
 }
 
 Future<MockOrder> confirmCustomerBooking(WidgetRef ref) async {
+  final BookingDraft draft = ref.read(bookingDraftProvider);
+  if (!draft.hasReceiver) {
+    throw const ApiException(
+      code: 'VALIDATION_ERROR',
+      message: 'Receiver name and mobile are required before booking.',
+    );
+  }
   final BackendQuoteHold hold = await ensureCustomerQuote(ref);
   final OrdersApi api = ref.read(ordersApiProvider);
   final ApiOrder confirmed = await api.confirm(
     orderId: hold.orderId,
     fareQuoteId: hold.quote.fareQuoteId,
   );
-  final BookingDraft draft = ref.read(bookingDraftProvider);
   final MockOrder mapped = OrderMapper.toMockOrder(
     ApiOrder(
       orderId: confirmed.orderId,

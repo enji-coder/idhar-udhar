@@ -22,7 +22,7 @@ import { riderMayAccessRides } from '../files/rider-verification';
 import { CatalogRepository } from './catalog.repository';
 import { CreateOrderDto, CreateOrderStopDto } from './dto/create-order.dto';
 import { PreviewVehicleFaresDto } from './dto/preview-vehicle-fares.dto';
-import { assertPackageForVehicle } from './package-constraints';
+import { assertPackageForVehicle, assertDropContact, normalizeContactPhone } from './package-constraints';
 import {
   isCustomerBookableVehicle,
   serializeCustomerVehicleFare,
@@ -67,6 +67,7 @@ export class OrdersService {
       city_id: body.city_id,
       vehicle_category_id: body.vehicle_category_id,
       package_weight_kg: body.package_weight_kg ?? null,
+      package_size_cm: body.package_size_cm ?? null,
       stops: body.stops,
     });
     const existing = await this.idempotency.find('create-order', key);
@@ -91,6 +92,8 @@ export class OrdersService {
         assertPackageForVehicle({
           weightKg: body.package_weight_kg ?? null,
           weightCapacity: category.weight_capacity,
+          packageSizeCm: body.package_size_cm ?? null,
+          sizeLimit: category.size,
         });
         const stops = await this.validateStops(body.stops, city.city_id, tx);
         const displayId = await this.orders.allocateDisplayId(city.city_id, tx);
@@ -245,7 +248,9 @@ export class OrdersService {
   async previewVehicleFares(auth: OrderActor, body: PreviewVehicleFaresDto) {
     this.assertCustomer(auth);
     const city = await this.requireCity(body.city_id, this.postgres);
-    const stops = await this.validateStops(body.stops, city.city_id, this.postgres);
+    const stops = await this.validateStops(body.stops, city.city_id, this.postgres, {
+      requireDropContact: false,
+    });
     const routed = await this.routing.routeStops(stops);
     const distanceKm = this.routing.distanceKm(routed);
     const rows = await this.fares.previewActiveVehicleFares(distanceKm);
@@ -986,7 +991,9 @@ export class OrdersService {
     stops: CreateOrderStopDto[],
     cityId: string,
     db: Queryable,
+    options?: { requireDropContact?: boolean },
   ): Promise<CreateOrderStopDto[]> {
+    const requireDropContact = options?.requireDropContact !== false;
     const sorted = [...stops].sort((left, right) => left.sequence - right.sequence);
     const sequences = sorted.map((stop) => stop.sequence);
     if (new Set(sequences).size !== sequences.length) {
@@ -1040,6 +1047,15 @@ export class OrdersService {
           'Each stop requires an address',
           400,
         );
+      }
+      if (stop.stop_type === 'DROP' && requireDropContact) {
+        assertDropContact({
+          contactName: stop.contact_name,
+          contactPhone: stop.contact_phone,
+        });
+        const normalized = normalizeContactPhone(stop.contact_phone);
+        stop.contact_name = (stop.contact_name ?? '').trim();
+        stop.contact_phone = normalized ?? stop.contact_phone;
       }
       if (stop.zone_id) {
         const zone = await this.catalog.findZone(stop.zone_id, db);

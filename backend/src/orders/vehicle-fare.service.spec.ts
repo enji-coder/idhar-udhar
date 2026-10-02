@@ -164,6 +164,8 @@ function stops() {
       address_text: 'Drop',
       latitude: 23.1,
       longitude: 72.1,
+      contact_name: 'Receiver',
+      contact_phone: '9876543210',
     },
   ];
 }

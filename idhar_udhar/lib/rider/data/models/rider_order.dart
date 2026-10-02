@@ -85,6 +85,8 @@ class RiderOrder {
     required this.estimatedMinutes,
     required this.customerMaskedName,
     required this.customerMaskedPhone,
+    this.receiverName = '',
+    this.receiverPhone = '',
     this.offerId,
     this.backendOrderId,
     this.paymentMethod = RiderOrderPaymentMethod.online,
@@ -120,6 +122,8 @@ class RiderOrder {
   final RiderOrderPaymentMethod paymentMethod;
   final String customerMaskedName;
   final String customerMaskedPhone;
+  final String receiverName;
+  final String receiverPhone;
   final int decisionSeconds;
   final double tripAmount;
   final double riderAmount;

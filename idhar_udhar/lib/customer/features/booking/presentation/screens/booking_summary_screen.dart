@@ -54,8 +54,11 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
       return;
     }
     final BookingDraft draft = ref.read(bookingDraftProvider);
-    final String? blocked =
-        draft.incompleteStopMessage ?? draft.paymentValidationError;
+    final String? blocked = draft.incompleteStopMessage ??
+        draft.paymentValidationError ??
+        (!draft.hasReceiver
+            ? 'Receiver name and mobile are required'
+            : draft.packageValidationError);
     if (blocked != null) {
       CustomSnackBar.error(context, blocked);
       return;
@@ -177,28 +180,43 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
           if (draft.vehicle != null)
             GlassContainer(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  SafeAssetImage(
-                    path: draft.vehicle!.imagePath,
+                  SizedBox(
+                    width: 72,
                     height: 72,
-                    fit: BoxFit.contain,
+                    child: SafeAssetImage(
+                      path: draft.vehicle!.imagePath,
+                      height: 72,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(draft.vehicle!.name,
-                            style: AppTextStyles.headingS),
                         Text(
-                          'ETA ~ ${draft.vehicle!.etaMinutes} min',
+                          draft.vehicle!.name,
+                          style: AppTextStyles.headingS,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          draft.vehicle!.etaMinutes > 0
+                              ? 'ETA ~ ${draft.vehicle!.etaMinutes} min'
+                              : 'ETA —',
                           style: AppTextStyles.caption.copyWith(
                             color: AppColors.textSecondary,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: AppSpacing.sm),
                   Text(
                     displayedFare == null
                         ? 'Calculating'
@@ -206,6 +224,8 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                     style: AppTextStyles.headingM.copyWith(
                       color: AppColors.orange,
                     ),
+                    maxLines: 1,
+                    softWrap: false,
                   ),
                 ],
               ),

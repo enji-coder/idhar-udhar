@@ -159,6 +159,16 @@ abstract final class OrderMapper {
   }) {
     final MockOrder? mapped =
         order == null ? null : toMockOrder(order);
+    final ApiStop? dropStop = order?.stops
+        .where((ApiStop stop) => stop.stopType == 'DROP')
+        .fold<ApiStop?>(null, (ApiStop? first, ApiStop stop) {
+      if (first == null) {
+        return stop;
+      }
+      return stop.sequence < first.sequence ? stop : first;
+    });
+    final String receiverName = (dropStop?.contactName ?? '').trim();
+    final String receiverPhone = (dropStop?.contactPhone ?? '').trim();
     return RiderOrder(
       id: offer.displayId ?? mapped?.displayLabel ?? offer.orderId,
       offerId: offer.offerId,
@@ -170,6 +180,8 @@ abstract final class OrderMapper {
       estimatedMinutes: 0,
       customerMaskedName: 'Customer',
       customerMaskedPhone: '••••',
+      receiverName: receiverName,
+      receiverPhone: receiverPhone,
       tripAmount: order?.riderAmount ?? offer.riderAmount ?? 0,
       pickupLatitude: mapped?.pickup.latitude,
       pickupLongitude: mapped?.pickup.longitude,

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../config/app_constants.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_draft_provider.dart';
+import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
@@ -25,6 +26,7 @@ class _ReceiverDetailsScreenState extends ConsumerState<ReceiverDetailsScreen> {
   late final TextEditingController _mobile;
   String? _nameError;
   String? _mobileError;
+  bool _useMyDetails = false;
 
   @override
   void initState() {
@@ -39,6 +41,32 @@ class _ReceiverDetailsScreenState extends ConsumerState<ReceiverDetailsScreen> {
     _name.dispose();
     _mobile.dispose();
     super.dispose();
+  }
+
+  /// Last 10 digits of the logged-in customer phone (strips +91 / country code).
+  static String localMobileDigits(String phone) {
+    final String digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 10) {
+      return digits;
+    }
+    return digits.substring(digits.length - 10);
+  }
+
+  void _applyMyDetails(bool selected) {
+    setState(() {
+      _useMyDetails = selected;
+      _nameError = null;
+      _mobileError = null;
+    });
+    if (!selected) {
+      return;
+    }
+    final user = ref.read(sessionProvider).user;
+    if (user == null) {
+      return;
+    }
+    _name.text = user.name.trim();
+    _mobile.text = localMobileDigits(user.phone);
   }
 
   void _continue() {
@@ -98,6 +126,9 @@ class _ReceiverDetailsScreenState extends ConsumerState<ReceiverDetailsScreen> {
             errorText: _nameError,
             textCapitalization: TextCapitalization.words,
             onChanged: (_) {
+              if (_useMyDetails) {
+                setState(() => _useMyDetails = false);
+              }
               if (_nameError != null) {
                 setState(() => _nameError = null);
               }
@@ -124,11 +155,44 @@ class _ReceiverDetailsScreenState extends ConsumerState<ReceiverDetailsScreen> {
               LengthLimitingTextInputFormatter(10),
             ],
             onChanged: (_) {
+              if (_useMyDetails) {
+                setState(() => _useMyDetails = false);
+              }
               if (_mobileError != null) {
                 setState(() => _mobileError = null);
               }
             },
             onSubmitted: (_) => _continue(),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          InkWell(
+            onTap: () => _applyMyDetails(!_useMyDetails),
+            borderRadius: AppRadius.lgAll,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: Row(
+                children: [
+                  Icon(
+                    _useMyDetails
+                        ? Icons.check_box_rounded
+                        : Icons.check_box_outline_blank_rounded,
+                    color: _useMyDetails
+                        ? AppColors.orange
+                        : AppColors.textSecondary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'Use my current details',
+                      style: AppTextStyles.bodyMedium.copyWith(
+                        color: AppColors.navy,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

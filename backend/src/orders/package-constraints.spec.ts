@@ -1,8 +1,11 @@
 import { ApiError } from '../common/errors/api-error';
 import {
+  assertDropContact,
   assertPackageForVehicle,
   packageExceedsCapacity,
+  packageExceedsSize,
   parseCapacityKg,
+  parseSizeCm,
 } from './package-constraints';
 
 describe('package capacity', () => {
@@ -37,6 +40,52 @@ describe('package capacity', () => {
   it('does not invent a limit when capacity is not numeric', () => {
     expect(() =>
       assertPackageForVehicle({ weightKg: 80, weightCapacity: 'large' }),
+    ).not.toThrow();
+  });
+});
+
+describe('package size', () => {
+  it('reads centimetres from admin size text', () => {
+    expect(parseSizeCm('36cm')).toBe(36);
+    expect(parseSizeCm('36')).toBe(36);
+    expect(parseSizeCm('30 CM')).toBe(30);
+    expect(parseSizeCm('large')).toBeNull();
+  });
+
+  it('rejects a parcel larger than the vehicle limit', () => {
+    expect(packageExceedsSize(60, '36cm')).toBe(true);
+    expect(() =>
+      assertPackageForVehicle({
+        weightKg: 5,
+        weightCapacity: '20 kg',
+        packageSizeCm: 60,
+        sizeLimit: '36cm',
+      }),
+    ).toThrow('Package size exceeds this vehicle limit');
+  });
+
+  it('requires size when the vehicle has a numeric size limit', () => {
+    expect(() =>
+      assertPackageForVehicle({
+        weightKg: 5,
+        weightCapacity: '20 kg',
+        packageSizeCm: null,
+        sizeLimit: '36cm',
+      }),
+    ).toThrow('Package size is required for this vehicle');
+  });
+});
+
+describe('drop contact', () => {
+  it('requires receiver name and a 10-digit mobile', () => {
+    expect(() =>
+      assertDropContact({ contactName: '', contactPhone: '9876543210' }),
+    ).toThrow('Receiver name is required');
+    expect(() =>
+      assertDropContact({ contactName: 'Asha', contactPhone: '123' }),
+    ).toThrow('Receiver mobile must be a valid 10-digit number');
+    expect(() =>
+      assertDropContact({ contactName: 'Asha', contactPhone: '9876543210' }),
     ).not.toThrow();
   });
 });

@@ -215,6 +215,8 @@ export type SampleStop = {
   latitude: number;
   longitude: number;
   zone_id?: string;
+  contact_name?: string;
+  contact_phone?: string;
 };
 
 export function sampleStops(zoneId?: string, extraDrops = 0): SampleStop[] {
@@ -234,6 +236,8 @@ export function sampleStops(zoneId?: string, extraDrops = 0): SampleStop[] {
       latitude: 23.04,
       longitude: 72.52,
       zone_id: zoneId,
+      contact_name: 'Receiver',
+      contact_phone: '9876543210',
     },
   ];
   for (let i = 0; i < extraDrops; i += 1) {
@@ -244,6 +248,8 @@ export function sampleStops(zoneId?: string, extraDrops = 0): SampleStop[] {
       latitude: Number((23.05 + i * 0.01).toFixed(6)),
       longitude: 72.51,
       zone_id: zoneId,
+      contact_name: 'Receiver',
+      contact_phone: '9876543210',
     });
   }
   return stops;
