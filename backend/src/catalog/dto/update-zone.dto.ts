@@ -1,6 +1,11 @@
-import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { UUID_RE } from '../../common/uuid-param.pipe';
 
 export class UpdateZoneDto {
+  @IsOptional()
+  @Matches(UUID_RE)
+  city_id?: string;
+
   @IsOptional()
   @IsString()
   @MinLength(1)

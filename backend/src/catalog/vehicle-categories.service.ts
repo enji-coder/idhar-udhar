@@ -32,8 +32,14 @@ export class VehicleCategoriesService {
   ) {}
 
   async listActive() {
-    const rows = await this.categories.list();
+    const [rows, launchCityId] = await Promise.all([
+      this.categories.list(),
+      this.categories.findLaunchCityId(),
+    ]);
     return {
+      // Booking create/quote/preview require a city UUID. Release builds may
+      // omit IU_CITY_ID; the customer app uses this launch city when unset.
+      launch_city_id: launchCityId,
       vehicle_categories: rows
         .filter((row) => row.active)
         .map((row) => this.serializePublic(row)),

@@ -153,6 +153,15 @@ class VehicleSelectionScreen extends ConsumerWidget {
       ),
       orElse: () => const <MockVehicle>[],
     );
+    // Temporary diagnostics — tag IU_FARE_PREVIEW
+    debugPrint(
+      '[IU_FARE_PREVIEW] ui hasRoute=${draft.hasRouteForCurrentStops} '
+      'loading=${farePreview.isLoading} hasError=${farePreview.hasError} '
+      'hasData=${farePreview.hasValue} '
+      'mapKeys=${farePreview.asData?.value.keys.toList() ?? const <String>[]} '
+      'error=${farePreview.hasError ? farePreview.error : null} '
+      'optionIds=${options.map((MockVehicle v) => '${v.name}:${v.id}').toList()}',
+    );
     final bool showTwoWheelerNote = options.any(MockData.isTwoWheeler) &&
         (draft.serviceFamily == ServiceFamily.twoWheeler ||
             draft.serviceFamily == null);
@@ -278,6 +287,11 @@ class VehicleSelectionScreen extends ConsumerWidget {
                 final v = options[index];
                 final selected = draft.vehicle?.id == v.id;
                 final String? serverFare = farePreview.asData?.value[v.id];
+                debugPrint(
+                  '[IU_FARE_PREVIEW] card name=${v.name} lookupKey=${v.id} '
+                  'mapHasKey=${farePreview.asData?.value.containsKey(v.id) == true} '
+                  'serverFare=$serverFare',
+                );
                 final String priceLabel = serverFare != null &&
                         serverFare.isNotEmpty
                     ? '₹$serverFare'
@@ -286,6 +300,9 @@ class VehicleSelectionScreen extends ConsumerWidget {
                         : draft.hasRouteForCurrentStops
                             ? 'Fare after route'
                             : 'Fare calculated after pickup & drop';
+                debugPrint(
+                  '[IU_FARE_PREVIEW] card name=${v.name} priceLabel=$priceLabel',
+                );
                 final String waitingNote = v.waitingPerMinute > 0
                     ? 'Waiting: ₹${v.waitingPerMinute.toStringAsFixed(v.waitingPerMinute == v.waitingPerMinute.roundToDouble() ? 0 : 2)}/min after ${v.initialWaitingMinutes} min'
                     : '';
@@ -305,15 +322,20 @@ class VehicleSelectionScreen extends ConsumerWidget {
                       borderColor:
                           selected ? AppColors.orange : AppColors.borderGlass,
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          AmbientGlow(
-                            diameter: 100,
-                            opacity: selected ? 0.28 : 0.12,
-                            child: SafeAssetImage(
-                              path: v.imagePath,
-                              width: 88,
-                              height: 72,
-                              fit: BoxFit.contain,
+                          SizedBox(
+                            width: 88,
+                            height: 72,
+                            child: AmbientGlow(
+                              diameter: 88,
+                              opacity: selected ? 0.28 : 0.12,
+                              child: SafeAssetImage(
+                                path: v.imagePath,
+                                width: 88,
+                                height: 72,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                           ),
                           const SizedBox(width: AppSpacing.md),
@@ -321,12 +343,19 @@ class VehicleSelectionScreen extends ConsumerWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(v.name, style: AppTextStyles.headingS),
+                                Text(
+                                  v.name,
+                                  style: AppTextStyles.headingS,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 Text(
                                   v.description,
                                   style: AppTextStyles.caption.copyWith(
                                     color: AppColors.textSecondary,
                                   ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: AppSpacing.xs),
                                 Text(
@@ -337,6 +366,8 @@ class VehicleSelectionScreen extends ConsumerWidget {
                                     color: AppColors.navy,
                                     fontWeight: FontWeight.w600,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 if (MockData.isTwoWheeler(v)) ...[
                                   const SizedBox(height: AppSpacing.xs),
@@ -347,38 +378,47 @@ class VehicleSelectionScreen extends ConsumerWidget {
                                       fontWeight: FontWeight.w600,
                                       fontSize: 11,
                                     ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
                               ],
                             ),
                           ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                priceLabel,
-                                textAlign: TextAlign.end,
-                                style: AppTextStyles.caption.copyWith(
-                                  color: AppColors.orange,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              if (waitingNote.isNotEmpty)
+                          const SizedBox(width: AppSpacing.sm),
+                          Flexible(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
                                 Text(
-                                  waitingNote,
+                                  priceLabel,
                                   textAlign: TextAlign.end,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
                                   style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 11,
+                                    color: AppColors.orange,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                              if (selected)
-                                const Icon(
-                                  Icons.check_circle,
-                                  color: AppColors.orange,
-                                  size: 22,
-                                ),
-                            ],
+                                if (waitingNote.isNotEmpty)
+                                  Text(
+                                    waitingNote,
+                                    textAlign: TextAlign.end,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.caption.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                if (selected)
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: AppColors.orange,
+                                    size: 22,
+                                  ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

@@ -1,14 +1,16 @@
 import { IsBoolean, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
-import { UUID_RE } from '../../common/uuid-param.pipe';
 
-export class CreateZoneDto {
-  @Matches(UUID_RE)
-  city_id!: string;
-
+export class UpdateStateDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(80)
-  name!: string;
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z]{2,5}$/)
+  code?: string;
 
   @IsOptional()
   @IsBoolean()

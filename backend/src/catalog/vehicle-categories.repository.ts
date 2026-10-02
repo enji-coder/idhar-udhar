@@ -227,4 +227,19 @@ export class VehicleCategoriesRepository {
   async delete(id: string, db: Queryable = this.postgres): Promise<void> {
     await db.query(`DELETE FROM vehicle_categories WHERE vehicle_category_id = $1`, [id]);
   }
+
+  /** Active Ahmedabad launch city used when the customer app omits IU_CITY_ID. */
+  async findLaunchCityId(
+    db: Queryable = this.postgres,
+  ): Promise<string | null> {
+    const result = await db.query<{ city_id: string }>(
+      `
+      SELECT city_id
+      FROM cities
+      WHERE city_code = 'AMD' AND active = TRUE
+      LIMIT 1
+      `,
+    );
+    return result.rows[0]?.city_id ?? null;
+  }
 }

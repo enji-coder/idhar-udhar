@@ -6,6 +6,9 @@ import 'vehicle_category.dart';
 
 /// Active categories from NestJS. PostgreSQL UUIDs are the only ids.
 abstract final class VehicleCategoryCatalog {
+  /// Launch city from the last successful [load]. Used when `IU_CITY_ID` is unset.
+  static String? launchCityId;
+
   static Future<List<VehicleCategory>> load() async {
     final response = await Dio().get<Map<String, dynamic>>(
       '${ApiConfig.baseUrl}/v1/vehicle-categories',
@@ -14,11 +17,17 @@ abstract final class VehicleCategoryCatalog {
     return parsePayload(response.data);
   }
 
-  /// Accepts the public `{ vehicle_categories: [...] }` payload.
+  /// Accepts the public `{ vehicle_categories: [...], launch_city_id? }` payload.
   ///
   /// JSON maps arrive as `Map<String, dynamic>`. `Map` is invariant, so a
   /// `whereType<Map<Object?, Object?>>()` check drops every real row.
   static List<VehicleCategory> parsePayload(Object? data) {
+    if (data is Map) {
+      final Object? city = data['launch_city_id'];
+      if (city is String && city.trim().isNotEmpty) {
+        launchCityId = city.trim();
+      }
+    }
     final Object? rows = data is Map ? data['vehicle_categories'] : null;
     if (rows is! List) {
       return const <VehicleCategory>[];

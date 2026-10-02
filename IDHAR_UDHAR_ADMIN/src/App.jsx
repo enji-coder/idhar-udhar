@@ -25,6 +25,8 @@ import Profile from './pages/Profile';
 import Vehicles from './pages/Vehicles';
 import VehicleCategories from './pages/VehicleCategories';
 import WalletPage from './pages/Wallet';
+import States from './pages/States';
+import Cities from './pages/Cities';
 import Zones from './pages/Zones';
 import Invoices from './pages/Invoices';
 import PurchaseInvoices from './pages/PurchaseInvoices';
@@ -67,6 +69,8 @@ export default function App() {
             <Route path="/vehicles" element={<Vehicles />} />
             <Route path="/vehicle-categories" element={<VehicleCategories />} />
             <Route path="/wallet" element={<WalletPage />} />
+            <Route path="/states" element={<States />} />
+            <Route path="/cities" element={<Cities />} />
             <Route path="/zones" element={<Zones />} />
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/purchase-invoices" element={<PurchaseInvoices />} />

@@ -1,6 +1,8 @@
-cd 
+cd idhar_udhar
 flutter clean
 flutter pub get
-flutter build apk --release --flavor rider -t lib/rider/rider_main.dart
+flutter build apk --release --flavor rider -t lib/rider/rider_main.dart --dart-define=API_BASE_URL=https://api.idharudhar.co.in
 
 flutter build apk --release --flavor customer -t lib/customer/customer_main.dart --dart-define=API_BASE_URL=https://api.idharudhar.co.in
+# Optional override: --dart-define=IU_CITY_ID=<uuid>
+# When omitted, the app uses launch_city_id from GET /v1/vehicle-categories.

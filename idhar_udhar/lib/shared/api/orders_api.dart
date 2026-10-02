@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import 'api_client.dart';
+import 'api_exception.dart';
 import 'json_codec.dart';
 
 class ApiStop {
@@ -270,24 +272,57 @@ class OrdersApi {
     required String cityId,
     required List<ApiStop> stops,
   }) async {
-    final Map<String, Object?> body = await _client.post(
-      '/v1/orders/vehicle-fares',
-      data: <String, Object?>{
-        'city_id': cityId,
-        'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
-      },
+    // ignore: avoid_print — temporary IU_FARE_PREVIEW diagnostics
+    debugPrint(
+      '[IU_FARE_PREVIEW] POST /v1/orders/vehicle-fares attempted '
+      'cityId=$cityId stopCount=${stops.length}',
     );
-    final Map<String, String> fares = <String, String>{};
-    for (final Object? item in jsonList(body['vehicles'])) {
-      final Map<String, Object?> vehicle = jsonObject(item);
-      final String? id = jsonString(vehicle['vehicle_category_id']);
-      final Map<String, Object?> fare = jsonObject(vehicle['fare']);
-      final String? payable = jsonString(fare['net_payable']);
-      if (id != null && id.isNotEmpty && payable != null && payable.isNotEmpty) {
-        fares[id] = payable;
+    try {
+      final Map<String, Object?> body = await _client.post(
+        '/v1/orders/vehicle-fares',
+        data: <String, Object?>{
+          'city_id': cityId,
+          'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
+        },
+      );
+      final Object? vehiclesRaw = body['vehicles'];
+      final List<Object?> vehicles = jsonList(vehiclesRaw);
+      debugPrint(
+        '[IU_FARE_PREVIEW] POST ok vehiclesType=${vehiclesRaw.runtimeType} '
+        'vehiclesLen=${vehicles.length}',
+      );
+      final Map<String, String> fares = <String, String>{};
+      for (final Object? item in vehicles) {
+        final Map<String, Object?> vehicle = jsonObject(item);
+        final String? id = jsonString(vehicle['vehicle_category_id']);
+        final Map<String, Object?> fare = jsonObject(vehicle['fare']);
+        final String? payable = jsonString(fare['net_payable']);
+        debugPrint(
+          '[IU_FARE_PREVIEW] response vehicle id=$id '
+          'net_payable=$payable fareKeys=${fare.keys.toList()}',
+        );
+        if (id != null &&
+            id.isNotEmpty &&
+            payable != null &&
+            payable.isNotEmpty) {
+          fares[id] = payable;
+        }
       }
+      debugPrint(
+        '[IU_FARE_PREVIEW] parsed fare map keys=${fares.keys.toList()} '
+        'values=${fares.values.toList()}',
+      );
+      return fares;
+    } on ApiException catch (error) {
+      debugPrint(
+        '[IU_FARE_PREVIEW] POST failed status=${error.statusCode} '
+        'code=${error.code} message=${error.message}',
+      );
+      rethrow;
+    } catch (error) {
+      debugPrint('[IU_FARE_PREVIEW] POST failed error=$error');
+      rethrow;
     }
-    return fares;
   }
 
   Future<ApiQuote> quote(String orderId) async {

@@ -2,13 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { AuthContext } from '../auth/types/auth-context';
+import { CitiesRepository } from './cities.repository';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
 import { ZoneRow, ZonesRepository } from './zones.repository';
 
 @Injectable()
 export class ZonesService {
-  constructor(private readonly zones: ZonesRepository) {}
+  constructor(
+    private readonly zones: ZonesRepository,
+    private readonly cities: CitiesRepository,
+  ) {}
 
   async list(_auth: AuthContext) {
     const rows = await this.zones.list();
@@ -24,18 +28,11 @@ export class ZonesService {
   }
 
   async create(_auth: AuthContext, body: CreateZoneDto) {
-    const city = await this.zones.findLaunchCity();
-    if (!city) {
-      throw new ApiError(
-        ErrorCodes.CITY_INVALID,
-        'Launch city AMD is not configured',
-        409,
-      );
-    }
+    await this.requireActiveCity(body.city_id);
     const name = body.name.replace(/\s+/g, ' ').trim();
-    await this.assertNameAvailable(city.city_id, name, null);
+    await this.assertNameAvailable(body.city_id, name, null);
     const inserted = await this.zones.insert({
-      cityId: city.city_id,
+      cityId: body.city_id,
       name,
       active: body.active !== false,
     });
@@ -51,9 +48,14 @@ export class ZonesService {
     if (!existing) {
       throw new ApiError(ErrorCodes.NOT_FOUND, 'Zone was not found', 404);
     }
+    const cityId = body.city_id ?? existing.city_id;
+    if (cityId !== existing.city_id) {
+      await this.requireActiveCity(cityId);
+    }
     const name = (body.name ?? existing.name).replace(/\s+/g, ' ').trim();
-    await this.assertNameAvailable(existing.city_id, name, id);
+    await this.assertNameAvailable(cityId, name, id);
     await this.zones.update(id, {
+      cityId,
       name,
       active: body.active ?? existing.active,
     });
@@ -81,6 +83,18 @@ export class ZonesService {
     return { deleted: true, zone_id: id };
   }
 
+  private async requireActiveCity(cityId: string) {
+    const city = await this.cities.findById(cityId);
+    if (!city || !city.active) {
+      throw new ApiError(
+        ErrorCodes.CITY_INVALID,
+        'City was not found or is inactive',
+        400,
+      );
+    }
+    return city;
+  }
+
   private async assertNameAvailable(cityId: string, name: string, excludeId: string | null) {
     const taken = await this.zones.findByName(cityId, name, excludeId);
     if (taken) {
@@ -94,6 +108,9 @@ export class ZonesService {
       city_id: row.city_id,
       city_code: row.city_code,
       city_name: row.city_name,
+      state_id: row.state_id,
+      state_code: row.state_code,
+      state_name: row.state_name,
       name: row.name,
       active: row.active,
       created_at: row.created_at,

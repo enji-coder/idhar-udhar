@@ -67,6 +67,7 @@ function serviceFor(stored: VehicleCategoryRow | null = null) {
     })),
     delete: jest.fn(),
     list: jest.fn(),
+    findLaunchCityId: jest.fn(async () => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
     usageByCategory: jest.fn(),
   };
   const fares = {
@@ -223,5 +224,15 @@ describe('vehicle category configuration', () => {
       message: 'Vehicle does not belong to the selected vehicle type',
     });
     expect(categories.update).not.toHaveBeenCalled();
+  });
+
+  it('returns the launch city with the public active catalog', async () => {
+    const { service, categories } = serviceFor(row());
+    categories.list.mockResolvedValue([row()]);
+    const body = await service.listActive();
+    expect(body.launch_city_id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(body.vehicle_categories).toHaveLength(1);
+    expect(body.vehicle_categories[0].rates.base_fare).toBe('40.00');
+    expect(body.vehicle_categories[0].rates.per_km).toBe('8.00');
   });
 });

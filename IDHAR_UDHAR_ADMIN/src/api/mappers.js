@@ -290,6 +290,31 @@ export function mapVehicleCategory(row) {
   };
 }
 
+export function mapState(row) {
+  return {
+    id: row.state_id,
+    name: row.name || '',
+    code: row.code || '',
+    status: row.active === false ? 'Inactive' : 'Active',
+    createdAt: row.created_at,
+    source: 'api',
+  };
+}
+
+export function mapCity(row) {
+  return {
+    id: row.city_id,
+    name: row.name || '',
+    code: row.city_code || '',
+    stateId: row.state_id,
+    stateCode: row.state_code || '',
+    stateName: row.state_name || '',
+    status: row.active === false ? 'Inactive' : 'Active',
+    createdAt: row.created_at,
+    source: 'api',
+  };
+}
+
 export function mapZone(row) {
   return {
     id: row.zone_id,
@@ -299,6 +324,11 @@ export function mapZone(row) {
     orders: 0,
     status: row.active === false ? 'Inactive' : 'Active',
     cityId: row.city_id,
+    cityCode: row.city_code || '',
+    cityName: row.city_name || '',
+    stateId: row.state_id,
+    stateCode: row.state_code || '',
+    stateName: row.state_name || '',
     createdAt: row.created_at,
     source: 'api',
   };

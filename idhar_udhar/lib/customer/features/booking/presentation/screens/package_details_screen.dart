@@ -170,6 +170,15 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
     final List<MockParcelSize> sizes = MockData.parcelSizes
         .where(draft.parcelSizeAllowed)
         .toList(growable: false);
+    final AsyncValue<Map<String, String>> farePreview =
+        ref.watch(vehicleFarePreviewProvider);
+    final String? previewRaw = draft.vehicle == null
+        ? null
+        : farePreview.asData?.value[draft.vehicle!.id];
+    final double? previewFare =
+        previewRaw == null ? null : double.tryParse(previewRaw);
+    // Prefer the order quote; fall back to the same backend vehicle-fare preview.
+    final double? estimatedFare = draft.customerVisibleFare ?? previewFare;
 
     return GlassPageScaffold(
       bottom: Column(
@@ -191,9 +200,9 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
                         ),
                       ),
                       Text(
-                        draft.customerVisibleFare == null
+                        estimatedFare == null
                             ? '—'
-                            : '₹${draft.customerVisibleFare!.toStringAsFixed(0)}',
+                            : '₹${estimatedFare.toStringAsFixed(0)}',
                         style: AppTextStyles.headingS.copyWith(
                           color: AppColors.orange,
                         ),

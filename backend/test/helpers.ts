@@ -294,13 +294,19 @@ async function upsertCity(
   if (existing.rows[0]) {
     return existing.rows[0];
   }
+  const state = await postgres.query<{ state_id: string }>(
+    `SELECT state_id FROM states WHERE code = 'GJ' AND active = TRUE LIMIT 1`,
+  );
+  if (!state.rows[0]) {
+    throw new Error('Gujarat (GJ) state is required before inserting cities');
+  }
   const inserted = await postgres.query<{ city_id: string; city_code: string }>(
     `
-    INSERT INTO cities (name, city_code, active)
-    VALUES ($1, $2, TRUE)
+    INSERT INTO cities (name, city_code, active, state_id)
+    VALUES ($1, $2, TRUE, $3)
     RETURNING city_id, city_code
     `,
-    [name, cityCode],
+    [name, cityCode, state.rows[0].state_id],
   );
   return inserted.rows[0];
 }

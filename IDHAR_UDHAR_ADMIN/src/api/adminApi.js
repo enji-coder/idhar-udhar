@@ -1,6 +1,6 @@
 import { apiDownload, apiRequest, clearTokens, saveTokens } from './client';
 import { adminApproveDocumentPath, adminDocumentPath, adminRejectDocumentPath, adminRiderDocumentsPath } from '../services/documentReview';
-import { mapCustomer, mapEarning, mapNotice, mapOrder, mapPayment, mapRider, mapVehicle, mapVehicleCategory, mapZone } from './mappers';
+import { mapCity, mapCustomer, mapEarning, mapNotice, mapOrder, mapPayment, mapRider, mapState, mapVehicle, mapVehicleCategory, mapZone } from './mappers';
 
 export async function adminLogin(email, password) {
   const tokens = await apiRequest('/v1/admin/auth/login', {
@@ -172,6 +172,32 @@ export async function fetchRiderCodLedger(riderId) {
 export async function fetchAdminVehicleCategories() {
   const body = await apiRequest('/v1/admin/vehicle-categories');
   return (body.vehicle_categories || []).map(mapVehicleCategory);
+}
+
+export async function fetchAdminStates() {
+  const body = await apiRequest('/v1/admin/states');
+  return (body.states || []).map(mapState);
+}
+
+export async function createAdminState(payload) {
+  return mapState(await apiRequest('/v1/admin/states', { method: 'POST', body: payload }));
+}
+
+export async function updateAdminState(id, payload) {
+  return mapState(await apiRequest(`/v1/admin/states/${id}`, { method: 'PATCH', body: payload }));
+}
+
+export async function fetchAdminCities() {
+  const body = await apiRequest('/v1/admin/cities');
+  return (body.cities || []).map(mapCity);
+}
+
+export async function createAdminCity(payload) {
+  return mapCity(await apiRequest('/v1/admin/cities', { method: 'POST', body: payload }));
+}
+
+export async function updateAdminCity(id, payload) {
+  return mapCity(await apiRequest(`/v1/admin/cities/${id}`, { method: 'PATCH', body: payload }));
 }
 
 export async function createAdminVehicleCategory(payload) {

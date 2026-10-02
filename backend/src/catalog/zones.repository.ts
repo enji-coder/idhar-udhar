@@ -7,11 +7,37 @@ export type ZoneRow = {
   city_id: string;
   city_code: string;
   city_name: string;
+  state_id: string;
+  state_code: string;
+  state_name: string;
   name: string;
   active: boolean;
   created_at: Date;
   rider_count: number;
 };
+
+const ZONE_SELECT = `
+  SELECT
+    z.zone_id,
+    z.city_id,
+    c.city_code,
+    c.name AS city_name,
+    c.state_id,
+    s.code AS state_code,
+    s.name AS state_name,
+    z.name,
+    z.active,
+    z.created_at,
+    (
+      SELECT count(*)::int
+      FROM rider_profiles r
+      WHERE r.home_zone_id = z.zone_id
+        AND r.deactivated_at IS NULL
+    ) AS rider_count
+  FROM zones z
+  JOIN cities c ON c.city_id = z.city_id
+  JOIN states s ON s.state_id = c.state_id
+`;
 
 @Injectable()
 export class ZonesRepository {
@@ -20,22 +46,7 @@ export class ZonesRepository {
   async list(db: Queryable = this.postgres): Promise<ZoneRow[]> {
     const result = await db.query<ZoneRow>(
       `
-      SELECT
-        z.zone_id,
-        z.city_id,
-        c.city_code,
-        c.name AS city_name,
-        z.name,
-        z.active,
-        z.created_at,
-        (
-          SELECT count(*)::int
-          FROM rider_profiles r
-          WHERE r.home_zone_id = z.zone_id
-            AND r.deactivated_at IS NULL
-        ) AS rider_count
-      FROM zones z
-      JOIN cities c ON c.city_id = z.city_id
+      ${ZONE_SELECT}
       ORDER BY z.created_at ASC, z.name ASC
       `,
     );
@@ -45,40 +56,10 @@ export class ZonesRepository {
   async findById(id: string, db: Queryable = this.postgres): Promise<ZoneRow | null> {
     const result = await db.query<ZoneRow>(
       `
-      SELECT
-        z.zone_id,
-        z.city_id,
-        c.city_code,
-        c.name AS city_name,
-        z.name,
-        z.active,
-        z.created_at,
-        (
-          SELECT count(*)::int
-          FROM rider_profiles r
-          WHERE r.home_zone_id = z.zone_id
-            AND r.deactivated_at IS NULL
-        ) AS rider_count
-      FROM zones z
-      JOIN cities c ON c.city_id = z.city_id
+      ${ZONE_SELECT}
       WHERE z.zone_id = $1
       `,
       [id],
-    );
-    return result.rows[0] ?? null;
-  }
-
-  async findLaunchCity(db: Queryable = this.postgres): Promise<{
-    city_id: string;
-    city_code: string;
-  } | null> {
-    const result = await db.query<{ city_id: string; city_code: string }>(
-      `
-      SELECT city_id, city_code
-      FROM cities
-      WHERE city_code = 'AMD' AND active = TRUE
-      LIMIT 1
-      `,
     );
     return result.rows[0] ?? null;
   }
@@ -120,12 +101,12 @@ export class ZonesRepository {
 
   async update(
     id: string,
-    input: { name: string; active: boolean },
+    input: { cityId: string; name: string; active: boolean },
     db: Queryable = this.postgres,
   ): Promise<void> {
     await db.query(
-      `UPDATE zones SET name = $2, active = $3 WHERE zone_id = $1`,
-      [id, input.name, input.active],
+      `UPDATE zones SET city_id = $2, name = $3, active = $4 WHERE zone_id = $1`,
+      [id, input.cityId, input.name, input.active],
     );
   }
 
