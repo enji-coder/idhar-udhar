@@ -5,9 +5,11 @@
 export const PAYMENT_PROVIDER = 'PAYMENT_PROVIDER';
 
 export type OnlineChargeIntent = {
-  orderId: string;
+  orderId?: string;
   amount: string;
-  payerType: 'CUSTOMER' | 'RECEIVER';
+  payerType: 'CUSTOMER' | 'RECEIVER' | 'RIDER';
+  riderProfileId?: string;
+  purpose?: 'BOOKING' | 'RECEIVABLE_CLEARANCE' | 'WALLET_TOPUP';
 };
 
 export type OnlineChargeBeginResult = {

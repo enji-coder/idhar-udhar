@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AuthModule } from '../auth/auth.module';
 import { AppConfig } from '../config/configuration';
 import { LOCATION_STORE } from './location-store';
 import { LocationService } from './location.service';
@@ -8,6 +9,7 @@ import { RedisLocationStore } from './redis-location.store';
 import { RiderLocationController } from './rider-location.controller';
 
 @Module({
+  imports: [AuthModule],
   controllers: [RiderLocationController],
   providers: [
     MemoryLocationStore,

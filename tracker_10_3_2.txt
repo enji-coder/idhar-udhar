@@ -1,0 +1,182 @@
+Current reality
+
+Core booking engine kaafi solid hai:
+
+Customer booking/quote/confirm ✅
+Backend fare authority + snapshot ✅
+Automatic SYSTEM dispatch ✅
+Real rider offer/accept + locking ✅
+Rider status machine ✅
+Customer status polling ✅
+Wallet/COD backend foundation ✅
+Cashfree plumbing ✅
+Backend tests 339/339 pass ✅
+
+Lekin production launch ke liye 5 major areas remaining hain:
+
+1. 💰 Trip payment — BLOCKER
+
+Audit ke according Customer Summary mein payment method hai, but actual trip payment API flow connected nahi hai.
+
+Yahan humein business rule lock karna hai.
+
+Current architecture:
+
+Confirm
+ ↓
+SEARCHING
+ ↓
+Rider
+
+Potential alternative:
+
+Confirm
+ ↓
+Online payment
+ ↓
+Cashfree webhook PAID
+ ↓
+SEARCHING
+ ↓
+Rider
+
+Main bina tumhari confirmation ke payment-before-search implement nahi karwaunga, because this changes the order/payment architecture.
+
+2. 💰 Delivery → 85/15 → Wallet
+
+Ye genuinely important hai.
+
+Abhi:
+
+DELIVERED
+ ↓
+Settlement
+
+but automatic:
+
+DELIVERED
+ ↓
+85% Rider
+15% IDHAR UDHAR
+ ↓
+Wallet/finance freeze
+
+properly automatic nahi hai.
+
+Ye fix karna hi padega.
+
+Aur tumhare locked business rule ke according 85/15 Trip Fare par hi hona chahiye — customer invoice/discounted payable total par nahi.
+
+3. 🔔 FCM Push
+
+Backend notification infrastructure hai, but Flutter app FCM token register nahi kar rahi.
+
+Isliye:
+
+Backend creates OFFER_NEW
+       ↓
+Notification worker
+       ↓
+❌ Rider device token missing
+
+Polling currently safety net hai, but professional production app ke liye token lifecycle properly implement karna hoga.
+
+4. 📍 Live Rider Tracking
+
+Abhi rider location publish karta hai:
+
+Rider → backend
+
+but customer ko assigned rider ka live location read karne ka proper API/UI path nahi hai:
+
+Backend → Customer
+
+Status tracking real hai, GPS tracking real nahi.
+
+5. 🔄 Redispatch
+
+Current:
+
+Rider A → Reject
+Rider B → Reject
+Rider C → Reject
+       ↓
+SEARCHING
+       ↓
+😶 stuck
+
+Isko automatically next eligible riders ke cohort ke liye redispatch karna hoga.
+
+🟠 Aur kuch important cleanup
+
+Ye bhi final APK se pehle karenge:
+
+Rider app ka local wallet mutation ❌
+Rider cancel ka local-only behavior ❌
+fake/demo wallet snackbar ❌
+demo invoice wording ❌
+MockData.seedOrders() ❌
+unused demo rider/accept/status helpers ❌
+searching screen ke 5 layout test failures ❌
+FCM token registration ❌
+production config verification ❌
+GPS radius
+
+Isko main abhi blocker nahi banaunga.
+
+Current dispatch:
+
+ONLINE
++ APPROVED
++ matching vehicle
++ no live order
++ COD eligible
+
+Ye functional dispatch hai.
+
+Nearby rider radius / Redis geo matching next production-scale enhancement ho sakta hai, unless tum specifically launch se pehle nearby-only matching require karte ho.
+
+🔴 But ek aur cheez mujhe abhi notice hui
+
+Cursor audit bol raha hai:
+
+Git main @ 4605d43, dirty ~96 paths
+
+Lekin hamare CloudShell mein latest state:
+
+26abfd6
+working tree clean
+
+Isliye Cursor audit kis exact working tree par hua tha, pehle reconcile karna zaroori hai.
+
+Ye important hai because hum galat version par fixes nahi karna chahte.
+
+Ab next step — sirf ek kaam
+
+Cursor IDE mein abhi koi code change mat karna.
+
+Bas Cursor ke terminal mein run karo:
+
+git status
+git log -1 --oneline
+
+Aur mujhe output bhejo.
+
+Uske baad hum exact current branch/version lock karenge.
+
+Phir fix order main ye rakhunga:
+
+1️⃣ Trip payment architecture decision
+2️⃣ DELIVERED → 85/15 → finance/wallet automatic
+3️⃣ FCM token registration + real push
+4️⃣ Redispatch
+5️⃣ Customer live rider GPS
+6️⃣ Remove local/dummy financial behavior
+7️⃣ Demo residue cleanup
+8️⃣ Searching UI test failures
+9️⃣ Full backend + Flutter tests
+🔟 Final Customer + Rider APK E2E
+1️⃣1️⃣ Git commit/push
+1️⃣2️⃣ Automated production deployment
+
+Aur deploy_auto abhi nahi. Pehle application genuinely production-ready banayenge; automation uske baad.

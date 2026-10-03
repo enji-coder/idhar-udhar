@@ -39,7 +39,8 @@ class RiderAssignedScreen extends ConsumerWidget {
       ref.read(sessionProvider.notifier).setEmail(email);
     }
 
-    ref.read(bookingDraftProvider.notifier).acceptRider();
+    // Assignment is already confirmed by the backend poll. Do not locally
+    // invent an "accepted" status before tracking.
     final order = ref.read(bookingDraftProvider).activeOrder;
     if (order != null) {
       ref.read(sessionProvider.notifier).updateOrder(order);
@@ -186,13 +187,13 @@ class RiderAssignedScreen extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
           Text(
-            'Rider assigned',
+            'Driver found',
             style: AppTextStyles.headingM,
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            'Your partner is on the way to pickup',
+            'Your partner is preparing for pickup',
             style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
             textAlign: TextAlign.center,
           ),
@@ -212,10 +213,11 @@ class RiderAssignedScreen extends ConsumerWidget {
           if (rider != null)
             RiderCard(
               name: rider.name,
-              vehicleLabel: rider.vehicleLabel,
-              rating: rider.rating,
-              subtitle:
-                  '${rider.trips} trips · ETA ${order?.etaMinutes ?? 12} min',
+              vehicleLabel: rider.vehicleLabel.isEmpty
+                  ? (order?.vehicle.name ?? 'Vehicle')
+                  : rider.vehicleLabel,
+              rating: rider.rating > 0 ? rider.rating : null,
+              subtitle: 'Assigned to your delivery',
               avatar: const SafeAssetImage(
                 path: AssetPaths.rider,
                 height: 48,
@@ -223,13 +225,28 @@ class RiderAssignedScreen extends ConsumerWidget {
               ),
               onCall: () {},
               onMessage: () {},
+            )
+          else
+            GlassContainer(
+              child: Text(
+                'Driver assigned. Details will appear shortly.',
+                style: AppTextStyles.body,
+                textAlign: TextAlign.center,
+              ),
             ),
           const SizedBox(height: AppSpacing.lg),
           GlassContainer(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Order ${order?.id ?? ''}', style: AppTextStyles.headingS),
+                Text(
+                  order == null
+                      ? 'Delivery'
+                      : (order.displayId != null && order.displayId!.isNotEmpty
+                          ? order.displayId!
+                          : 'Your delivery'),
+                  style: AppTextStyles.headingS,
+                ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   '${order?.pickup.address ?? ''}\n→ ${order?.drop.address ?? ''}',

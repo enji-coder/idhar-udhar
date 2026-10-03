@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import 'api_client.dart';
+import 'api_config.dart';
 import 'api_exception.dart';
 import 'json_codec.dart';
 
@@ -24,13 +25,20 @@ class ApiStop {
   final String? contactName;
   final String? contactPhone;
 
+  /// Nest `CreateOrderStopDto` allows at most 6 fractional digits
+  /// (`@IsNumber({ maxDecimalPlaces: 6 })`). Raw GPS doubles often exceed that
+  /// and fail `POST /v1/orders/vehicle-fares` with HTTP 400.
+  static double coordinateForApi(double value) {
+    return double.parse(value.toStringAsFixed(6));
+  }
+
   Map<String, Object?> toJson() {
     return <String, Object?>{
       'sequence': sequence,
       'stop_type': stopType,
       'address_text': addressText,
-      'latitude': latitude,
-      'longitude': longitude,
+      'latitude': coordinateForApi(latitude),
+      'longitude': coordinateForApi(longitude),
       if (contactName != null) 'contact_name': contactName,
       if (contactPhone != null) 'contact_phone': contactPhone,
     };
@@ -49,6 +57,26 @@ class ApiStop {
   }
 }
 
+class ApiAssignedRider {
+  const ApiAssignedRider({
+    this.name,
+    this.vehicleRegistration,
+    this.vehicleCategoryName,
+  });
+
+  final String? name;
+  final String? vehicleRegistration;
+  final String? vehicleCategoryName;
+
+  factory ApiAssignedRider.fromJson(Map<String, Object?> json) {
+    return ApiAssignedRider(
+      name: jsonString(json['name']),
+      vehicleRegistration: jsonString(json['vehicle_registration']),
+      vehicleCategoryName: jsonString(json['vehicle_category_name']),
+    );
+  }
+}
+
 class ApiOrder {
   const ApiOrder({
     required this.orderId,
@@ -59,6 +87,7 @@ class ApiOrder {
     this.vehicleCategoryName,
     this.vehicleCategoryId,
     this.riderProfileId,
+    this.assignedRider,
     this.stops = const <ApiStop>[],
     this.tripFare,
     this.riderAmount,
@@ -76,6 +105,7 @@ class ApiOrder {
   final String? vehicleCategoryName;
   final String? vehicleCategoryId;
   final String? riderProfileId;
+  final ApiAssignedRider? assignedRider;
   final List<ApiStop> stops;
   final double? tripFare;
   final double? riderAmount;
@@ -91,6 +121,7 @@ class ApiOrder {
   factory ApiOrder.fromJson(Map<String, Object?> json) {
     final Map<String, Object?> snapshot = jsonObject(json['fare_snapshot']);
     final Map<String, Object?> waiting = jsonObject(json['waiting']);
+    final Map<String, Object?> assigned = jsonObject(json['assigned_rider']);
     final Map<String, Object?> quote = json.containsKey('fare_quote_id')
         ? json
         : jsonObject(json['fare_quote']);
@@ -103,6 +134,7 @@ class ApiOrder {
       vehicleCategoryName: jsonString(json['vehicle_category_name']),
       vehicleCategoryId: jsonString(json['vehicle_category_id']),
       riderProfileId: jsonString(json['rider_profile_id']),
+      assignedRider: assigned.isEmpty ? null : ApiAssignedRider.fromJson(assigned),
       stops: jsonList(json['stops'])
           .map((Object? item) => ApiStop.fromJson(jsonObject(item)))
           .toList(growable: false),
@@ -123,9 +155,8 @@ class ApiOrder {
               : null),
       fareQuoteId: jsonString(json['fare_quote_id']) ??
           jsonString(quote['fare_quote_id']),
-      waitingAmount: waiting['amount'] == null
-          ? null
-          : jsonDouble(waiting['amount']),
+      waitingAmount:
+          waiting['amount'] == null ? null : jsonDouble(waiting['amount']),
       receivableOutstanding: waiting['outstanding_amount'] == null
           ? null
           : jsonDouble(waiting['outstanding_amount']),
@@ -272,35 +303,30 @@ class OrdersApi {
     required String cityId,
     required List<ApiStop> stops,
   }) async {
-    // ignore: avoid_print — temporary IU_FARE_PREVIEW diagnostics
-    debugPrint(
-      '[IU_FARE_PREVIEW] POST /v1/orders/vehicle-fares attempted '
-      'cityId=$cityId stopCount=${stops.length}',
-    );
+    final List<Map<String, Object?>> stopPayload =
+        stops.map((ApiStop stop) => stop.toJson()).toList(growable: false);
+    final Map<String, Object?> request = <String, Object?>{
+      'city_id': cityId,
+      'stops': stopPayload,
+    };
+    if (ApiConfig.enableRequestLogging) {
+      debugPrint(
+        'FARE DEBUG request path=/v1/orders/vehicle-fares '
+        'baseUrl=${ApiConfig.baseUrl} cityId=$cityId '
+        'stopCount=${stopPayload.length} stops=$stopPayload',
+      );
+    }
     try {
       final Map<String, Object?> body = await _client.post(
         '/v1/orders/vehicle-fares',
-        data: <String, Object?>{
-          'city_id': cityId,
-          'stops': stops.map((ApiStop stop) => stop.toJson()).toList(),
-        },
-      );
-      final Object? vehiclesRaw = body['vehicles'];
-      final List<Object?> vehicles = jsonList(vehiclesRaw);
-      debugPrint(
-        '[IU_FARE_PREVIEW] POST ok vehiclesType=${vehiclesRaw.runtimeType} '
-        'vehiclesLen=${vehicles.length}',
+        data: request,
       );
       final Map<String, String> fares = <String, String>{};
-      for (final Object? item in vehicles) {
+      for (final Object? item in jsonList(body['vehicles'])) {
         final Map<String, Object?> vehicle = jsonObject(item);
         final String? id = jsonString(vehicle['vehicle_category_id']);
         final Map<String, Object?> fare = jsonObject(vehicle['fare']);
         final String? payable = jsonString(fare['net_payable']);
-        debugPrint(
-          '[IU_FARE_PREVIEW] response vehicle id=$id '
-          'net_payable=$payable fareKeys=${fare.keys.toList()}',
-        );
         if (id != null &&
             id.isNotEmpty &&
             payable != null &&
@@ -308,26 +334,36 @@ class OrdersApi {
           fares[id] = payable;
         }
       }
-      debugPrint(
-        '[IU_FARE_PREVIEW] parsed fare map keys=${fares.keys.toList()} '
-        'values=${fares.values.toList()}',
-      );
+      if (ApiConfig.enableRequestLogging) {
+        debugPrint(
+          'FARE DEBUG response vehicleCount=${jsonList(body['vehicles']).length} '
+          'parsedCount=${fares.length} fares=$fares '
+          'distance_km=${body['distance_km']}',
+        );
+      }
       return fares;
-    } on ApiException catch (error) {
-      debugPrint(
-        '[IU_FARE_PREVIEW] POST failed status=${error.statusCode} '
-        'code=${error.code} message=${error.message}',
-      );
+    } on ApiException catch (error, stack) {
+      if (ApiConfig.enableRequestLogging) {
+        debugPrint(
+          'FARE DEBUG exception code=${error.code} status=${error.statusCode} '
+          'message=${error.message} details=${error.details}',
+        );
+        debugPrint('FARE DEBUG stack=$stack');
+      }
       rethrow;
-    } catch (error) {
-      debugPrint('[IU_FARE_PREVIEW] POST failed error=$error');
+    } catch (error, stack) {
+      if (ApiConfig.enableRequestLogging) {
+        debugPrint('FARE DEBUG exception=$error');
+        debugPrint('FARE DEBUG stack=$stack');
+      }
       rethrow;
     }
   }
 
   Future<ApiQuote> quote(String orderId) async {
     return ApiQuote.fromJson(
-      await _client.post('/v1/orders/$orderId/quote', data: <String, Object?>{}),
+      await _client
+          .post('/v1/orders/$orderId/quote', data: <String, Object?>{}),
     );
   }
 
@@ -348,4 +384,77 @@ class OrdersApi {
       await _client.post('/v1/orders/$orderId/cancel'),
     );
   }
+
+  /// Records who pays after fare confirm. Does not charge Cashfree.
+  Future<void> setPaymentResponsibility({
+    required String orderId,
+    required String whoPays,
+    required String customerResponsibility,
+    required String receiverResponsibility,
+  }) async {
+    await _client.post(
+      '/v1/orders/$orderId/payment/responsibility',
+      data: <String, Object?>{
+        'who_pays': whoPays,
+        'customer_responsibility': customerResponsibility,
+        'receiver_responsibility': receiverResponsibility,
+      },
+    );
+  }
+
+  /// Records online/cash plan after responsibility. Does not charge Cashfree.
+  Future<void> setPaymentPlan({
+    required String orderId,
+    required String customerPlannedOnline,
+    required String customerPlannedCash,
+    required String receiverPlannedOnline,
+    required String receiverPlannedCash,
+  }) async {
+    await _client.post(
+      '/v1/orders/$orderId/payment/plan',
+      data: <String, Object?>{
+        'customer_planned_online': customerPlannedOnline,
+        'customer_planned_cash': customerPlannedCash,
+        'receiver_planned_online': receiverPlannedOnline,
+        'receiver_planned_cash': receiverPlannedCash,
+      },
+    );
+  }
+
+  /// Latest assigned-rider GPS for an active delivery. Null when unavailable.
+  Future<RiderLiveLocation?> riderLocation(String orderId) async {
+    final Map<String, Object?> body =
+        await _client.get('/v1/orders/$orderId/rider-location');
+    final Map<String, Object?>? loc = body['location'] is Map
+        ? jsonObject(body['location'])
+        : null;
+    if (loc == null) {
+      return null;
+    }
+    final double? lat = (loc['latitude'] as num?)?.toDouble();
+    final double? lng = (loc['longitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) {
+      return null;
+    }
+    return RiderLiveLocation(
+      latitude: lat,
+      longitude: lng,
+      stale: body['stale'] == true,
+      recordedAt: jsonString(loc['recorded_at']),
+    );
+  }
+}
+
+class RiderLiveLocation {
+  const RiderLiveLocation({
+    required this.latitude,
+    required this.longitude,
+    required this.stale,
+    this.recordedAt,
+  });
+
+  final double latitude;
+  final double longitude;
+  final bool stale;
+  final String? recordedAt;
 }

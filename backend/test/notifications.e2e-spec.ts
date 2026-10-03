@@ -16,6 +16,7 @@ import {
   OrderCatalog,
   sampleStops,
   uniqueIdempotencyKey,
+  verifyPendingWalletTopUp,
 } from './helpers';
 
 describe('Notifications and worker (e2e)', () => {
@@ -620,6 +621,16 @@ describe('Notifications and worker (e2e)', () => {
       .set('Idempotency-Key', uniqueIdempotencyKey())
       .send({ amount: '50.00' });
     expect(recharge.status).toBe(201);
+    expect(recharge.body.charge_purpose).toBe('WALLET_TOPUP');
+    const beforeCredit = await request(app.getHttpServer())
+      .get('/v1/notifications')
+      .set(bearer(rider.tokens.accessToken));
+    expect(
+      beforeCredit.body.notifications.some(
+        (row: { type: string }) => row.type === 'WALLET_RECHARGE_COMPLETED',
+      ),
+    ).toBe(false);
+    expect(await verifyPendingWalletTopUp(app, recharge.body)).toBe('applied');
     const afterRecharge = await request(app.getHttpServer())
       .get('/v1/notifications')
       .set(bearer(rider.tokens.accessToken));

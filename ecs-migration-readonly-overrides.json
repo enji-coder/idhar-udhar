@@ -1,0 +1,12 @@
+{
+  "containerOverrides": [
+    {
+      "name": "idhar-udhar-backend",
+      "command": [
+        "node",
+        "-e",
+        "const fs=require('fs'),pg=require('pg');(async()=>{const ssl=process.env.DATABASE_SSL==='true'?{ca:fs.readFileSync(process.env.DATABASE_SSL_ROOT_CERT,'utf8'),rejectUnauthorized:true}:false;const c=new pg.Client({host:process.env.DATABASE_HOST,port:Number(process.env.DATABASE_PORT),database:process.env.DATABASE_NAME,user:process.env.DATABASE_USER,password:process.env.DATABASE_PASSWORD,ssl});await c.connect();const q=async(sql)=>{const r=await c.query(sql);console.log(JSON.stringify(r.rows))};await q(`SELECT state_id,name,code,active FROM states WHERE code='GJ'`);await q(`SELECT c.city_id,c.name,c.city_code,c.state_id,s.code AS state_code FROM cities c JOIN states s ON s.state_id=c.state_id WHERE c.city_code='AMD'`);await q(`SELECT count(*)::int AS cities_without_state FROM cities WHERE state_id IS NULL`);await q(`SELECT is_nullable FROM information_schema.columns WHERE table_name='cities' AND column_name='state_id'`);await c.end()})().catch(e=>{console.error(e.message);process.exit(1)})"
+      ]
+    }
+  ]
+}

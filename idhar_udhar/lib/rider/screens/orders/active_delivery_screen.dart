@@ -9,7 +9,6 @@ import 'package:idhar_udhar/shared/maps/maps.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
-import '../../data/dummy/rider_finance.dart';
 import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
@@ -155,12 +154,31 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen> {
                     ? 'Cancel trip (₹0)'
                     : 'Cancel trip (₹${riderCancel.fee.toStringAsFixed(0)})',
                 destructive: true,
-                onPressed: () {
-                  applyRiderEarning(ref, riderCancel.riderAmount);
-                  ref.read(activeOrderProvider.notifier).state = null;
-                  ref.read(deliveryStatusProvider.notifier).state =
-                      DeliveryLifecycleStatus.accepted;
-                  context.go(RiderRoutes.dashboard);
+                onPressed: () async {
+                  // Rider cancel of an assigned trip is not a customer cancel.
+                  // Do not mutate local wallet; clear only after server work exists.
+                  final String? orderId = order.backendOrderId;
+                  if (orderId == null || orderId.isEmpty) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'This trip is not linked to the server and cannot be cancelled here.',
+                          ),
+                        ),
+                      );
+                    }
+                    return;
+                  }
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Rider trip cancellation must be handled by support or a server cancel API.',
+                        ),
+                      ),
+                    );
+                  }
                 },
               ),
             ),
@@ -204,11 +222,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen> {
                 }
               }
               if (next == DeliveryLifecycleStatus.delivered) {
-                completeRiderTrip(
-                  ref,
-                  cashCollected: order.cashCollected,
-                  riderAmount: order.riderAmount,
-                );
+                // Wallet/COD are backend-authoritative after DELIVERED finance capture.
                 await ref.read(riderSessionProvider.notifier).refreshWallet();
               }
               if (next != null) {

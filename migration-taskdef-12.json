@@ -1,0 +1,93 @@
+{
+    "containerDefinitions":  [
+                                 {
+                                     "name":  "migration",
+                                     "image":  "635738235470.dkr.ecr.ap-south-1.amazonaws.com/idhar-udhar-migration@sha256:9b97c0111de7dfb9a56aac568e6039f38311e0f33549abd606cfc9c5494df866",
+                                     "cpu":  0,
+                                     "portMappings":  [
+
+                                                      ],
+                                     "essential":  true,
+                                     "environment":  [
+                                                         {
+                                                             "name":  "DATABASE_SSL",
+                                                             "value":  "true"
+                                                         },
+                                                         {
+                                                             "name":  "PGHOST",
+                                                             "value":  "idhar-udhar-prod-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_NAME",
+                                                             "value":  "idhar_udhar"
+                                                         },
+                                                         {
+                                                             "name":  "PGUSER",
+                                                             "value":  "idhar_admin"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_HOST",
+                                                             "value":  "idhar-udhar-prod-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_PORT",
+                                                             "value":  "5432"
+                                                         },
+                                                         {
+                                                             "name":  "PGPORT",
+                                                             "value":  "5432"
+                                                         },
+                                                         {
+                                                             "name":  "MIGRATE_DRY_RUN",
+                                                             "value":  "1"
+                                                         },
+                                                         {
+                                                             "name":  "PGDATABASE",
+                                                             "value":  "idhar_udhar"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_USER",
+                                                             "value":  "idhar_admin"
+                                                         }
+                                                     ],
+                                     "mountPoints":  [
+
+                                                     ],
+                                     "volumesFrom":  [
+
+                                                     ],
+                                     "secrets":  [
+                                                     {
+                                                         "name":  "DATABASE_PASSWORD",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:rds!db-168c4185-d158-49e3-8cd8-b91c36019f68-qcZSYx:password::"
+                                                     }
+                                                 ],
+                                     "logConfiguration":  {
+                                                              "logDriver":  "awslogs",
+                                                              "options":  {
+                                                                              "awslogs-group":  "/ecs/idhar-udhar-migration",
+                                                                              "awslogs-create-group":  "true",
+                                                                              "awslogs-region":  "ap-south-1",
+                                                                              "awslogs-stream-prefix":  "ecs"
+                                                                          }
+                                                          },
+                                     "systemControls":  [
+
+                                                        ]
+                                 }
+                             ],
+    "family":  "idhar-udhar-migration",
+    "executionRoleArn":  "arn:aws:iam::635738235470:role/ecsTaskExecutionRole",
+    "networkMode":  "awsvpc",
+    "volumes":  [
+
+                ],
+    "placementConstraints":  [
+
+                             ],
+    "requiresCompatibilities":  [
+                                    "FARGATE"
+                                ],
+    "cpu":  "256",
+    "memory":  "512"
+}

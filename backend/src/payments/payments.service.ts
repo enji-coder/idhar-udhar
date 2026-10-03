@@ -65,6 +65,124 @@ export class PaymentsService {
     });
   }
 
+  async beginRiderWalletTopUp(
+    auth: AuthContext,
+    amountRaw: string,
+    idempotencyKey: string,
+  ) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider role required', 403);
+    }
+    const amount = this.readPositive(amountRaw);
+    const scopedKey = `${auth.identityId}:${idempotencyKey}`;
+    const requestHash = hashRequest({ amount });
+    const existing = await this.idempotency.find('wallet-topup', scopedKey);
+    if (existing) {
+      return this.replayOrConflict(
+        existing.request_hash,
+        requestHash,
+        existing.result_payload,
+      );
+    }
+    try {
+      return await this.postgres.transaction(async (tx) => {
+        const replay = await this.idempotency.find('wallet-topup', scopedKey, tx);
+        if (replay) {
+          return this.replayOrConflict(
+            replay.request_hash,
+            requestHash,
+            replay.result_payload,
+          );
+        }
+        await this.assertMethodEnabled('ONLINE', tx);
+        const onlineRefs = await this.provider.beginOnlineCharge({
+          amount,
+          payerType: 'RIDER',
+          riderProfileId: auth.profileId,
+          purpose: 'WALLET_TOPUP',
+        });
+        const row = await this.payments.insertTransaction(
+          {
+            orderId: null,
+            riderProfileId: auth.profileId,
+            payerType: 'RIDER',
+            method: 'ONLINE',
+            amount,
+            direction: 'CHARGE',
+            status: 'PENDING',
+            providerTxnId: onlineRefs.providerTxnId,
+            providerEventId: onlineRefs.providerEventId,
+            idempotencyKey: scopedKey,
+            createdByType: 'RIDER',
+            createdByProfileId: auth.profileId,
+            chargePurpose: 'WALLET_TOPUP',
+          },
+          tx,
+        );
+        if (
+          onlineRefs.paymentSessionId &&
+          onlineRefs.gatewayOrderId &&
+          onlineRefs.providerTxnId &&
+          onlineRefs.environment
+        ) {
+          await this.gateway.insertAttempt(
+            {
+              paymentTransactionId: row.payment_transaction_id,
+              environment: onlineRefs.environment,
+              gatewayOrderId: onlineRefs.gatewayOrderId,
+              cfOrderId: onlineRefs.providerTxnId,
+              paymentSessionId: onlineRefs.paymentSessionId,
+              amount,
+            },
+            tx,
+          );
+        }
+        const payload = {
+          payment_transaction_id: row.payment_transaction_id,
+          amount,
+          charge_purpose: 'WALLET_TOPUP' as const,
+          payment_session_id: onlineRefs.paymentSessionId,
+          cashfree_order_id: onlineRefs.gatewayOrderId,
+          cashfree_environment: onlineRefs.environment,
+        };
+        await this.idempotency.insert(
+          {
+            scope: 'wallet-topup',
+            key: scopedKey,
+            actorIdentityId: auth.identityId,
+            requestHash,
+            resultEntityId: row.payment_transaction_id,
+            resultPayload: payload,
+          },
+          tx,
+        );
+        return payload;
+      });
+    } catch (err) {
+      if (isUniqueViolation(err, 'payment_tx_wallet_topup_idemp_unique')) {
+        const raced = await this.idempotency.find('wallet-topup', scopedKey);
+        if (raced) {
+          return this.replayOrConflict(
+            raced.request_hash,
+            requestHash,
+            raced.result_payload,
+          );
+        }
+      }
+      if (isUniqueViolation(err, 'idempotency_scope_key_unique')) {
+        const raced = await this.idempotency.find('wallet-topup', scopedKey);
+        if (raced) {
+          return this.replayOrConflict(
+            raced.request_hash,
+            requestHash,
+            raced.result_payload,
+          );
+        }
+      }
+      throw err;
+    }
+  }
+
   async beginReceivableClearance(
     auth: AuthContext,
     orderId: string,

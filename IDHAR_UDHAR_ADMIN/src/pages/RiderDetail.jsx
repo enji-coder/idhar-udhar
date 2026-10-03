@@ -20,7 +20,7 @@ import { formatAppDate, formatAppTime, parseAppDate, sortByDateTime } from '../u
 import { maskAadhaar, maskBankAccount } from '../utils/masking';
 import { enrichRiderProfile, enrichVehicleRecord, riderDocumentsFor } from '../services/profileEnrichment';
 import { calculateOrderFinance } from '../services/commission';
-import { approveAdminDocument, fetchAdminDocument, fetchAdminRider, fetchAdminRiderDocuments, fetchRiderCod, fetchRiderEarnings, fetchRiderProfilePicture, fetchRiderWallet, fetchRiderWalletLedger, rejectAdminDocument, reopenRiderVerification } from '../api/adminApi';
+import { approveAdminDocument, fetchAdminDocument, fetchAdminRider, fetchAdminRiderDocuments, fetchRiderCod, fetchRiderEarnings, fetchRiderProfilePicture, fetchRiderWallet, fetchRiderWalletLedger, fetchRiderWalletTopUps, rejectAdminDocument, reopenRiderVerification } from '../api/adminApi';
 import { canSubmitReview, documentLabel, documentStatusLabel, documentsLockedLabel, languageLabel, mediaPreviewError, previewErrorMessage, previewKind, rejectionIssue, verificationSourceLabel } from '../services/documentReview';
 
 const IDLE_PREVIEW = { status: 'idle', url: '', contentType: '', fileName: '', error: '' };
@@ -74,6 +74,7 @@ export default function RiderDetail() {
   const [cod, setCod] = useState(null);
   const [pay, setPay] = useState([]);
   const [ledger, setLedger] = useState([]);
+  const [topups, setTopups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [serverDocuments, setServerDocuments] = useState([]);
@@ -99,11 +100,12 @@ export default function RiderDetail() {
         const profile = await fetchAdminRider(id);
         if (cancelled) return;
         setRider(profile);
-        const [walletResult, codResult, earningsResult, ledgerResult, documentsResult] = await Promise.allSettled([
+        const [walletResult, codResult, earningsResult, ledgerResult, topupsResult, documentsResult] = await Promise.allSettled([
           fetchRiderWallet(id),
           fetchRiderCod(id),
           fetchRiderEarnings(id),
           fetchRiderWalletLedger(id),
+          fetchRiderWalletTopUps(id),
           fetchAdminRiderDocuments(id),
         ]);
         if (cancelled) return;
@@ -126,6 +128,17 @@ export default function RiderDetail() {
           })));
         } else {
           setLedger([]);
+        }
+        if (topupsResult.status === 'fulfilled') {
+          setTopups((topupsResult.value || []).map((entry) => ({
+            id: entry.payment_transaction_id,
+            date: entry.created_at,
+            amount: Number(entry.amount || 0),
+            status: entry.status,
+            reference: entry.gateway_order_id || entry.provider_txn_id || '—',
+          })));
+        } else {
+          setTopups([]);
         }
         if (documentsResult.status === 'fulfilled') {
           setServerDocuments(documentsResult.value?.documents || []);
@@ -369,6 +382,10 @@ export default function RiderDetail() {
           </div>
           <dl className="mt-4 space-y-2 text-sm">
             <div className="flex justify-between"><dt className="text-ink-muted">Phone</dt><dd>{rider.phone}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Email</dt><dd>{rider.email || '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Date of birth</dt><dd>{rider.dateOfBirth || '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Language</dt><dd>{rider.language || '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Online</dt><dd>{rider.online || 'OFFLINE'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Vehicle</dt><dd>{rider.vehicle}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Rating</dt><dd>{rider.rating || 'N/A'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">On-time</dt><dd>{rider.onTime != null ? `${rider.onTime}%` : 'N/A'}</dd></div>
@@ -496,6 +513,23 @@ export default function RiderDetail() {
           pageSize={10}
           compact
           itemLabel="transactions"
+          scroll
+        />
+      </GlassCard>
+      <GlassCard className="overflow-hidden">
+        <h3 className="mb-3 text-lg font-semibold">Wallet top-ups</h3>
+        <DataTable
+          columns={[
+            { key: 'id', label: 'Payment ID' },
+            { key: 'date', label: 'Date', render: (row) => formatAppDate(parseAppDate(row.date)) },
+            { key: 'amount', label: 'Amount', render: (row) => formatINR(row.amount) },
+            { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+            { key: 'reference', label: 'Provider reference', hideBelow: 'lg' },
+          ]}
+          data={topups}
+          pageSize={10}
+          compact
+          itemLabel="top-ups"
           scroll
         />
       </GlassCard>

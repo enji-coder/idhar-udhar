@@ -32,7 +32,8 @@ export type PlanRow = {
 
 export type TransactionRow = {
   payment_transaction_id: string;
-  order_id: string;
+  order_id: string | null;
+  rider_profile_id: string | null;
   payer_type: PayerType;
   method: PaymentMethod;
   amount: string;
@@ -81,6 +82,7 @@ const PLAN_COLUMNS = `
 const TX_COLUMNS = `
   payment_transaction_id,
   order_id,
+  rider_profile_id,
   payer_type,
   method,
   amount::text AS amount,
@@ -333,7 +335,7 @@ export class PaymentsRepository {
         g.failure_reason,
         ref.refund_status
       FROM payment_transactions t
-      JOIN orders o ON o.order_id = t.order_id
+      LEFT JOIN orders o ON o.order_id = t.order_id
       LEFT JOIN payment_gateway_attempts g
         ON g.payment_transaction_id = t.payment_transaction_id
       LEFT JOIN LATERAL (
@@ -352,7 +354,8 @@ export class PaymentsRepository {
 
   async insertTransaction(
     input: {
-      orderId: string;
+      orderId?: string | null;
+      riderProfileId?: string | null;
       payerType: PayerType;
       method: PaymentMethod;
       amount: string;
@@ -363,7 +366,7 @@ export class PaymentsRepository {
       idempotencyKey: string;
       createdByType: TransactionRow['created_by_type'];
       createdByProfileId: string | null;
-      chargePurpose?: 'BOOKING' | 'RECEIVABLE_CLEARANCE';
+      chargePurpose?: 'BOOKING' | 'RECEIVABLE_CLEARANCE' | 'WALLET_TOPUP';
     },
     db: Queryable,
   ): Promise<TransactionRow> {
@@ -371,6 +374,7 @@ export class PaymentsRepository {
       `
       INSERT INTO payment_transactions (
         order_id,
+        rider_profile_id,
         payer_type,
         method,
         amount,
@@ -384,12 +388,13 @@ export class PaymentsRepository {
         charge_purpose
       )
       VALUES (
-        $1, $2, $3, $4::numeric(12,2), $5, $6, $7, $8, $9, $10, $11, $12
+        $1, $2, $3, $4, $5::numeric(12,2), $6, $7, $8, $9, $10, $11, $12, $13
       )
       RETURNING ${TX_COLUMNS}
       `,
       [
-        input.orderId,
+        input.orderId ?? null,
+        input.riderProfileId ?? null,
         input.payerType,
         input.method,
         input.amount,

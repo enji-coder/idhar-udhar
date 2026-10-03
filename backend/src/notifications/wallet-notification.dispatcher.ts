@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Queryable } from '../database/queryable';
 import { NotificationService } from './notification.service';
-
 @Injectable()
 export class WalletNotificationDispatcher {
   constructor(private readonly notifications: NotificationService) {}
@@ -23,6 +22,50 @@ export class WalletNotificationDispatcher {
         profileId: input.riderProfileId,
         amount: input.amount,
       },
+      db,
+    );
+  }
+
+  async onWithdrawalEvent(
+    input: {
+      riderProfileId: string;
+      withdrawalId: string;
+      amount: string;
+      type:
+        | 'WITHDRAWAL_REQUESTED'
+        | 'WITHDRAWAL_PROCESSING'
+        | 'WITHDRAWAL_SUCCESSFUL'
+        | 'WITHDRAWAL_FAILED'
+        | 'WITHDRAWAL_REJECTED'
+        | 'WITHDRAWAL_REFUNDED';
+      reference?: string | null;
+    },
+    db: Queryable,
+  ): Promise<void> {
+    await this.notifications.notifyIfRecipient(
+      {
+        eventKey: `withdraw:${input.withdrawalId}:${input.type}:RIDER:${input.riderProfileId}`,
+        type: input.type,
+        audience: 'RIDER',
+        profileType: 'RIDER',
+        profileId: input.riderProfileId,
+        amount: input.amount,
+        reason: input.reference ?? null,
+      },
+      db,
+    );
+  }
+
+  async onWithdrawalRequested(
+    input: {
+      riderProfileId: string;
+      withdrawalId: string;
+      amount: string;
+    },
+    db: Queryable,
+  ): Promise<void> {
+    await this.onWithdrawalEvent(
+      { ...input, type: 'WITHDRAWAL_REQUESTED' },
       db,
     );
   }

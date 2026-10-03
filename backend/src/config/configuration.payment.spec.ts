@@ -57,12 +57,18 @@ describe('payment configuration', () => {
     expect(payment.cashfree.apiBaseUrl).not.toContain('api.cashfree.com');
   });
 
-  it('refuses Cashfree production in this phase', () => {
+  it('selects the Cashfree production host when credentials are present', () => {
     process.env.PAYMENT_PROVIDER = 'cashfree';
     process.env.CASHFREE_ENVIRONMENT = 'production';
     process.env.CASHFREE_CLIENT_ID = 'test_client_id';
     process.env.CASHFREE_CLIENT_SECRET = 'test_client_secret';
-    expect(() => loadAppConfig()).toThrow(/production is not enabled/);
+    const payment = loadAppConfig().payment;
+    expect(payment.provider).toBe('cashfree');
+    expect(payment.cashfree.environment).toBe('production');
+    expect(payment.cashfree.apiBaseUrl).toBe('https://api.cashfree.com/pg');
+    expect(payment.cashfree.payoutApiBaseUrl).toBe(
+      'https://api.cashfree.com/payout',
+    );
   });
 
   it('requires Cashfree credentials before selecting the gateway', () => {

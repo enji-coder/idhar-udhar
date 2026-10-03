@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
+import '../../features/wallet/wallet_topup_checkout.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -98,8 +99,25 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
               confirmLabel: 'Add',
               onConfirm: (amount) async {
                 try {
-                  await ref.read(walletApiProvider).recharge(amount);
-                  await ref.read(riderSessionProvider.notifier).refreshWallet();
+                  final session =
+                      await ref.read(walletApiProvider).beginTopUp(amount);
+                  await openRiderWalletTopUpCheckout(session);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Payment submitted. Balance updates after confirmation.',
+                        ),
+                      ),
+                    );
+                  }
+                  // Poll briefly; credit only arrives after webhook verification.
+                  for (var i = 0; i < 5; i++) {
+                    await Future<void>.delayed(const Duration(seconds: 2));
+                    await ref
+                        .read(riderSessionProvider.notifier)
+                        .refreshWallet();
+                  }
                 } on ApiException catch (error) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -119,9 +137,32 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
               title: 'Withdraw Money',
               confirmLabel: 'Withdraw',
               maxAmount: balance,
-              onConfirm: (amount) {
-                ref.read(riderWalletBalanceProvider.notifier).state =
-                    (balance - amount).clamp(0, double.infinity);
+              onConfirm: (amount) async {
+                try {
+                  final bank = ref.read(riderBankProvider);
+                  final String method =
+                      bank.upiId.trim().isNotEmpty ? 'UPI' : 'BANK';
+                  await ref.read(walletApiProvider).withdraw(
+                        amount: amount,
+                        payoutMethod: method,
+                      );
+                  await ref.read(riderSessionProvider.notifier).refreshWallet();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Withdrawal requested. Funds are held until processed.',
+                        ),
+                      ),
+                    );
+                  }
+                } on ApiException catch (error) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error.message)),
+                    );
+                  }
+                }
               },
             ),
           ),
@@ -136,7 +177,7 @@ Future<void> showRiderWalletAmountSheet({
   required WidgetRef ref,
   required String title,
   required String confirmLabel,
-  required ValueChanged<double> onConfirm,
+  required FutureOr<void> Function(double amount) onConfirm,
   double? maxAmount,
 }) {
   return _amountSheet(
@@ -154,11 +195,12 @@ Future<void> _amountSheet({
   required WidgetRef ref,
   required String title,
   required String confirmLabel,
-  required ValueChanged<double> onConfirm,
+  required FutureOr<void> Function(double amount) onConfirm,
   double? maxAmount,
 }) async {
   final controller = TextEditingController();
   String? error;
+  bool submitting = false;
 
   await showModalBottomSheet<void>(
     context: context,
@@ -184,7 +226,7 @@ Future<void> _amountSheet({
                 Text(title, style: RiderTextStyles.title),
                 const SizedBox(height: RiderSpacing.sm),
                 Text(
-                  'Recharge is applied by the server. COD Due is settled first.',
+                  'Payments are confirmed by the server. COD Due is settled first on credit.',
                   style: RiderTextStyles.caption,
                 ),
                 const SizedBox(height: RiderSpacing.lg),
@@ -201,20 +243,34 @@ Future<void> _amountSheet({
                 ),
                 const SizedBox(height: RiderSpacing.lg),
                 RiderPrimaryButton(
-                  label: confirmLabel,
-                  onPressed: () {
-                    final amount = double.tryParse(controller.text.trim());
-                    if (amount == null || amount <= 0) {
-                      setModal(() => error = 'Enter a valid amount');
-                      return;
-                    }
-                    if (maxAmount != null && amount > maxAmount) {
-                      setModal(() => error = 'Amount exceeds available balance');
-                      return;
-                    }
-                    onConfirm(amount);
-                    Navigator.of(context).pop();
-                  },
+                  label: submitting ? 'Please wait…' : confirmLabel,
+                  onPressed: submitting
+                      ? null
+                      : () async {
+                          final amount =
+                              double.tryParse(controller.text.trim());
+                          if (amount == null || amount <= 0) {
+                            setModal(() => error = 'Enter a valid amount');
+                            return;
+                          }
+                          if (maxAmount != null && amount > maxAmount) {
+                            setModal(
+                              () => error = 'Amount exceeds available balance',
+                            );
+                            return;
+                          }
+                          setModal(() => submitting = true);
+                          try {
+                            await onConfirm(amount);
+                            if (context.mounted) {
+                              Navigator.of(context).pop();
+                            }
+                          } finally {
+                            if (context.mounted) {
+                              setModal(() => submitting = false);
+                            }
+                          }
+                        },
                 ),
               ],
             );

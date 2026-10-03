@@ -32,6 +32,8 @@ class SearchingRiderScreen extends ConsumerStatefulWidget {
 class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
   Timer? _timer;
   bool _cancelled = false;
+  String? _pollError;
+  bool _noRiderHint = false;
 
   @override
   void initState() {
@@ -42,10 +44,13 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
         unawaited(_poll());
       });
       unawaited(_poll());
-      return;
+      // After ~2 minutes of searching with no assignment, show a soft hint.
+      Future<void>.delayed(const Duration(seconds: 120), () {
+        if (mounted && !_cancelled) {
+          setState(() => _noRiderHint = true);
+        }
+      });
     }
-    // Cash/COD confirm always attaches a backend order id. Without it we wait
-    // for status refresh instead of inventing a local rider assignment.
   }
 
   Future<void> _poll() async {
@@ -68,11 +73,20 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
       );
       ref.read(bookingDraftProvider.notifier).attachActive(mapped);
       ref.read(sessionProvider.notifier).updateOrder(mapped);
+      setState(() => _pollError = null);
+      if (mapped.status == OrderStatus.cancelled) {
+        _timer?.cancel();
+        return;
+      }
       if (mapped.status == OrderStatus.assigned ||
           mapped.status == OrderStatus.accepted ||
           mapped.status == OrderStatus.arriving) {
         _timer?.cancel();
         context.go(AppRoutes.bookRiderAssigned);
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        setState(() => _pollError = error.message);
       }
     } catch (_) {
       // Keep searching UI; next poll retries.
@@ -131,14 +145,20 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
   Widget build(BuildContext context) {
     final order = ref.watch(bookingDraftProvider).activeOrder;
     final canCancel = order?.canCancel ?? true;
+    final bool cancelled = order?.status == OrderStatus.cancelled;
 
     return GlassPageScaffold(
-      bottom: canCancel
+      bottom: canCancel && !cancelled
           ? SecondaryButton(
-              label: 'Cancel Booking',
+              label: 'Cancel request',
               onPressed: _cancel,
             )
-          : null,
+          : cancelled
+              ? AnimatedPrimaryButton(
+                  label: 'Back to home',
+                  onPressed: _goHome,
+                )
+              : null,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final double height = constraints.maxHeight;
@@ -154,10 +174,15 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
                 child: IuBackButton(onPressed: _goHome),
               ),
               SizedBox(height: topGap),
-              Text('Finding your rider', style: AppTextStyles.headingM),
+              Text(
+                cancelled ? 'Request cancelled' : 'Finding your rider',
+                style: AppTextStyles.headingM,
+              ),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                'Matching a nearby IDHAR UDHAR partner…',
+                cancelled
+                    ? 'This booking was cancelled.'
+                    : 'We\'re finding an available driver near you.',
                 style: AppTextStyles.body.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -188,7 +213,11 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
             child: Column(
               children: [
                 Text(
-                  order?.id ?? 'Preparing order',
+                  cancelled
+                      ? 'Cancelled'
+                      : (order == null
+                          ? 'Preparing your request'
+                          : 'Looking for a driver'),
                   style: AppTextStyles.headingS,
                 ),
                 const SizedBox(height: AppSpacing.xs),
@@ -201,14 +230,43 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  order?.statusLabel ?? 'Searching for rider',
-                  style: AppTextStyles.caption.copyWith(
-                    color: AppColors.orange,
-                    fontWeight: FontWeight.w700,
+                if (!cancelled) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _SearchStep(
+                    label: 'Searching',
+                    active: true,
                   ),
-                ),
+                  const SizedBox(height: AppSpacing.xs),
+                  _SearchStep(
+                    label: 'Matching',
+                    active: order != null,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  const _SearchStep(
+                    label: 'Confirming',
+                    active: false,
+                  ),
+                ],
+                if (_pollError != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    _pollError!,
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                if (_noRiderHint && !cancelled) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Still looking for an available driver. You can keep waiting or cancel and try again.',
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
           );
@@ -219,7 +277,7 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
               if (compact) ...[
                 illustration,
                 const SizedBox(height: AppSpacing.lg),
-                const LoadingIndicator(width: 180),
+                if (!cancelled) const LoadingIndicator(width: 180),
                 const SizedBox(height: AppSpacing.lg),
                 statusCard,
                 SizedBox(height: topGap),
@@ -231,7 +289,7 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
                       children: [
                         illustration,
                         const SizedBox(height: AppSpacing.xxl),
-                        const LoadingIndicator(width: 180),
+                        if (!cancelled) const LoadingIndicator(width: 180),
                       ],
                     ),
                   ),
@@ -254,6 +312,34 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
           return ClipRect(child: column);
         },
       ),
+    );
+  }
+}
+
+class _SearchStep extends StatelessWidget {
+  const _SearchStep({required this.label, required this.active});
+
+  final String label;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(
+          active ? Icons.radio_button_checked : Icons.radio_button_off,
+          size: 16,
+          color: active ? AppColors.orange : AppColors.textSecondary,
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Text(
+          label,
+          style: AppTextStyles.caption.copyWith(
+            color: active ? AppColors.orange : AppColors.textSecondary,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 }

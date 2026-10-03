@@ -7,14 +7,10 @@ import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import 'package:uuid/uuid.dart';
-
-/// Temporary fare-preview diagnostics. Tag: IU_FARE_PREVIEW
-void _farePreviewDiag(String message) {
-  debugPrint('[IU_FARE_PREVIEW] $message');
-}
 
 /// City for create/quote/preview. Prefers `--dart-define=IU_CITY_ID`, else
 /// the launch city returned by `GET /v1/vehicle-categories`.
@@ -59,37 +55,37 @@ final orderServerViewProvider =
 
 /// Booking fares from POST /v1/orders/vehicle-fares, keyed by category id.
 /// Empty when the route or city is not ready. Waiting is not part of these amounts.
+///
+/// Watches only the route geometry key so parcel weight/notes/quote updates do
+/// not cancel an in-flight vehicle-fares request (that left Parcel Details on "—").
 final vehicleFarePreviewProvider =
     FutureProvider.autoDispose<Map<String, String>>((Ref ref) async {
-  final BookingDraft draft = ref.watch(bookingDraftProvider);
-  _farePreviewDiag(
-    'provider run hasRoute=${draft.hasRouteForCurrentStops} '
-    'routeKm=${draft.routeDistanceKm} '
-    'sigMatch=${draft.routeSignature == draft.currentRouteKey}',
+  final String routeKey = ref.watch(
+    bookingDraftProvider.select((BookingDraft draft) {
+      if (!draft.hasRouteForCurrentStops) {
+        return '';
+      }
+      return draft.currentRouteKey;
+    }),
   );
-  if (!draft.hasRouteForCurrentStops) {
-    _farePreviewDiag('early exit: no route for current stops');
+  if (routeKey.isEmpty) {
     return const <String, String>{};
   }
+  final BookingDraft draft = ref.read(bookingDraftProvider);
   final String cityId = await resolveBookingCityId(
     () => ref.read(vehicleCategoryCatalogProvider.future),
   );
-  _farePreviewDiag(
-    'resolved cityId=${cityId.isEmpty ? "<empty>" : cityId} '
-    'launchCityId=${VehicleCategoryCatalog.launchCityId ?? "<null>"}',
-  );
   if (cityId.isEmpty) {
-    _farePreviewDiag('early exit: empty cityId');
-    return const <String, String>{};
+    throw const ApiException(
+      code: 'CITY_INVALID',
+      message:
+          'Delivery city is not configured. Set IU_CITY_ID or ensure the vehicle catalog returns launch_city_id.',
+    );
   }
   final MockLocation? pickup = draft.pickup;
   final double? pickupLat = pickup?.latitude;
   final double? pickupLng = pickup?.longitude;
   if (pickup == null || pickupLat == null || pickupLng == null) {
-    _farePreviewDiag(
-      'early exit: pickup coords missing pickupNull=${pickup == null} '
-      'lat=$pickupLat lng=$pickupLng',
-    );
     return const <String, String>{};
   }
   final List<ApiStop> stops = <ApiStop>[
@@ -107,9 +103,6 @@ final vehicleFarePreviewProvider =
   for (int i = 0; i < drops.length; i++) {
     final MockLocation drop = drops[i];
     if (drop.latitude == null || drop.longitude == null) {
-      _farePreviewDiag(
-        'early exit: drop[$i] coords missing lat=${drop.latitude} lng=${drop.longitude}',
-      );
       return const <String, String>{};
     }
     stops.add(
@@ -124,23 +117,23 @@ final vehicleFarePreviewProvider =
       ),
     );
   }
-  _farePreviewDiag(
-    'calling previewVehicleFares pickup=($pickupLat,$pickupLng) '
-    'drops=${drops.map((MockLocation d) => '(${d.latitude},${d.longitude})').join(' ')} '
-    'stopCount=${stops.length}',
-  );
-  try {
-    final Map<String, String> fares =
-        await ref.read(ordersApiProvider).previewVehicleFares(
-              cityId: cityId,
-              stops: stops,
-            );
-    _farePreviewDiag(
-      'parsed fare map keys=${fares.keys.toList()} values=${fares.values.toList()}',
+  if (ApiConfig.enableRequestLogging) {
+    debugPrint(
+      'FARE DEBUG provider cityId=$cityId routeKey=$routeKey '
+      'pickup=${pickupLat},${pickupLng} drops=${drops.length} '
+      'iuCityIdDefine=${ApiConfig.cityId}',
     );
-    return fares;
-  } catch (error) {
-    _farePreviewDiag('previewVehicleFares threw: $error');
+  }
+  try {
+    return await ref.read(ordersApiProvider).previewVehicleFares(
+          cityId: cityId,
+          stops: stops,
+        );
+  } catch (error, stack) {
+    if (ApiConfig.enableRequestLogging) {
+      debugPrint('FARE DEBUG provider exception=$error');
+      debugPrint('FARE DEBUG provider stack=$stack');
+    }
     rethrow;
   }
 });
@@ -203,7 +196,8 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
   if (cityId.isEmpty) {
     throw const ApiException(
       code: 'CITY_INVALID',
-      message: 'Delivery city is not configured for this build. Set IU_CITY_ID.',
+      message:
+          'Delivery city is not configured for this build. Set IU_CITY_ID.',
     );
   }
   final String? blocked = draft.incompleteStopMessage;
@@ -261,6 +255,9 @@ Future<MockOrder> confirmCustomerBooking(WidgetRef ref) async {
     orderId: hold.orderId,
     fareQuoteId: hold.quote.fareQuoteId,
   );
+  // Persist payment responsibility/plan after fare snapshot exists.
+  // Does not require ONLINE prepaid before SEARCHING (existing architecture).
+  await _persistPaymentPlan(api, confirmed.orderId, draft);
   final MockOrder mapped = OrderMapper.toMockOrder(
     ApiOrder(
       orderId: confirmed.orderId,
@@ -282,4 +279,43 @@ Future<MockOrder> confirmCustomerBooking(WidgetRef ref) async {
   );
   ref.read(bookingDraftProvider.notifier).attachActive(mapped);
   return mapped;
+}
+
+String _inr(double value) => value.toStringAsFixed(2);
+
+Future<void> _persistPaymentPlan(
+  OrdersApi api,
+  String orderId,
+  BookingDraft draft,
+) async {
+  final String whoPays = switch (draft.whoPays) {
+    PaymentWhoPays.customer => 'CUSTOMER',
+    PaymentWhoPays.receiver => 'RECEIVER',
+    PaymentWhoPays.split => 'SPLIT',
+  };
+  final PaymentAllocation allocation = draft.paymentAllocation;
+  try {
+    await api.setPaymentResponsibility(
+      orderId: orderId,
+      whoPays: whoPays,
+      customerResponsibility: _inr(draft.customerResponsibility),
+      receiverResponsibility: _inr(draft.receiverResponsibility),
+    );
+    await api.setPaymentPlan(
+      orderId: orderId,
+      customerPlannedOnline: _inr(allocation.customerOnline),
+      customerPlannedCash: _inr(allocation.customerCash),
+      receiverPlannedOnline: _inr(allocation.receiverOnline),
+      receiverPlannedCash: _inr(allocation.receiverCash),
+    );
+  } on ApiException catch (error) {
+    // Confirm already succeeded and SEARCHING/dispatch may be live.
+    // Do not roll back the booking UX; ops can repair the payment plan.
+    if (ApiConfig.enableRequestLogging) {
+      debugPrint(
+        'PAYMENT PLAN persist failed after confirm for $orderId '
+        'code=${error.code} message=${error.message}',
+      );
+    }
+  }
 }

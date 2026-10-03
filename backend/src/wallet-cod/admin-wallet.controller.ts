@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UuidParamPipe } from '../common/uuid-param.pipe';
@@ -28,6 +28,15 @@ export class AdminWalletController {
   }
 
   @Roles('ADMIN')
+  @Get(':id/wallet/topups')
+  getWalletTopUps(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.walletCod.getAdminWalletTopUps(auth, id);
+  }
+
+  @Roles('ADMIN')
   @Get(':id/cod')
   getCod(
     @CurrentAuth() auth: AuthContext,
@@ -52,5 +61,57 @@ export class AdminWalletController {
     @Param('id', UuidParamPipe) id: string,
   ) {
     return this.walletCod.getAdminEarnings(auth, id);
+  }
+}
+
+@Controller('admin/wallet')
+export class AdminWalletWithdrawalsController {
+  constructor(private readonly walletCod: WalletCodService) {}
+
+  @Roles('ADMIN')
+  @Get('withdrawals')
+  listWithdrawals(@CurrentAuth() auth: AuthContext) {
+    return this.walletCod.listAdminWithdrawals(auth);
+  }
+
+  @Roles('ADMIN')
+  @Get('withdrawals/:id')
+  getWithdrawal(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.walletCod.getAdminWithdrawal(auth, id);
+  }
+
+  @Roles('ADMIN')
+  @Post('withdrawals/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  rejectWithdrawal(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.walletCod.rejectWithdrawal(auth, id, body.reason);
+  }
+
+  @Roles('ADMIN')
+  @Post('withdrawals/:id/mark-processing')
+  @HttpCode(HttpStatus.OK)
+  markProcessing(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.walletCod.markWithdrawalProcessing(auth, id);
+  }
+
+  @Roles('ADMIN')
+  @Post('withdrawals/:id/reconcile')
+  @HttpCode(HttpStatus.OK)
+  async reconcile(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    await this.walletCod.getAdminWithdrawal(auth, id);
+    return this.walletCod.reconcileWithdrawal(id);
   }
 }

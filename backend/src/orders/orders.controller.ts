@@ -69,6 +69,15 @@ export class OrdersController {
     return this.orders.listStops(auth, id);
   }
 
+  @Roles('CUSTOMER', 'ADMIN')
+  @Get(':id/rider-location')
+  riderLocation(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.orders.getAssignedRiderLocation(auth, id);
+  }
+
   @Roles('CUSTOMER')
   @Post(':id/quote')
   @HttpCode(HttpStatus.CREATED)

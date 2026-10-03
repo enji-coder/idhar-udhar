@@ -146,6 +146,39 @@ export async function fetchRiderWalletLedger(riderId) {
   return body.entries || [];
 }
 
+export async function fetchRiderWalletTopUps(riderId) {
+  const body = await apiRequest(`/v1/admin/riders/${riderId}/wallet/topups`);
+  return body.topups || [];
+}
+
+export async function fetchAdminWithdrawals() {
+  const body = await apiRequest('/v1/admin/wallet/withdrawals');
+  return body.withdrawals || [];
+}
+
+export async function fetchAdminWithdrawal(id) {
+  return apiRequest(`/v1/admin/wallet/withdrawals/${id}`);
+}
+
+export async function rejectAdminWithdrawal(id, reason) {
+  return apiRequest(`/v1/admin/wallet/withdrawals/${id}/reject`, {
+    method: 'POST',
+    body: { reason },
+  });
+}
+
+export async function markAdminWithdrawalProcessing(id) {
+  return apiRequest(`/v1/admin/wallet/withdrawals/${id}/mark-processing`, {
+    method: 'POST',
+  });
+}
+
+export async function reconcileAdminWithdrawal(id) {
+  return apiRequest(`/v1/admin/wallet/withdrawals/${id}/reconcile`, {
+    method: 'POST',
+  });
+}
+
 export async function fetchAdminNotices() {
   const body = await apiRequest('/v1/notifications?limit=50');
   return (body.notifications || []).map(mapNotice);

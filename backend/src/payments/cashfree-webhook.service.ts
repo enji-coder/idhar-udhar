@@ -17,6 +17,7 @@ import {
 import { PaymentGatewayRepository } from './payment-gateway.repository';
 import { PaymentsRepository } from './payments.repository';
 import { SettlementService } from '../settlement/settlement.service';
+import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 
 export type WebhookApplyResult = 'applied' | 'duplicate' | 'ignored' | 'rejected';
 
@@ -31,6 +32,7 @@ export class CashfreeWebhookService {
     private readonly notifications: PaymentNotificationDispatcher,
     private readonly logger: AppLogger,
     private readonly settlement: SettlementService,
+    private readonly walletCod: WalletCodService,
   ) {}
 
   async apply(input: {
@@ -171,8 +173,22 @@ export class CashfreeWebhookService {
       },
       tx,
     );
-    const order = await this.orders.findById(attempt.order_id, tx);
-    if (
+    const order = attempt.order_id
+      ? await this.orders.findById(attempt.order_id, tx)
+      : null;
+    if (nextStatus === 'PAID' && attempt.charge_purpose === 'WALLET_TOPUP') {
+      if (!attempt.rider_profile_id) {
+        return { result: 'rejected', paymentTransactionId: attempt.payment_transaction_id };
+      }
+      await this.walletCod.applyVerifiedWalletTopUp(
+        {
+          paymentTransactionId: attempt.payment_transaction_id,
+          riderProfileId: attempt.rider_profile_id,
+          amount: attempt.transaction_amount,
+        },
+        tx,
+      );
+    } else if (
       nextStatus === 'PAID' &&
       attempt.charge_purpose === 'RECEIVABLE_CLEARANCE' &&
       order

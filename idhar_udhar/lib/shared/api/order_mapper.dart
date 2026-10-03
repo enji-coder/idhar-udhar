@@ -137,6 +137,26 @@ abstract final class OrderMapper {
         ? drops.skip(1).map(_stopToLocation).toList(growable: false)
         : const <MockLocation>[];
     final double fare = order.tripFare ?? 0;
+    final ApiAssignedRider? assigned = order.assignedRider;
+    final String? riderName = assigned?.name?.trim();
+    final String vehicleLabel = <String?>[
+      assigned?.vehicleCategoryName?.trim(),
+      order.vehicleCategoryName?.trim(),
+      assigned?.vehicleRegistration?.trim(),
+    ].whereType<String>().where((String part) => part.isNotEmpty).join(' · ');
+    final MockRider? rider = order.riderProfileId == null ||
+            order.riderProfileId!.isEmpty
+        ? null
+        : MockRider(
+            id: order.riderProfileId!,
+            name: (riderName != null && riderName.isNotEmpty)
+                ? riderName
+                : 'Your rider',
+            vehicleLabel: vehicleLabel,
+            rating: 0,
+            phone: '',
+            trips: 0,
+          );
     return MockOrder(
       id: order.orderId,
       displayId: order.displayId,
@@ -150,6 +170,7 @@ abstract final class OrderMapper {
       tripFare: order.tripFare,
       createdAt: order.createdAt,
       riderId: order.riderProfileId,
+      rider: rider,
     );
   }
 

@@ -9,8 +9,8 @@ import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/profiles_api.dart';
 import 'package:idhar_udhar/shared/api/token_store.dart';
+import 'package:idhar_udhar/shared/push/push_token_sync.dart';
 
-import '../data/mock/mock_data.dart';
 import '../data/mock/mock_models.dart';
 import '../storage/session_storage.dart';
 
@@ -77,13 +77,15 @@ class SessionNotifier extends StateNotifier<SessionState> {
     NotificationsApi? notificationsApi,
     ProfilesApi? profilesApi,
     TokenStore? tokenStore,
+    PushTokenSync? pushTokens,
   })  : _storage = storage ?? SessionStorage(),
         _authApi = authApi,
         _ordersApi = ordersApi,
         _notificationsApi = notificationsApi,
         _profilesApi = profilesApi,
         _tokenStore = tokenStore,
-        super(SessionState(orders: MockData.seedOrders()));
+        _pushTokens = pushTokens,
+        super(const SessionState(orders: <MockOrder>[]));
 
   final SessionStorage _storage;
   final AuthApi? _authApi;
@@ -91,6 +93,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
   final NotificationsApi? _notificationsApi;
   final ProfilesApi? _profilesApi;
   final TokenStore? _tokenStore;
+  final PushTokenSync? _pushTokens;
 
   /// Loopback capture only. Never persisted. Null in release / live hosts.
   String? debugCapturedOtp;
@@ -152,6 +155,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
       }
       final String phone = (await tokens.phone) ?? '';
       await _loadAuthenticated(phone, loadFeeds: false, hydrateEpoch: epoch);
+      try {
+        await _pushTokens?.syncAfterAuth();
+      } catch (_) {}
     } on ApiException catch (error) {
       if (!_hydrateActive(epoch)) {
         return;
@@ -227,6 +233,9 @@ class SessionNotifier extends StateNotifier<SessionState> {
       code: code,
     );
     await _loadAuthenticated(user.phone, loadFeeds: true);
+    try {
+      await _pushTokens?.syncAfterAuth();
+    } catch (_) {}
     return true;
   }
 
@@ -400,11 +409,10 @@ class SessionNotifier extends StateNotifier<SessionState> {
   int get unreadNoticeCount =>
       state.notices.where((n) => !n.read).length;
 
-  void addWallet(double amount) {
-    state = state.copyWith(walletBalance: state.walletBalance + amount);
-  }
-
   Future<void> logout() async {
+    try {
+      await _pushTokens?.unregisterOnLogout();
+    } catch (_) {}
     final AuthApi? auth = _authApi;
     if (auth != null) {
       await auth.logout();
@@ -517,5 +525,6 @@ final sessionProvider =
     notificationsApi: ref.watch(notificationsApiProvider),
     profilesApi: ref.watch(profilesApiProvider),
     tokenStore: ref.watch(tokenStoreProvider),
+    pushTokens: ref.watch(pushTokenSyncProvider),
   );
 });

@@ -15,6 +15,11 @@ describe('CashfreePaymentService', () => {
             environment === 'sandbox'
               ? 'https://sandbox.cashfree.com/pg'
               : 'https://api.cashfree.com/pg',
+          payoutApiBaseUrl:
+            environment === 'sandbox'
+              ? 'https://sandbox.cashfree.com/payout'
+              : 'https://api.cashfree.com/payout',
+          payoutApiVersion: '2024-01-01',
           timeoutMs: 1000,
         },
       }),
@@ -73,15 +78,40 @@ describe('CashfreePaymentService', () => {
     expect(JSON.stringify(result)).not.toContain('sandbox_secret');
   });
 
-  it('does not call Cashfree when production is selected', async () => {
+  it('creates a production order against the production host', async () => {
     const { service, calls } = serviceWith('production');
-    await expect(
-      service.beginOnlineCharge({
-        orderId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        amount: '10.00',
-        payerType: 'CUSTOMER',
-      }),
-    ).rejects.toMatchObject({ status: 503 });
-    expect(calls).toHaveLength(0);
+    const result = await service.beginOnlineCharge({
+      orderId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      amount: '10.00',
+      payerType: 'CUSTOMER',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://api.cashfree.com/pg/orders');
+    expect(result.environment).toBe('production');
+  });
+
+  it('initiates a payout transfer on the payout host', async () => {
+    const { service, calls } = serviceWith('sandbox');
+    service.useHttp(async (url, init) => {
+      calls.push({ url, headers: init.headers });
+      return {
+        status: 200,
+        json: {
+          status: 'PENDING',
+          cf_transfer_id: 'cf-transfer-1',
+          transfer_id: 'wabc',
+        },
+      };
+    });
+    const result = await service.initiatePayoutTransfer({
+      merchantTransferId: 'wabc',
+      amount: '25.00',
+      payoutMethod: 'UPI',
+      beneficiaryId: 'rider1',
+      vpa: 'rider@upi',
+    });
+    expect(calls[0].url).toBe('https://sandbox.cashfree.com/payout/transfers');
+    expect(result.outcome).toBe('accepted');
+    expect(result.providerTransferId).toBe('cf-transfer-1');
   });
 });

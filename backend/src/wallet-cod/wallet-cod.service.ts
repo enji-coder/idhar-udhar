@@ -1,9 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository } from '../auth/identity/identity.repository';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
+import { AppLogger } from '../common/logger/app-logger';
 import { isCheckViolation, isUniqueViolation } from '../common/pg-error';
+import { AppConfig } from '../config/configuration';
 import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
 import { assertPositiveInr, formatInr } from '../fare/money';
@@ -13,6 +16,7 @@ import {
   IdempotencyScope,
 } from '../orders/idempotency.repository';
 import { OrderRow } from '../orders/orders.repository';
+import { CashfreePaymentService } from '../payments/cashfree-payment.service';
 import { WalletNotificationDispatcher } from '../notifications/wallet-notification.dispatcher';
 import {
   LockedRiderFinance,
@@ -23,6 +27,10 @@ import {
   WalletCodRepository,
 } from './wallet-cod.repository';
 
+function merchantTransferIdFor(withdrawalId: string): string {
+  return `w${withdrawalId.replace(/-/g, '')}`;
+}
+
 @Injectable()
 export class WalletCodService {
   constructor(
@@ -31,6 +39,10 @@ export class WalletCodService {
     private readonly idempotency: IdempotencyRepository,
     private readonly identities: IdentityRepository,
     private readonly walletNotifications: WalletNotificationDispatcher,
+    @Inject(forwardRef(() => CashfreePaymentService))
+    private readonly cashfree: CashfreePaymentService,
+    private readonly config: ConfigService,
+    private readonly logger: AppLogger,
   ) {}
 
   async getOwnWallet(auth: AuthContext) {
@@ -144,30 +156,763 @@ export class WalletCodService {
     return { earnings: earnings.map((row) => serializeEarning(row)) };
   }
 
-  async recharge(
+  async applyVerifiedWalletTopUp(
+    input: {
+      paymentTransactionId: string;
+      riderProfileId: string;
+      amount: string;
+    },
+    db: Queryable,
+  ) {
+    const existing = await this.repo.findWalletLedgerByPaymentTransactionId(
+      input.paymentTransactionId,
+      db,
+    );
+    if (existing) {
+      const finance = await this.repo.lockAccounts(input.riderProfileId, db);
+      return {
+        rider_profile_id: input.riderProfileId,
+        available_balance: formatInr(finance.wallet.available_balance),
+        cod_due: formatInr(finance.cod.cod_due),
+        wallet_ledger_id: existing.wallet_ledger_id,
+        idempotent_replay: true,
+      };
+    }
+    const result = await this.applyInflow(db, {
+      riderProfileId: input.riderProfileId,
+      amount: input.amount,
+      walletEntryType: 'RECHARGE',
+      codSource: 'RECHARGE_SETTLEMENT',
+      sourceTxnId: `wallet-topup:${input.paymentTransactionId}`,
+      actorType: 'WEBHOOK',
+      actorProfileId: null,
+      allowWalletCredit: true,
+      relatedPaymentTransactionId: input.paymentTransactionId,
+    });
+    return { ...result, idempotent_replay: false };
+  }
+
+  async requestWithdraw(
     auth: AuthContext,
     amountRaw: string,
+    payoutMethod: 'UPI' | 'BANK',
     idempotencyKey: string,
   ) {
     this.assertRider(auth);
     const amount = this.readPositive(amountRaw);
     return this.runIdempotent({
       auth,
-      scope: 'recharge',
+      scope: 'wallet-withdraw',
       idempotencyKey,
-      requestHash: hashRequest({ amount }),
-      work: (tx) =>
-        this.applyInflow(tx, {
-          riderProfileId: auth.profileId,
+      requestHash: hashRequest({ amount, payout_method: payoutMethod }),
+      work: async (tx) => {
+        const finance = await this.repo.lockAccounts(auth.profileId, tx);
+        if (await this.repo.exceeds(amount, finance.wallet.available_balance, tx)) {
+          throw new ApiError(
+            ErrorCodes.WALLET_INSUFFICIENT,
+            'Withdrawal exceeds available wallet balance',
+            409,
+          );
+        }
+        let riderUpiId: string | null = null;
+        let bankAccountId: string | null = null;
+        if (payoutMethod === 'UPI') {
+          const upi = await this.repo.findCurrentUpi(auth.profileId, tx);
+          if (!upi) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'Set a current UPI ID before requesting a UPI withdrawal',
+              409,
+            );
+          }
+          riderUpiId = upi.rider_upi_id;
+        } else {
+          const bank = await this.repo.findCurrentBankAccount(auth.profileId, tx);
+          if (!bank) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'Set a current bank account before requesting a bank withdrawal',
+              409,
+            );
+          }
+          bankAccountId = bank.bank_account_id;
+        }
+        const decreased = await this.repo.debitWallet(
+          finance.wallet.wallet_account_id,
           amount,
-          walletEntryType: 'RECHARGE',
-          codSource: 'RECHARGE_SETTLEMENT',
-          sourceTxnId: `recharge:${auth.identityId}:${idempotencyKey}`,
-          actorType: 'RIDER',
-          actorProfileId: auth.profileId,
-          allowWalletCredit: true,
-        }),
+          tx,
+        );
+        if (decreased === null) {
+          throw new ApiError(
+            ErrorCodes.WALLET_INSUFFICIENT,
+            'Withdrawal exceeds available wallet balance',
+            409,
+          );
+        }
+        const ledger = await this.repo.insertWalletLedger(
+          {
+            walletAccountId: finance.wallet.wallet_account_id,
+            direction: 'DEBIT',
+            amount,
+            entryType: 'PAYOUT',
+            actorType: 'RIDER',
+            actorProfileId: auth.profileId,
+          },
+          tx,
+        );
+        const withdrawal = await this.repo.insertWithdrawal(
+          {
+            riderProfileId: auth.profileId,
+            amount,
+            payoutMethod,
+            riderUpiId,
+            bankAccountId,
+            walletLedgerId: ledger.wallet_ledger_id,
+          },
+          tx,
+        );
+        await this.walletNotifications.onWithdrawalRequested(
+          {
+            riderProfileId: auth.profileId,
+            withdrawalId: withdrawal.withdrawal_id,
+            amount,
+          },
+          tx,
+        );
+        return {
+          withdrawal_id: withdrawal.withdrawal_id,
+          status: withdrawal.status,
+          amount: formatInr(amount),
+          available_balance: decreased,
+          wallet_ledger_id: ledger.wallet_ledger_id,
+        };
+      },
     });
+  }
+
+  async listAdminWithdrawals(auth: AuthContext) {
+    await this.assertAdminFinance(auth);
+    const rows = await this.repo.listWithdrawals();
+    return {
+      withdrawals: rows.map((row) => this.serializeWithdrawal(row)),
+    };
+  }
+
+  async getAdminWithdrawal(auth: AuthContext, withdrawalId: string) {
+    await this.assertAdminFinance(auth);
+    const listed = await this.repo.listWithdrawals();
+    const summary = listed.find((row) => row.withdrawal_id === withdrawalId);
+    if (!summary) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Withdrawal was not found', 404);
+    }
+    let destinationMasked: string | null = null;
+    if (summary.payout_method === 'UPI' && summary.rider_upi_id) {
+      const upi = await this.repo.findUpiById(summary.rider_upi_id, this.postgres);
+      destinationMasked = upi?.vpa_masked ?? null;
+    } else if (summary.payout_method === 'BANK' && summary.bank_account_id) {
+      const bank = await this.repo.findBankById(
+        summary.bank_account_id,
+        this.postgres,
+      );
+      destinationMasked = bank
+        ? `${bank.account_masked}${bank.ifsc_or_bank ? ` / ${bank.ifsc_or_bank}` : ''}`
+        : null;
+    }
+    return {
+      ...this.serializeWithdrawal(summary),
+      destination_masked: destinationMasked,
+    };
+  }
+
+  async getAdminWalletTopUps(auth: AuthContext, riderProfileId: string) {
+    await this.assertAdminFinance(auth);
+    await this.postgres.transaction(async (tx) => {
+      await this.requireRider(riderProfileId, tx);
+    });
+    const rows = await this.repo.listWalletTopUps(riderProfileId);
+    return {
+      topups: rows.map((row) => ({
+        payment_transaction_id: row.payment_transaction_id,
+        rider_profile_id: riderProfileId,
+        amount: formatInr(row.amount),
+        status: row.transaction_status,
+        provider_txn_id: row.provider_txn_id,
+        gateway_order_id: row.gateway_order_id,
+        created_at: row.created_at.toISOString(),
+      })),
+    };
+  }
+
+  async rejectWithdrawal(
+    auth: AuthContext,
+    withdrawalId: string,
+    reason?: string,
+  ) {
+    await this.assertAdminFinance(auth);
+    return this.postgres.transaction(async (tx) => {
+      const row = await this.repo.lockWithdrawal(withdrawalId, tx);
+      if (!row) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Withdrawal was not found', 404);
+      }
+      if (row.status !== 'REQUESTED' && row.status !== 'PENDING') {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Only requested withdrawals can be rejected',
+          409,
+        );
+      }
+      const restored = await this.refundWithdrawalOnce(
+        {
+          withdrawalId,
+          riderProfileId: row.rider_profile_id,
+          amount: row.amount,
+          actorType: 'ADMIN',
+          actorProfileId: auth.profileId,
+          notifyType: 'WITHDRAWAL_REJECTED',
+        },
+        tx,
+      );
+      await this.repo.updateWithdrawalStatus(
+        {
+          withdrawalId,
+          status: 'REJECTED',
+          decidedByAdminProfileId: auth.profileId,
+          failureReason: reason?.trim() || null,
+          processed: true,
+          refundWalletLedgerId: restored.wallet_ledger_id,
+        },
+        tx,
+      );
+      return {
+        withdrawal_id: withdrawalId,
+        status: 'REJECTED',
+        available_balance: restored.available_balance,
+      };
+    });
+  }
+
+  /**
+   * Moves REQUESTED → PROCESSING, then initiates Cashfree payout.
+   * On clear provider rejection: FAILED + single refund.
+   * On timeout/unknown after accept ambiguity: remains PROCESSING for reconcile.
+   */
+  async markWithdrawalProcessing(auth: AuthContext, withdrawalId: string) {
+    await this.assertAdminFinance(auth);
+    const payment = this.config.getOrThrow<AppConfig['payment']>('payment');
+    if (payment.provider !== 'cashfree') {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Cashfree payouts are not configured',
+        503,
+      );
+    }
+
+    const prepared = await this.postgres.transaction(async (tx) => {
+      const row = await this.repo.lockWithdrawal(withdrawalId, tx);
+      if (!row) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Withdrawal was not found', 404);
+      }
+      if (row.status === 'PROCESSING' && row.merchant_transfer_id) {
+        return {
+          alreadyProcessing: true as const,
+          withdrawalId,
+          merchantTransferId: row.merchant_transfer_id,
+          amount: row.amount,
+          payoutMethod: row.payout_method as 'UPI' | 'BANK',
+          riderProfileId: row.rider_profile_id,
+          riderUpiId: row.rider_upi_id,
+          bankAccountId: row.bank_account_id,
+        };
+      }
+      if (row.status !== 'REQUESTED') {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Only requested withdrawals can move to processing',
+          409,
+        );
+      }
+      const merchantTransferId =
+        row.merchant_transfer_id ?? merchantTransferIdFor(withdrawalId);
+      await this.repo.updateWithdrawalStatus(
+        {
+          withdrawalId,
+          status: 'PROCESSING',
+          decidedByAdminProfileId: auth.profileId,
+          merchantTransferId,
+        },
+        tx,
+      );
+      await this.walletNotifications.onWithdrawalEvent(
+        {
+          riderProfileId: row.rider_profile_id,
+          withdrawalId,
+          amount: formatInr(row.amount),
+          type: 'WITHDRAWAL_PROCESSING',
+        },
+        tx,
+      );
+      return {
+        alreadyProcessing: false as const,
+        withdrawalId,
+        merchantTransferId,
+        amount: row.amount,
+        payoutMethod: row.payout_method as 'UPI' | 'BANK',
+        riderProfileId: row.rider_profile_id,
+        riderUpiId: row.rider_upi_id,
+        bankAccountId: row.bank_account_id,
+      };
+    });
+
+    if (prepared.alreadyProcessing) {
+      await this.reconcileWithdrawal(prepared.withdrawalId);
+      return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+    }
+
+    let vpa: string | null = null;
+    let bankAccountNumber: string | null = null;
+    let bankIfsc: string | null = null;
+    await this.postgres.transaction(async (tx) => {
+      if (prepared.payoutMethod === 'UPI') {
+        if (!prepared.riderUpiId) {
+          throw new ApiError(
+            ErrorCodes.VALIDATION_ERROR,
+            'Withdrawal is missing a UPI destination',
+            409,
+          );
+        }
+        const upi = await this.repo.findUpiById(prepared.riderUpiId, tx);
+        if (!upi?.vpa_encrypted_or_token) {
+          throw new ApiError(
+            ErrorCodes.VALIDATION_ERROR,
+            'UPI destination is incomplete',
+            409,
+          );
+        }
+        vpa = upi.vpa_encrypted_or_token;
+      } else {
+        if (!prepared.bankAccountId) {
+          throw new ApiError(
+            ErrorCodes.VALIDATION_ERROR,
+            'Withdrawal is missing a bank destination',
+            409,
+          );
+        }
+        const bank = await this.repo.findBankById(prepared.bankAccountId, tx);
+        if (!bank?.account_encrypted_or_token || !bank.ifsc_or_bank) {
+          throw new ApiError(
+            ErrorCodes.VALIDATION_ERROR,
+            'Bank destination is incomplete',
+            409,
+          );
+        }
+        bankAccountNumber = bank.account_encrypted_or_token;
+        bankIfsc = bank.ifsc_or_bank;
+      }
+    });
+
+    try {
+      const transfer = await this.cashfree.initiatePayoutTransfer({
+        merchantTransferId: prepared.merchantTransferId,
+        amount: prepared.amount,
+        payoutMethod: prepared.payoutMethod,
+        beneficiaryId: prepared.riderProfileId.replace(/-/g, '').slice(0, 50),
+        vpa,
+        bankAccountNumber,
+        bankIfsc,
+      });
+      if (transfer.outcome === 'rejected') {
+        await this.applyAuthoritativePayoutOutcome({
+          withdrawalId,
+          outcome: 'failed',
+          providerTransferId: transfer.providerTransferId,
+          providerStatus: transfer.providerStatus,
+          failureReason: transfer.failureReason,
+        });
+        return { withdrawal_id: withdrawalId, status: 'FAILED' };
+      }
+      await this.postgres.transaction(async (tx) => {
+        const row = await this.repo.lockWithdrawal(withdrawalId, tx);
+        if (!row || row.status !== 'PROCESSING') {
+          return;
+        }
+        await this.repo.updateWithdrawalStatus(
+          {
+            withdrawalId,
+            status: 'PROCESSING',
+            providerTransferId: transfer.providerTransferId,
+            providerStatus: transfer.providerStatus,
+            touchReconciled: true,
+          },
+          tx,
+        );
+      });
+      const status = (transfer.providerStatus ?? '').toUpperCase();
+      if (status === 'SUCCESS' || status === 'COMPLETED') {
+        await this.applyAuthoritativePayoutOutcome({
+          withdrawalId,
+          outcome: 'success',
+          providerTransferId: transfer.providerTransferId,
+          providerStatus: transfer.providerStatus,
+          failureReason: null,
+        });
+        return { withdrawal_id: withdrawalId, status: 'SUCCESSFUL' };
+      }
+      if (
+        status === 'FAILED' ||
+        status === 'REJECTED' ||
+        status === 'FAILED_AT_BANK'
+      ) {
+        await this.applyAuthoritativePayoutOutcome({
+          withdrawalId,
+          outcome: 'failed',
+          providerTransferId: transfer.providerTransferId,
+          providerStatus: transfer.providerStatus,
+          failureReason: transfer.failureReason,
+        });
+        return { withdrawal_id: withdrawalId, status: 'FAILED' };
+      }
+      return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+    } catch (err) {
+      // Network/timeout after merchant_transfer_id is persisted: do NOT refund.
+      this.logger.warn('cashfree_payout_initiate_uncertain', {
+        withdrawal_id: withdrawalId,
+        merchant_transfer_id: prepared.merchantTransferId,
+        error: err instanceof Error ? err.message : 'unknown',
+      });
+      return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+    }
+  }
+
+  async applyAuthoritativePayoutOutcome(input: {
+    withdrawalId: string;
+    outcome: 'success' | 'failed' | 'reversed' | 'pending' | 'unknown';
+    providerTransferId: string | null;
+    providerStatus: string | null;
+    failureReason: string | null;
+  }): Promise<{ status: string; result: string }> {
+    return this.postgres.transaction(async (tx) => {
+      const row = await this.repo.lockWithdrawal(input.withdrawalId, tx);
+      if (!row) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Withdrawal was not found', 404);
+      }
+      if (input.outcome === 'pending' || input.outcome === 'unknown') {
+        await this.repo.updateWithdrawalStatus(
+          {
+            withdrawalId: input.withdrawalId,
+            status: row.status,
+            providerTransferId: input.providerTransferId,
+            providerStatus: input.providerStatus,
+            failureReason: input.failureReason,
+            touchReconciled: true,
+          },
+          tx,
+        );
+        return {
+          status: row.status,
+          result: input.outcome === 'unknown' ? 'requires_review' : 'pending',
+        };
+      }
+      if (input.outcome === 'success') {
+        if (row.status === 'SUCCESSFUL') {
+          return { status: 'SUCCESSFUL', result: 'duplicate' };
+        }
+        if (row.status !== 'PROCESSING') {
+          return { status: row.status, result: 'ignored' };
+        }
+        await this.repo.updateWithdrawalStatus(
+          {
+            withdrawalId: input.withdrawalId,
+            status: 'SUCCESSFUL',
+            providerTransferId: input.providerTransferId,
+            providerStatus: input.providerStatus ?? 'SUCCESS',
+            processed: true,
+            touchReconciled: true,
+          },
+          tx,
+        );
+        await this.walletNotifications.onWithdrawalEvent(
+          {
+            riderProfileId: row.rider_profile_id,
+            withdrawalId: input.withdrawalId,
+            amount: formatInr(row.amount),
+            type: 'WITHDRAWAL_SUCCESSFUL',
+            reference: input.providerTransferId,
+          },
+          tx,
+        );
+        return { status: 'SUCCESSFUL', result: 'applied' };
+      }
+      if (input.outcome === 'failed') {
+        if (row.status === 'FAILED' || row.status === 'REJECTED') {
+          return { status: row.status, result: 'duplicate' };
+        }
+        if (row.status !== 'PROCESSING') {
+          return { status: row.status, result: 'ignored' };
+        }
+        const restored = await this.refundWithdrawalOnce(
+          {
+            withdrawalId: input.withdrawalId,
+            riderProfileId: row.rider_profile_id,
+            amount: row.amount,
+            actorType: 'SYSTEM',
+            actorProfileId: null,
+            notifyType: 'WITHDRAWAL_FAILED',
+          },
+          tx,
+        );
+        await this.repo.updateWithdrawalStatus(
+          {
+            withdrawalId: input.withdrawalId,
+            status: 'FAILED',
+            providerTransferId: input.providerTransferId,
+            providerStatus: input.providerStatus ?? 'FAILED',
+            failureReason: input.failureReason,
+            processed: true,
+            refundWalletLedgerId: restored.wallet_ledger_id,
+            touchReconciled: true,
+          },
+          tx,
+        );
+        return { status: 'FAILED', result: 'applied' };
+      }
+      // reversed after success (or while processing)
+      if (row.status === 'CANCELLED' && row.refund_wallet_ledger_id) {
+        return { status: 'CANCELLED', result: 'duplicate' };
+      }
+      if (row.status !== 'SUCCESSFUL' && row.status !== 'PROCESSING') {
+        return { status: row.status, result: 'ignored' };
+      }
+      const restored = await this.refundWithdrawalOnce(
+        {
+          withdrawalId: input.withdrawalId,
+          riderProfileId: row.rider_profile_id,
+          amount: row.amount,
+          actorType: 'SYSTEM',
+          actorProfileId: null,
+          notifyType: 'WITHDRAWAL_REFUNDED',
+        },
+        tx,
+      );
+      await this.repo.updateWithdrawalStatus(
+        {
+          withdrawalId: input.withdrawalId,
+          status: 'CANCELLED',
+          providerTransferId: input.providerTransferId,
+          providerStatus: input.providerStatus ?? 'REVERSED',
+          failureReason: input.failureReason ?? 'Provider reversed the transfer',
+          processed: true,
+          refundWalletLedgerId: restored.wallet_ledger_id,
+          touchReconciled: true,
+        },
+        tx,
+      );
+      return { status: 'CANCELLED', result: 'applied' };
+    });
+  }
+
+  async applyPayoutWebhookByMerchantTransferId(input: {
+    merchantTransferId: string;
+    providerTransferId: string | null;
+    providerStatus: string;
+    failureReason: string | null;
+  }): Promise<{ status: string; result: string }> {
+    const found = await this.repo.findWithdrawalByMerchantTransferId(
+      input.merchantTransferId,
+    );
+    if (!found) {
+      return { status: 'UNKNOWN', result: 'ignored' };
+    }
+    const mapped = this.mapProviderStatus(input.providerStatus);
+    return this.applyAuthoritativePayoutOutcome({
+      withdrawalId: found.withdrawal_id,
+      outcome: mapped,
+      providerTransferId: input.providerTransferId,
+      providerStatus: input.providerStatus,
+      failureReason: input.failureReason,
+    });
+  }
+
+  async reconcileWithdrawal(withdrawalId: string): Promise<{
+    status: string;
+    result: string;
+  }> {
+    const payment = this.config.getOrThrow<AppConfig['payment']>('payment');
+    if (payment.provider !== 'cashfree') {
+      return { status: 'PROCESSING', result: 'requires_review' };
+    }
+    const locked = await this.postgres.transaction(async (tx) => {
+      return this.repo.lockWithdrawal(withdrawalId, tx);
+    });
+    if (!locked) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Withdrawal was not found', 404);
+    }
+    if (locked.status !== 'PROCESSING' || !locked.merchant_transfer_id) {
+      return { status: locked.status, result: 'ignored' };
+    }
+    try {
+      const snapshot = await this.cashfree.retrievePayoutTransfer(
+        locked.merchant_transfer_id,
+      );
+      return this.applyAuthoritativePayoutOutcome({
+        withdrawalId,
+        outcome: snapshot.outcome,
+        providerTransferId: snapshot.providerTransferId,
+        providerStatus: snapshot.providerStatus,
+        failureReason: snapshot.failureReason,
+      });
+    } catch (err) {
+      this.logger.warn('cashfree_payout_reconcile_uncertain', {
+        withdrawal_id: withdrawalId,
+        error: err instanceof Error ? err.message : 'unknown',
+      });
+      await this.postgres.transaction(async (tx) => {
+        await this.repo.updateWithdrawalStatus(
+          {
+            withdrawalId,
+            status: 'PROCESSING',
+            touchReconciled: true,
+          },
+          tx,
+        );
+      });
+      return { status: 'PROCESSING', result: 'requires_review' };
+    }
+  }
+
+  async reconcileDueWithdrawals(): Promise<{
+    claimed: number;
+    applied: number;
+    requires_review: number;
+  }> {
+    const reconcile =
+      this.config.getOrThrow<AppConfig['payment']>('payment').payoutReconcile;
+    const due = await this.repo.listProcessingForReconcile(
+      reconcile.minAgeSeconds,
+      reconcile.batchSize,
+    );
+    let applied = 0;
+    let requiresReview = 0;
+    for (const row of due) {
+      const result = await this.reconcileWithdrawal(row.withdrawal_id);
+      if (result.result === 'applied') {
+        applied += 1;
+      } else if (result.result === 'requires_review' || result.result === 'pending') {
+        requiresReview += 1;
+      }
+    }
+    return { claimed: due.length, applied, requires_review: requiresReview };
+  }
+
+  private mapProviderStatus(
+    providerStatus: string,
+  ): 'success' | 'failed' | 'reversed' | 'pending' | 'unknown' {
+    const status = providerStatus.toUpperCase();
+    if (status === 'SUCCESS' || status === 'COMPLETED') {
+      return 'success';
+    }
+    if (status === 'FAILED' || status === 'REJECTED' || status === 'FAILED_AT_BANK') {
+      return 'failed';
+    }
+    if (status === 'REVERSED') {
+      return 'reversed';
+    }
+    if (status === 'PENDING' || status === 'RECEIVED' || status === 'APPROVAL_PENDING') {
+      return 'pending';
+    }
+    return 'unknown';
+  }
+
+  private async refundWithdrawalOnce(
+    input: {
+      withdrawalId: string;
+      riderProfileId: string;
+      amount: string;
+      actorType: WalletActorType;
+      actorProfileId: string | null;
+      notifyType: 'WITHDRAWAL_FAILED' | 'WITHDRAWAL_REJECTED' | 'WITHDRAWAL_REFUNDED';
+    },
+    db: Queryable,
+  ): Promise<{ available_balance: string; wallet_ledger_id: string }> {
+    const existing = await this.repo.lockWithdrawal(input.withdrawalId, db);
+    if (existing?.refund_wallet_ledger_id) {
+      const finance = await this.repo.lockAccounts(input.riderProfileId, db);
+      return {
+        available_balance: formatInr(finance.wallet.available_balance),
+        wallet_ledger_id: existing.refund_wallet_ledger_id,
+      };
+    }
+    const finance = await this.repo.lockAccounts(input.riderProfileId, db);
+    const restored = await this.repo.creditWallet(
+      finance.wallet.wallet_account_id,
+      input.amount,
+      db,
+    );
+    const ledger = await this.repo.insertWalletLedger(
+      {
+        walletAccountId: finance.wallet.wallet_account_id,
+        direction: 'CREDIT',
+        amount: input.amount,
+        entryType: 'ADJUSTMENT',
+        actorType: input.actorType,
+        actorProfileId: input.actorProfileId,
+      },
+      db,
+    );
+    await this.repo.updateWithdrawalStatus(
+      {
+        withdrawalId: input.withdrawalId,
+        status: existing?.status ?? 'PROCESSING',
+        refundWalletLedgerId: ledger.wallet_ledger_id,
+      },
+      db,
+    );
+    await this.walletNotifications.onWithdrawalEvent(
+      {
+        riderProfileId: input.riderProfileId,
+        withdrawalId: input.withdrawalId,
+        amount: formatInr(input.amount),
+        type: input.notifyType,
+      },
+      db,
+    );
+    return {
+      available_balance: restored,
+      wallet_ledger_id: ledger.wallet_ledger_id,
+    };
+  }
+
+  private serializeWithdrawal(row: {
+    withdrawal_id: string;
+    rider_profile_id: string;
+    amount: string;
+    status: string;
+    payout_method: string;
+    rider_upi_id?: string | null;
+    bank_account_id?: string | null;
+    merchant_transfer_id?: string | null;
+    provider_transfer_id?: string | null;
+    provider_status?: string | null;
+    failure_reason?: string | null;
+    requested_at?: Date;
+    processed_at?: Date | null;
+    updated_at?: Date;
+  }) {
+    return {
+      withdrawal_id: row.withdrawal_id,
+      rider_profile_id: row.rider_profile_id,
+      amount: formatInr(row.amount),
+      status: row.status,
+      payout_method: row.payout_method,
+      rider_upi_id: row.rider_upi_id ?? null,
+      bank_account_id: row.bank_account_id ?? null,
+      merchant_transfer_id: row.merchant_transfer_id ?? null,
+      provider_transfer_id: row.provider_transfer_id ?? null,
+      provider_status: row.provider_status ?? null,
+      failure_reason: row.failure_reason ?? null,
+      requested_at: row.requested_at?.toISOString?.() ?? null,
+      processed_at: row.processed_at ? row.processed_at.toISOString() : null,
+      updated_at: row.updated_at?.toISOString?.() ?? null,
+    };
   }
 
   async settle(
@@ -325,6 +1070,7 @@ export class WalletCodService {
       actorProfileId: string | null;
       allowWalletCredit: boolean;
       relatedOrderId?: string | null;
+      relatedPaymentTransactionId?: string | null;
       locked?: LockedRiderFinance;
     },
   ) {
@@ -395,6 +1141,7 @@ export class WalletCodService {
           amount: split.remainder,
           entryType: input.walletEntryType,
           relatedOrderId: input.relatedOrderId ?? null,
+          relatedPaymentTransactionId: input.relatedPaymentTransactionId ?? null,
           relatedCodLedgerId: codLedgerId,
           actorType: input.actorType,
           actorProfileId: input.actorProfileId,
@@ -440,6 +1187,7 @@ export class WalletCodService {
           amount: split.remainder,
           entryType: input.walletEntryType,
           relatedOrderId: input.relatedOrderId ?? null,
+          relatedPaymentTransactionId: input.relatedPaymentTransactionId ?? null,
           actorType: input.actorType,
           actorProfileId: input.actorProfileId,
         },

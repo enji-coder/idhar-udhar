@@ -11,12 +11,17 @@ import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthContext } from '../auth/types/auth-context';
 import { readIdempotencyKey } from '../orders/idempotency-key';
+import { PaymentsService } from '../payments/payments.service';
 import { AmountDto } from './dto/amount.dto';
+import { WithdrawDto } from './dto/withdraw.dto';
 import { WalletCodService } from './wallet-cod.service';
 
 @Controller('rider')
 export class RiderWalletController {
-  constructor(private readonly walletCod: WalletCodService) {}
+  constructor(
+    private readonly walletCod: WalletCodService,
+    private readonly payments: PaymentsService,
+  ) {}
 
   @Roles('RIDER')
   @Get('wallet')
@@ -38,9 +43,25 @@ export class RiderWalletController {
     @Body() body: AmountDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.walletCod.recharge(
+    return this.payments.beginRiderWalletTopUp(
       auth,
       body.amount,
+      readIdempotencyKey(idempotencyKey),
+    );
+  }
+
+  @Roles('RIDER')
+  @Post('wallet/withdraw')
+  @HttpCode(HttpStatus.CREATED)
+  withdraw(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: WithdrawDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.walletCod.requestWithdraw(
+      auth,
+      body.amount,
+      body.payout_method,
       readIdempotencyKey(idempotencyKey),
     );
   }

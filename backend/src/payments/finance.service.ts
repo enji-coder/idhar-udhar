@@ -39,9 +39,8 @@ export class FinanceService {
   }
 
   /**
-   * Inserts the ORIGINAL 85/15/50 freeze from the confirmed Trip Fare.
-   * This is NOT the locked production capture moment (normally DELIVERED).
-   * Admin/test may call it until that business event is decided.
+   * Admin/test seam for the ORIGINAL 85/15/50 freeze from Trip Fare.
+   * Production capture is {@link captureOnDelivered} inside the DELIVERED transition.
    */
   async freezeOriginal(auth: AuthContext, orderId: string) {
     if (auth.role !== 'ADMIN') {
@@ -52,75 +51,96 @@ export class FinanceService {
       if (!order) {
         throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
       }
-      const snapshot = await this.fares.findSnapshotByOrder(order.order_id, tx);
-      if (!snapshot) {
-        throw new ApiError(
-          ErrorCodes.FARE_NOT_CONFIRMED,
-          'Confirm the trip fare before freezing finance',
-          409,
-        );
-      }
-      if (snapshot.tax !== '0' && snapshot.tax !== '0.00') {
-        throw new ApiError(
-          ErrorCodes.INTERNAL_ERROR,
-          'Fare snapshot tax must be 0',
-          500,
-        );
-      }
-      const existing = await this.finance.findOriginal(order.order_id, tx);
-      if (existing) {
-        await this.walletCod.syncOrderFinance(order, tx);
-        await this.ensureTaxSnapshot(existing.finance_snapshot_id, tx);
-        return {
-          capture_moment: 'ADMIN_TEST_TRIGGER',
-          note: 'Production capture moment is still a business decision; this endpoint is a test/admin freeze seam.',
-          snapshot: serializeFinanceSnapshot(existing),
-        };
-      }
-      const settings = await this.finance.findActiveSettings(tx);
-      if (!settings) {
+      return this.captureOriginalInTx(order, tx, 'ADMIN_TEST_TRIGGER');
+    });
+  }
+
+  /**
+   * Production finance capture at DELIVERED.
+   * Idempotent: existing ORIGINAL re-syncs wallet/COD only.
+   * Must run in the same transaction as the DELIVERED status transition.
+   */
+  async captureOnDelivered(order: OrderRow, tx: Queryable) {
+    if (order.canonical_status !== 'DELIVERED') {
+      throw new ApiError(
+        ErrorCodes.INVALID_TRANSITION,
+        'Finance capture requires a delivered order',
+        409,
+      );
+    }
+    return this.captureOriginalInTx(order, tx, 'DELIVERED');
+  }
+
+  private async captureOriginalInTx(
+    order: OrderRow,
+    tx: Queryable,
+    captureMoment: 'DELIVERED' | 'ADMIN_TEST_TRIGGER',
+  ) {
+    const snapshot = await this.fares.findSnapshotByOrder(order.order_id, tx);
+    if (!snapshot) {
+      throw new ApiError(
+        ErrorCodes.FARE_NOT_CONFIRMED,
+        'Confirm the trip fare before freezing finance',
+        409,
+      );
+    }
+    if (snapshot.tax !== '0' && snapshot.tax !== '0.00') {
+      throw new ApiError(
+        ErrorCodes.INTERNAL_ERROR,
+        'Fare snapshot tax must be 0',
+        500,
+      );
+    }
+    const existing = await this.finance.findOriginal(order.order_id, tx);
+    if (existing) {
+      await this.walletCod.syncOrderFinance(order, tx);
+      await this.ensureTaxSnapshot(existing.finance_snapshot_id, tx);
+      return {
+        capture_moment: captureMoment,
+        snapshot: serializeFinanceSnapshot(existing),
+      };
+    }
+    const settings = await this.finance.findActiveSettings(tx);
+    if (!settings) {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_SETTINGS_UNAVAILABLE,
+        'No active payment settings version exists',
+        409,
+      );
+    }
+    try {
+      const inserted = await this.finance.insertOriginalFromFareSnapshot(
+        order.order_id,
+        tx,
+      );
+      if (!inserted) {
         throw new ApiError(
           ErrorCodes.PAYMENT_SETTINGS_UNAVAILABLE,
-          'No active payment settings version exists',
+          'Finance freeze requires a fare snapshot and active payment settings',
           409,
         );
       }
-      try {
-        const inserted = await this.finance.insertOriginalFromFareSnapshot(
-          order.order_id,
-          tx,
-        );
-        if (!inserted) {
-          throw new ApiError(
-            ErrorCodes.PAYMENT_SETTINGS_UNAVAILABLE,
-            'Finance freeze requires a fare snapshot and active payment settings',
-            409,
-          );
+      await this.walletCod.syncOrderFinance(order, tx);
+      await this.ensureTaxSnapshot(inserted.finance_snapshot_id, tx);
+      return {
+        capture_moment: captureMoment,
+        snapshot: serializeFinanceSnapshot(inserted),
+      };
+    } catch (err) {
+      if (isUniqueViolation(err, 'finance_snap_one_original')) {
+        const raced = await this.finance.findOriginal(order.order_id, tx);
+        if (!raced) {
+          throw err;
         }
         await this.walletCod.syncOrderFinance(order, tx);
-        await this.ensureTaxSnapshot(inserted.finance_snapshot_id, tx);
+        await this.ensureTaxSnapshot(raced.finance_snapshot_id, tx);
         return {
-          capture_moment: 'ADMIN_TEST_TRIGGER',
-          note: 'Production capture moment is still a business decision; this endpoint is a test/admin freeze seam.',
-          snapshot: serializeFinanceSnapshot(inserted),
+          capture_moment: captureMoment,
+          snapshot: serializeFinanceSnapshot(raced),
         };
-      } catch (err) {
-        if (isUniqueViolation(err, 'finance_snap_one_original')) {
-          const raced = await this.finance.findOriginal(order.order_id, tx);
-          if (!raced) {
-            throw err;
-          }
-          await this.walletCod.syncOrderFinance(order, tx);
-          await this.ensureTaxSnapshot(raced.finance_snapshot_id, tx);
-          return {
-            capture_moment: 'ADMIN_TEST_TRIGGER',
-            note: 'Production capture moment is still a business decision; this endpoint is a test/admin freeze seam.',
-            snapshot: serializeFinanceSnapshot(raced),
-          };
-        }
-        throw err;
       }
-    });
+      throw err;
+    }
   }
 
   async allocatePreview(tripFare: string) {

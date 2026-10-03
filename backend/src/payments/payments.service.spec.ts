@@ -15,6 +15,15 @@ const customerAuth: AuthContext = {
   profileId: PROFILE_ID,
 };
 
+const RIDER_PROFILE_ID = '99999999-9999-9999-9999-999999999999';
+
+const riderAuth: AuthContext = {
+  identityId: IDENTITY_ID,
+  sessionId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+  role: 'RIDER',
+  profileId: RIDER_PROFILE_ID,
+};
+
 const adminAuth: AuthContext = {
   ...customerAuth,
   role: 'ADMIN',
@@ -82,7 +91,8 @@ function makeService(opts?: {
     insertTransaction: jest.fn(async (input: Record<string, unknown>) => {
       const row = {
         payment_transaction_id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
-        order_id: input.orderId,
+        order_id: input.orderId ?? null,
+        rider_profile_id: input.riderProfileId ?? null,
         payer_type: input.payerType,
         method: input.method,
         amount: input.amount,
@@ -276,6 +286,43 @@ describe('PaymentsService createTransaction', () => {
     ).rejects.toMatchObject({
       code: ErrorCodes.FORBIDDEN,
       status: 403,
+    });
+  });
+});
+
+describe('PaymentsService rider wallet top-up', () => {
+  const session = {
+    providerTxnId: 'cf-wallet-1',
+    providerEventId: null,
+    paymentSessionId: 'session-wallet',
+    gatewayOrderId: 'iu-wallet-order',
+    environment: 'sandbox' as const,
+  };
+
+  it('beginRiderWalletTopUp creates PENDING charge and does not credit wallet', async () => {
+    const beginOnlineCharge = jest.fn(async () => session);
+    const { service, inserted, walletCod, beginOnlineCharge: begin } = makeService({
+      beginOnlineCharge,
+    });
+    const payload = await service.beginRiderWalletTopUp(riderAuth, '40.00', 'topup-1');
+    expect(begin).toHaveBeenCalledWith({
+      amount: '40.00',
+      payerType: 'RIDER',
+      riderProfileId: RIDER_PROFILE_ID,
+      purpose: 'WALLET_TOPUP',
+    });
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({
+      order_id: null,
+      payer_type: 'RIDER',
+      transaction_status: 'PENDING',
+      amount: '40.00',
+    });
+    expect(walletCod.syncOrderFinance).not.toHaveBeenCalled();
+    expect(payload).toMatchObject({
+      amount: '40.00',
+      charge_purpose: 'WALLET_TOPUP',
+      payment_session_id: 'session-wallet',
     });
   });
 });

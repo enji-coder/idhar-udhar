@@ -1,0 +1,178 @@
+{
+    "containerDefinitions":  [
+                                 {
+                                     "name":  "idhar-udhar-backend",
+                                     "image":  "635738235470.dkr.ecr.ap-south-1.amazonaws.com/idhar-udhar-backend:admin-location-crud-20261002",
+                                     "cpu":  0,
+                                     "portMappings":  [
+                                                          {
+                                                              "containerPort":  3000,
+                                                              "hostPort":  3000,
+                                                              "protocol":  "tcp",
+                                                              "name":  "idhar-udhar-backend-3000-tcp"
+                                                          }
+                                                      ],
+                                     "essential":  true,
+                                     "environment":  [
+                                                         {
+                                                             "name":  "DATABASE_POOL_MAX",
+                                                             "value":  "10"
+                                                         },
+                                                         {
+                                                             "name":  "AWS_REGION",
+                                                             "value":  "ap-south-1"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_NAME",
+                                                             "value":  "idhar_udhar"
+                                                         },
+                                                         {
+                                                             "name":  "REDIS_TLS",
+                                                             "value":  "true"
+                                                         },
+                                                         {
+                                                             "name":  "PORT",
+                                                             "value":  "3000"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_HOST",
+                                                             "value":  "idhar-udhar-prod-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_PORT",
+                                                             "value":  "5432"
+                                                         },
+                                                         {
+                                                             "name":  "MSG91_SENDER_ID",
+                                                             "value":  "IDRUDR"
+                                                         },
+                                                         {
+                                                             "name":  "CORS_ORIGIN",
+                                                             "value":  "https://admin.idharudhar.co.in"
+                                                         },
+                                                         {
+                                                             "name":  "S3_DOCUMENTS_BUCKET",
+                                                             "value":  "idhar-udhar-prod-documents"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_SSL",
+                                                             "value":  "true"
+                                                         },
+                                                         {
+                                                             "name":  "MSG91_TEMPLATE_ID",
+                                                             "value":  "6aae47bebb3047b66106a613"
+                                                         },
+                                                         {
+                                                             "name":  "NOTIFICATION_WORKER_ENABLED",
+                                                             "value":  "true"
+                                                         },
+                                                         {
+                                                             "name":  "OTP_DELIVERY_PROVIDER",
+                                                             "value":  "msg91"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_SSL_ROOT_CERT",
+                                                             "value":  "/app/certs/rds-global-bundle.pem"
+                                                         },
+                                                         {
+                                                             "name":  "REDIS_ENABLED",
+                                                             "value":  "true"
+                                                         },
+                                                         {
+                                                             "name":  "NODE_ENV",
+                                                             "value":  "production"
+                                                         },
+                                                         {
+                                                             "name":  "LOCATION_STORE",
+                                                             "value":  "redis"
+                                                         },
+                                                         {
+                                                             "name":  "PUSH_PROVIDER",
+                                                             "value":  "fcm"
+                                                         },
+                                                         {
+                                                             "name":  "DATABASE_USER",
+                                                             "value":  "idhar_admin"
+                                                         },
+                                                         {
+                                                             "name":  "ROUTING_PROVIDER",
+                                                             "value":  "google"
+                                                         }
+                                                     ],
+                                     "mountPoints":  [
+
+                                                     ],
+                                     "volumesFrom":  [
+
+                                                     ],
+                                     "secrets":  [
+                                                     {
+                                                         "name":  "DATABASE_PASSWORD",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:rds!db-168c4185-d158-49e3-8cd8-b91c36019f68-qcZSYx:password::"
+                                                     },
+                                                     {
+                                                         "name":  "JWT_ACCESS_SECRET",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:JWT_ACCESS_SECRET::"
+                                                     },
+                                                     {
+                                                         "name":  "OTP_HASH_PEPPER",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:OTP_HASH_PEPPER::"
+                                                     },
+                                                     {
+                                                         "name":  "REFRESH_TOKEN_PEPPER",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:REFRESH_TOKEN_PEPPER::"
+                                                     },
+                                                     {
+                                                         "name":  "MSG91_AUTHKEY",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:MSG91_AUTHKEY::"
+                                                     },
+                                                     {
+                                                         "name":  "GOOGLE_MAPS_API_KEY",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:GOOGLE_MAPS_API_KEY::"
+                                                     },
+                                                     {
+                                                         "name":  "FIREBASE_SERVICE_ACCOUNT_JSON",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:FIREBASE_SERVICE_ACCOUNT_JSON::"
+                                                     },
+                                                     {
+                                                         "name":  "REDIS_HOST",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:REDIS_HOST::"
+                                                     },
+                                                     {
+                                                         "name":  "REDIS_PORT",
+                                                         "valueFrom":  "arn:aws:secretsmanager:ap-south-1:635738235470:secret:idhar-udhar/prod/backend-L4fInY:REDIS_PORT::"
+                                                     }
+                                                 ],
+                                     "logConfiguration":  {
+                                                              "logDriver":  "awslogs",
+                                                              "options":  {
+                                                                              "awslogs-group":  "/ecs/idhar-udhar-backend",
+                                                                              "awslogs-create-group":  "true",
+                                                                              "awslogs-region":  "ap-south-1",
+                                                                              "awslogs-stream-prefix":  "ecs"
+                                                                          },
+                                                              "secretOptions":  [
+
+                                                                                ]
+                                                          },
+                                     "systemControls":  [
+
+                                                        ]
+                                 }
+                             ],
+    "family":  "idhar-udhar-backend",
+    "taskRoleArn":  "arn:aws:iam::635738235470:role/ecsTaskRole",
+    "executionRoleArn":  "arn:aws:iam::635738235470:role/ecsTaskExecutionRole",
+    "networkMode":  "awsvpc",
+    "volumes":  [
+
+                ],
+    "placementConstraints":  [
+
+                             ],
+    "requiresCompatibilities":  [
+                                    "FARGATE"
+                                ],
+    "cpu":  "512",
+    "memory":  "1024"
+}

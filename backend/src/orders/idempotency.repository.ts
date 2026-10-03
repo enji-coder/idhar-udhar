@@ -11,7 +11,9 @@ export type IdempotencyScope =
   | 'payment'
   | 'finance-freeze'
   | 'recharge'
-  | 'cod-settlement';
+  | 'cod-settlement'
+  | 'wallet-topup'
+  | 'wallet-withdraw';
 
 export type IdempotencyRow = {
   idempotency_id: string;

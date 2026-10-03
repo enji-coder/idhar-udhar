@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AuthContext } from '../auth/types/auth-context';
+import { IdentityRepository } from '../auth/identity/identity.repository';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { assertLatLng, CoordinateError } from '../routing/coordinates';
@@ -8,7 +9,10 @@ import { LOCATION_STORE, LocationStore, RiderLocationFix } from './location-stor
 
 @Injectable()
 export class LocationService {
-  constructor(@Inject(LOCATION_STORE) private readonly store: LocationStore) {}
+  constructor(
+    @Inject(LOCATION_STORE) private readonly store: LocationStore,
+    private readonly identities: IdentityRepository,
+  ) {}
 
   async updateRiderLocation(auth: AuthContext, body: UpdateRiderLocationDto) {
     if (auth.role !== 'RIDER') {
@@ -40,6 +44,7 @@ export class LocationService {
       receivedAt,
     };
     await this.store.upsert(fix);
+    await this.identities.touchRiderLastSeen(auth.profileId);
     return this.serialize(fix);
   }
 
@@ -52,6 +57,29 @@ export class LocationService {
       store: this.store.backend,
       durable: this.store.durable,
       location: fix ? this.serializeFix(fix) : null,
+    };
+  }
+
+  /**
+   * Read a rider fix for an authorized consumer (order owner / admin).
+   * Caller must already enforce ownership and assignment.
+   */
+  async getRiderLocationForConsumer(riderProfileId: string) {
+    const fix = await this.store.get(riderProfileId);
+    if (!fix) {
+      return {
+        store: this.store.backend,
+        durable: this.store.durable,
+        location: null,
+        stale: true,
+      };
+    }
+    const ageMs = Date.now() - fix.receivedAt.getTime();
+    return {
+      store: this.store.backend,
+      durable: this.store.durable,
+      location: this.serializeFix(fix),
+      stale: ageMs > 120_000,
     };
   }
 

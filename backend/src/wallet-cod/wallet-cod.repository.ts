@@ -755,6 +755,410 @@ export class WalletCodRepository {
     );
     return result.rows[0] ?? null;
   }
+
+  async findWalletLedgerByPaymentTransactionId(
+    paymentTransactionId: string,
+    db: Queryable,
+  ): Promise<WalletLedgerRow | null> {
+    const result = await db.query<WalletLedgerRow>(
+      `
+      SELECT ${WALLET_LEDGER_COLUMNS}
+      FROM wallet_ledger_entries
+      WHERE related_payment_transaction_id = $1
+      `,
+      [paymentTransactionId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findCurrentUpi(
+    riderProfileId: string,
+    db: Queryable,
+  ): Promise<{
+    rider_upi_id: string;
+    vpa_encrypted_or_token: string;
+    vpa_masked: string;
+  } | null> {
+    const result = await db.query<{
+      rider_upi_id: string;
+      vpa_encrypted_or_token: string;
+      vpa_masked: string;
+    }>(
+      `
+      SELECT rider_upi_id, vpa_encrypted_or_token, vpa_masked
+      FROM rider_upis
+      WHERE rider_profile_id = $1 AND is_current = TRUE
+      `,
+      [riderProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findCurrentBankAccount(
+    riderProfileId: string,
+    db: Queryable,
+  ): Promise<{
+    bank_account_id: string;
+    account_encrypted_or_token: string;
+    account_masked: string;
+    ifsc_or_bank: string | null;
+    holder_name: string;
+  } | null> {
+    const result = await db.query<{
+      bank_account_id: string;
+      account_encrypted_or_token: string;
+      account_masked: string;
+      ifsc_or_bank: string | null;
+      holder_name: string;
+    }>(
+      `
+      SELECT
+        bank_account_id,
+        account_encrypted_or_token,
+        account_masked,
+        ifsc_or_bank,
+        holder_name
+      FROM rider_bank_accounts
+      WHERE rider_profile_id = $1 AND is_current = TRUE
+      `,
+      [riderProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findUpiById(
+    riderUpiId: string,
+    db: Queryable,
+  ): Promise<{
+    rider_upi_id: string;
+    vpa_encrypted_or_token: string;
+    vpa_masked: string;
+  } | null> {
+    const result = await db.query<{
+      rider_upi_id: string;
+      vpa_encrypted_or_token: string;
+      vpa_masked: string;
+    }>(
+      `
+      SELECT rider_upi_id, vpa_encrypted_or_token, vpa_masked
+      FROM rider_upis
+      WHERE rider_upi_id = $1
+      `,
+      [riderUpiId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findBankById(
+    bankAccountId: string,
+    db: Queryable,
+  ): Promise<{
+    bank_account_id: string;
+    account_encrypted_or_token: string;
+    account_masked: string;
+    ifsc_or_bank: string | null;
+    holder_name: string;
+  } | null> {
+    const result = await db.query<{
+      bank_account_id: string;
+      account_encrypted_or_token: string;
+      account_masked: string;
+      ifsc_or_bank: string | null;
+      holder_name: string;
+    }>(
+      `
+      SELECT
+        bank_account_id,
+        account_encrypted_or_token,
+        account_masked,
+        ifsc_or_bank,
+        holder_name
+      FROM rider_bank_accounts
+      WHERE bank_account_id = $1
+      `,
+      [bankAccountId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async insertWithdrawal(
+    input: {
+      riderProfileId: string;
+      amount: string;
+      payoutMethod: 'UPI' | 'BANK';
+      riderUpiId: string | null;
+      bankAccountId: string | null;
+      walletLedgerId: string;
+    },
+    db: Queryable,
+  ): Promise<{ withdrawal_id: string; status: string }> {
+    const result = await db.query<{ withdrawal_id: string; status: string }>(
+      `
+      INSERT INTO rider_wallet_withdrawals (
+        rider_profile_id,
+        amount,
+        status,
+        payout_method,
+        rider_upi_id,
+        bank_account_id,
+        wallet_ledger_id
+      )
+      VALUES ($1, $2::numeric(12,2), 'REQUESTED', $3, $4, $5, $6)
+      RETURNING withdrawal_id, status
+      `,
+      [
+        input.riderProfileId,
+        input.amount,
+        input.payoutMethod,
+        input.riderUpiId,
+        input.bankAccountId,
+        input.walletLedgerId,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async listWithdrawals(
+    db: Queryable = this.postgres,
+  ): Promise<
+    Array<{
+      withdrawal_id: string;
+      rider_profile_id: string;
+      amount: string;
+      status: string;
+      payout_method: string;
+      rider_upi_id: string | null;
+      bank_account_id: string | null;
+      merchant_transfer_id: string | null;
+      provider_transfer_id: string | null;
+      provider_status: string | null;
+      failure_reason: string | null;
+      requested_at: Date;
+      processed_at: Date | null;
+      updated_at: Date;
+    }>
+  > {
+    const result = await db.query<{
+      withdrawal_id: string;
+      rider_profile_id: string;
+      amount: string;
+      status: string;
+      payout_method: string;
+      rider_upi_id: string | null;
+      bank_account_id: string | null;
+      merchant_transfer_id: string | null;
+      provider_transfer_id: string | null;
+      provider_status: string | null;
+      failure_reason: string | null;
+      requested_at: Date;
+      processed_at: Date | null;
+      updated_at: Date;
+    }>(
+      `
+      SELECT
+        withdrawal_id,
+        rider_profile_id,
+        amount::text AS amount,
+        status,
+        payout_method,
+        rider_upi_id,
+        bank_account_id,
+        merchant_transfer_id,
+        provider_transfer_id,
+        provider_status,
+        failure_reason,
+        requested_at,
+        processed_at,
+        updated_at
+      FROM rider_wallet_withdrawals
+      ORDER BY requested_at DESC
+      LIMIT 200
+      `,
+    );
+    return result.rows;
+  }
+
+  async lockWithdrawal(
+    withdrawalId: string,
+    db: Queryable,
+  ): Promise<{
+    withdrawal_id: string;
+    rider_profile_id: string;
+    amount: string;
+    status: string;
+    payout_method: string;
+    rider_upi_id: string | null;
+    bank_account_id: string | null;
+    wallet_ledger_id: string | null;
+    merchant_transfer_id: string | null;
+    provider_transfer_id: string | null;
+    provider_status: string | null;
+    failure_reason: string | null;
+    refund_wallet_ledger_id: string | null;
+  } | null> {
+    const result = await db.query<{
+      withdrawal_id: string;
+      rider_profile_id: string;
+      amount: string;
+      status: string;
+      payout_method: string;
+      rider_upi_id: string | null;
+      bank_account_id: string | null;
+      wallet_ledger_id: string | null;
+      merchant_transfer_id: string | null;
+      provider_transfer_id: string | null;
+      provider_status: string | null;
+      failure_reason: string | null;
+      refund_wallet_ledger_id: string | null;
+    }>(
+      `
+      SELECT
+        withdrawal_id,
+        rider_profile_id,
+        amount::text AS amount,
+        status,
+        payout_method,
+        rider_upi_id,
+        bank_account_id,
+        wallet_ledger_id,
+        merchant_transfer_id,
+        provider_transfer_id,
+        provider_status,
+        failure_reason,
+        refund_wallet_ledger_id
+      FROM rider_wallet_withdrawals
+      WHERE withdrawal_id = $1
+      FOR UPDATE
+      `,
+      [withdrawalId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findWithdrawalByMerchantTransferId(
+    merchantTransferId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{ withdrawal_id: string } | null> {
+    const result = await db.query<{ withdrawal_id: string }>(
+      `
+      SELECT withdrawal_id
+      FROM rider_wallet_withdrawals
+      WHERE merchant_transfer_id = $1
+      `,
+      [merchantTransferId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async listProcessingForReconcile(
+    minAgeSeconds: number,
+    limit: number,
+    db: Queryable = this.postgres,
+  ): Promise<Array<{ withdrawal_id: string; merchant_transfer_id: string }>> {
+    const result = await db.query<{
+      withdrawal_id: string;
+      merchant_transfer_id: string;
+    }>(
+      `
+      SELECT withdrawal_id, merchant_transfer_id
+      FROM rider_wallet_withdrawals
+      WHERE status = 'PROCESSING'
+        AND merchant_transfer_id IS NOT NULL
+        AND updated_at <= now() - ($1::text || ' seconds')::interval
+      ORDER BY updated_at ASC
+      LIMIT $2
+      `,
+      [String(minAgeSeconds), limit],
+    );
+    return result.rows;
+  }
+
+  async updateWithdrawalStatus(
+    input: {
+      withdrawalId: string;
+      status: string;
+      decidedByAdminProfileId?: string | null;
+      failureReason?: string | null;
+      processed?: boolean;
+      merchantTransferId?: string | null;
+      providerTransferId?: string | null;
+      providerStatus?: string | null;
+      refundWalletLedgerId?: string | null;
+      touchReconciled?: boolean;
+    },
+    db: Queryable,
+  ): Promise<void> {
+    await db.query(
+      `
+      UPDATE rider_wallet_withdrawals
+      SET
+        status = $2,
+        decided_by_admin_profile_id = COALESCE($3, decided_by_admin_profile_id),
+        failure_reason = COALESCE($4, failure_reason),
+        processed_at = CASE WHEN $5 THEN now() ELSE processed_at END,
+        merchant_transfer_id = COALESCE($6, merchant_transfer_id),
+        provider_transfer_id = COALESCE($7, provider_transfer_id),
+        provider_status = COALESCE($8, provider_status),
+        refund_wallet_ledger_id = COALESCE($9, refund_wallet_ledger_id),
+        last_reconciled_at = CASE WHEN $10 THEN now() ELSE last_reconciled_at END
+      WHERE withdrawal_id = $1
+      `,
+      [
+        input.withdrawalId,
+        input.status,
+        input.decidedByAdminProfileId ?? null,
+        input.failureReason ?? null,
+        input.processed === true,
+        input.merchantTransferId ?? null,
+        input.providerTransferId ?? null,
+        input.providerStatus ?? null,
+        input.refundWalletLedgerId ?? null,
+        input.touchReconciled === true,
+      ],
+    );
+  }
+
+  async listWalletTopUps(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<
+    Array<{
+      payment_transaction_id: string;
+      amount: string;
+      transaction_status: string;
+      provider_txn_id: string | null;
+      created_at: Date;
+      gateway_order_id: string | null;
+    }>
+  > {
+    const result = await db.query<{
+      payment_transaction_id: string;
+      amount: string;
+      transaction_status: string;
+      provider_txn_id: string | null;
+      created_at: Date;
+      gateway_order_id: string | null;
+    }>(
+      `
+      SELECT
+        t.payment_transaction_id,
+        t.amount::text AS amount,
+        t.transaction_status,
+        t.provider_txn_id,
+        t.created_at,
+        a.gateway_order_id
+      FROM payment_transactions t
+      LEFT JOIN payment_gateway_attempts a
+        ON a.payment_transaction_id = t.payment_transaction_id
+      WHERE t.rider_profile_id = $1
+        AND t.charge_purpose = 'WALLET_TOPUP'
+      ORDER BY t.created_at DESC
+      LIMIT 100
+      `,
+      [riderProfileId],
+    );
+    return result.rows;
+  }
 }
 
 export function serializeWalletLedger(row: WalletLedgerRow) {

@@ -87,6 +87,13 @@ class ApiClient {
     return _send(() => _dio.put<dynamic>(path, data: data));
   }
 
+  Future<Map<String, Object?>> patch(
+    String path, {
+    Object? data,
+  }) {
+    return _send(() => _dio.patch<dynamic>(path, data: data));
+  }
+
   /// Multipart POST. Used by rider document upload. Does not change JSON calls.
   Future<Map<String, Object?>> postForm(
     String path, {

@@ -32,6 +32,7 @@ export type RiderProfileRow = {
   cod_operational_status: string;
   preferred_language: string | null;
   profile_picture_file_id: string | null;
+  last_seen_at?: Date | string | null;
 };
 
 export type AdminProfileRow = {
@@ -333,6 +334,9 @@ export class IdentityRepository {
       phone_normalized: string;
       city_code: string | null;
       zone_name: string | null;
+      name: string | null;
+      email: string | null;
+      date_of_birth: string | null;
     })[]
   > {
     const result = await db.query<
@@ -340,6 +344,9 @@ export class IdentityRepository {
         phone_normalized: string;
         city_code: string | null;
         zone_name: string | null;
+        name: string | null;
+        email: string | null;
+        date_of_birth: string | null;
       }
     >(
       `
@@ -352,11 +359,18 @@ export class IdentityRepository {
         r.home_city_id,
         r.home_zone_id,
         r.cod_operational_status,
+        r.preferred_language,
+        r.profile_picture_file_id,
+        r.last_seen_at,
         i.phone_normalized,
+        i.email,
+        d.name,
+        d.date_of_birth::text AS date_of_birth,
         c.city_code,
         z.name AS zone_name
       FROM rider_profiles r
       JOIN identities i ON i.identity_id = r.identity_id
+      LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
       LEFT JOIN cities c ON c.city_id = r.home_city_id
       LEFT JOIN zones z ON z.zone_id = r.home_zone_id
       ORDER BY r.created_at DESC
@@ -374,6 +388,9 @@ export class IdentityRepository {
         phone_normalized: string;
         city_code: string | null;
         zone_name: string | null;
+        name: string | null;
+        email: string | null;
+        date_of_birth: string | null;
       })
     | null
   > {
@@ -382,6 +399,9 @@ export class IdentityRepository {
         phone_normalized: string;
         city_code: string | null;
         zone_name: string | null;
+        name: string | null;
+        email: string | null;
+        date_of_birth: string | null;
       }
     >(
       `
@@ -394,11 +414,18 @@ export class IdentityRepository {
         r.home_city_id,
         r.home_zone_id,
         r.cod_operational_status,
+        r.preferred_language,
+        r.profile_picture_file_id,
+        r.last_seen_at,
         i.phone_normalized,
+        i.email,
+        d.name,
+        d.date_of_birth::text AS date_of_birth,
         c.city_code,
         z.name AS zone_name
       FROM rider_profiles r
       JOIN identities i ON i.identity_id = r.identity_id
+      LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
       LEFT JOIN cities c ON c.city_id = r.home_city_id
       LEFT JOIN zones z ON z.zone_id = r.home_zone_id
       WHERE r.rider_profile_id = $1
@@ -491,20 +518,38 @@ export class IdentityRepository {
   async updateRiderOnlineStatus(
     riderProfileId: string,
     onlineStatus: 'ONLINE' | 'OFFLINE',
+    db: Queryable = this.postgres,
   ): Promise<{ approval_status: string; online_status: string } | null> {
-    const result = await this.postgres.query<{
+    const result = await db.query<{
       approval_status: string;
       online_status: string;
     }>(
       `
       UPDATE rider_profiles
-      SET online_status = $2
+      SET
+        online_status = $2,
+        last_seen_at = CASE WHEN $2 = 'ONLINE' THEN now() ELSE last_seen_at END
       WHERE rider_profile_id = $1
       RETURNING approval_status, online_status
       `,
       [riderProfileId, onlineStatus],
     );
     return result.rows[0] ?? null;
+  }
+
+  async touchRiderLastSeen(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<void> {
+    await db.query(
+      `
+      UPDATE rider_profiles
+      SET last_seen_at = now()
+      WHERE rider_profile_id = $1
+        AND online_status = 'ONLINE'
+      `,
+      [riderProfileId],
+    );
   }
 
   async updateRiderLanguage(
@@ -525,5 +570,112 @@ export class IdentityRepository {
       [riderProfileId, preferredLanguage],
     );
     return result.rows[0] ?? null;
+  }
+
+  async updateIdentityEmail(
+    identityId: string,
+    email: string | null,
+    db: Queryable = this.postgres,
+  ): Promise<IdentityRow | null> {
+    const result = await db.query<IdentityRow>(
+      `
+      UPDATE identities
+      SET email = $2
+      WHERE identity_id = $1
+      RETURNING identity_id, phone_normalized, email, auth_status
+      `,
+      [identityId, email],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findRiderDriver(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    rider_driver_id: string;
+    name: string | null;
+    date_of_birth: string | null;
+  } | null> {
+    const result = await db.query<{
+      rider_driver_id: string;
+      name: string | null;
+      date_of_birth: string | null;
+    }>(
+      `
+      SELECT
+        rider_driver_id,
+        name,
+        date_of_birth::text AS date_of_birth
+      FROM rider_drivers
+      WHERE rider_profile_id = $1
+      `,
+      [riderProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async upsertRiderDriverDetails(
+    input: {
+      riderProfileId: string;
+      name?: string;
+      dateOfBirth?: string | null;
+      updateName: boolean;
+      updateDob: boolean;
+    },
+    db: Queryable = this.postgres,
+  ): Promise<{
+    rider_driver_id: string;
+    name: string | null;
+    date_of_birth: string | null;
+  }> {
+    const existing = await this.findRiderDriver(input.riderProfileId, db);
+    if (!existing) {
+      const inserted = await db.query<{
+        rider_driver_id: string;
+        name: string | null;
+        date_of_birth: string | null;
+      }>(
+        `
+        INSERT INTO rider_drivers (rider_profile_id, name, date_of_birth)
+        VALUES ($1, $2, $3::date)
+        RETURNING
+          rider_driver_id,
+          name,
+          date_of_birth::text AS date_of_birth
+        `,
+        [
+          input.riderProfileId,
+          input.updateName ? input.name ?? null : null,
+          input.updateDob ? input.dateOfBirth ?? null : null,
+        ],
+      );
+      return inserted.rows[0];
+    }
+    const result = await db.query<{
+      rider_driver_id: string;
+      name: string | null;
+      date_of_birth: string | null;
+    }>(
+      `
+      UPDATE rider_drivers
+      SET
+        name = CASE WHEN $3 THEN $2 ELSE name END,
+        date_of_birth = CASE WHEN $5 THEN $4::date ELSE date_of_birth END
+      WHERE rider_profile_id = $1
+      RETURNING
+        rider_driver_id,
+        name,
+        date_of_birth::text AS date_of_birth
+      `,
+      [
+        input.riderProfileId,
+        input.name ?? null,
+        input.updateName,
+        input.dateOfBirth ?? null,
+        input.updateDob,
+      ],
+    );
+    return result.rows[0];
   }
 }

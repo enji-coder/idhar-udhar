@@ -105,4 +105,69 @@ export class CatalogRepository {
     );
     return result.rows[0] ?? null;
   }
+
+  /**
+   * Online, approved riders with an active vehicle in this category.
+   * Used by SYSTEM dispatch after fare confirm (same offer seam as admin).
+   */
+  async listEligibleOnlineRidersForCategory(
+    vehicleCategoryId: string,
+    db: Queryable = this.postgres,
+    limit = 20,
+  ): Promise<string[]> {
+    const result = await db.query<{ rider_profile_id: string }>(
+      `
+      SELECT DISTINCT r.rider_profile_id
+      FROM rider_profiles r
+      INNER JOIN vehicles v
+        ON v.rider_profile_id = r.rider_profile_id
+       AND v.active = TRUE
+       AND v.vehicle_category_id = $1
+      WHERE r.online_status = 'ONLINE'
+        AND r.approval_status = 'APPROVED'
+        AND r.deactivated_at IS NULL
+      ORDER BY r.rider_profile_id
+      LIMIT $2
+      `,
+      [vehicleCategoryId, limit],
+    );
+    return result.rows.map((row) => row.rider_profile_id);
+  }
+
+  /** Customer-safe assigned rider fields only. No phone/email/licence. */
+  async findAssignedRiderDisplay(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    name: string | null;
+    vehicle_registration: string | null;
+    vehicle_category_name: string | null;
+  } | null> {
+    const result = await db.query<{
+      name: string | null;
+      vehicle_registration: string | null;
+      vehicle_category_name: string | null;
+    }>(
+      `
+      SELECT
+        d.name,
+        v.registration AS vehicle_registration,
+        vc.name AS vehicle_category_name
+      FROM rider_profiles r
+      LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
+      LEFT JOIN LATERAL (
+        SELECT registration, vehicle_category_id
+        FROM vehicles
+        WHERE rider_profile_id = r.rider_profile_id
+          AND active = TRUE
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC
+        LIMIT 1
+      ) v ON TRUE
+      LEFT JOIN vehicle_categories vc ON vc.vehicle_category_id = v.vehicle_category_id
+      WHERE r.rider_profile_id = $1
+      `,
+      [riderProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
 }

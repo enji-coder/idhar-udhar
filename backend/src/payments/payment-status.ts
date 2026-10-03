@@ -2,7 +2,11 @@ import { formatInr } from '../fare/money';
 
 export type AggregatePaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
 
-export type PayerType = 'CUSTOMER' | 'RECEIVER';
+export type PayerType = 'CUSTOMER' | 'RECEIVER' | 'RIDER';
+export type ChargePurpose =
+  | 'BOOKING'
+  | 'RECEIVABLE_CLEARANCE'
+  | 'WALLET_TOPUP';
 export type WhoPays = 'CUSTOMER' | 'RECEIVER' | 'SPLIT';
 export type PaymentMethod = 'ONLINE' | 'CASH';
 export type PaymentDirection = 'CHARGE' | 'REFUND';

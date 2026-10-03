@@ -45,6 +45,8 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
     _customWeight = TextEditingController(
       text: _useCustomWeight ? _formatWeight(draft.weightKg) : '',
     );
+    // Warm the order quote for Booking Summary only. Estimated Fare on this
+    // screen is driven by vehicleFarePreviewProvider, not this prefetch.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_prefetchQuote());
     });
@@ -53,11 +55,8 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
   Future<void> _prefetchQuote() async {
     try {
       await ensureCustomerQuote(ref);
-      if (mounted) {
-        setState(() {});
-      }
     } catch (_) {
-      // Summary confirm path surfaces quote errors; keep parcel layout usable.
+      // Summary confirms quote; Estimated Fare uses vehicle-fares preview.
     }
   }
 
@@ -172,13 +171,27 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
         .toList(growable: false);
     final AsyncValue<Map<String, String>> farePreview =
         ref.watch(vehicleFarePreviewProvider);
-    final String? previewRaw = draft.vehicle == null
-        ? null
-        : farePreview.asData?.value[draft.vehicle!.id];
+    // Keep the last successful map while a reload is in flight.
+    final Map<String, String>? fareMap =
+        farePreview.asData?.value ?? farePreview.valueOrNull;
+    final String? previewRaw =
+        draft.vehicle == null ? null : fareMap?[draft.vehicle!.id];
     final double? previewFare =
         previewRaw == null ? null : double.tryParse(previewRaw);
-    // Prefer the order quote; fall back to the same backend vehicle-fare preview.
+    // Prefer a held order quote; otherwise backend vehicle-fares preview.
+    // Never gate this label on ensureCustomerQuote — that create/quote call
+    // can run for seconds and left the UI stuck on "Calculating...".
     final double? estimatedFare = draft.customerVisibleFare ?? previewFare;
+    final String estimatedFareLabel;
+    if (estimatedFare != null) {
+      estimatedFareLabel = '₹${estimatedFare.toStringAsFixed(0)}';
+    } else if (farePreview.isLoading) {
+      estimatedFareLabel = 'Calculating...';
+    } else if (farePreview.hasError) {
+      estimatedFareLabel = 'Unable to calculate fare';
+    } else {
+      estimatedFareLabel = 'Unable to calculate fare';
+    }
 
     return GlassPageScaffold(
       bottom: Column(
@@ -200,13 +213,21 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
                         ),
                       ),
                       Text(
-                        estimatedFare == null
-                            ? '—'
-                            : '₹${estimatedFare.toStringAsFixed(0)}',
+                        estimatedFareLabel,
                         style: AppTextStyles.headingS.copyWith(
                           color: AppColors.orange,
                         ),
                       ),
+                      if (estimatedFare == null && !farePreview.isLoading) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        TextButton(
+                          onPressed: () {
+                            ref.invalidate(vehicleFarePreviewProvider);
+                            unawaited(_prefetchQuote());
+                          },
+                          child: const Text('Retry'),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -320,8 +341,7 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: sizes.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(width: AppSpacing.sm),
+              separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, index) {
                 final s = sizes[index];
                 final selected = draft.sizeId == s.id;
@@ -378,8 +398,8 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
             runSpacing: AppSpacing.sm,
             children: [
               ..._presetWeights.where(draft.weightAllowed).map((kg) {
-                final bool selected = !_useCustomWeight &&
-                    (draft.weightKg - kg).abs() < 0.001;
+                final bool selected =
+                    !_useCustomWeight && (draft.weightKg - kg).abs() < 0.001;
                 return ChoiceChip(
                   label: Text(_presetLabel(kg)),
                   selected: selected,

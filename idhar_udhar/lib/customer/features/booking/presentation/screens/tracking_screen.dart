@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/maps/maps.dart';
 
 import '../../../../core/constants/asset_paths.dart';
@@ -35,6 +39,10 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
 
   DisplayRoute? _route;
   String? _routeKey;
+  Timer? _pollTimer;
+  bool _refreshing = false;
+  GeoPoint? _riderPoint;
+  bool _riderStale = false;
 
   static String _labelFor(OrderStatus status) {
     switch (status) {
@@ -67,6 +75,24 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
 
   void _sync(MockOrder order) {
     ref.read(sessionProvider.notifier).updateOrder(order);
+    ref.read(bookingDraftProvider.notifier).attachActive(order);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      unawaited(_refreshFromServer());
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_refreshFromServer());
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   MockOrder? _viewedOrder() {
@@ -81,39 +107,59 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
     return ref.read(bookingDraftProvider).activeOrder;
   }
 
-  void _advance() {
-    final MockOrder? order = _viewedOrder();
-    if (order == null) {
+  Future<void> _refreshFromServer() async {
+    if (_refreshing || !mounted) {
       return;
     }
-
-    if (order.status != OrderStatus.nearDestination) {
-      final MockOrder? updated = ref
-          .read(bookingDraftProvider.notifier)
-          .advanceDemoStatus(order: order);
-      if (updated != null) {
-        _sync(updated);
+    final MockOrder? order = _viewedOrder();
+    final String? apiId = order?.backendOrderId;
+    if (apiId == null || apiId.isEmpty) {
+      return;
+    }
+    _refreshing = true;
+    try {
+      final latest = await ref.read(ordersApiProvider).getById(apiId);
+      if (!mounted) {
         return;
       }
+      final mapped = OrderMapper.toMockOrder(
+        latest,
+        vehicle: order?.vehicle,
+      );
+      _sync(mapped);
+      await _refreshRiderLocation(apiId);
+      if (mapped.status == OrderStatus.delivered) {
+        _pollTimer?.cancel();
+        context.go(AppRoutes.bookCompleted);
+      }
+    } catch (_) {
+      // Keep last known status; next poll retries.
+    } finally {
+      _refreshing = false;
     }
-
-    final email = ref.read(sessionProvider).user?.email ?? '';
-    final MockOrder? delivered =
-        ref.read(bookingDraftProvider.notifier).markDelivered(
-              invoiceEmail: email,
-              order: order,
-            );
-    if (delivered != null) {
-      _sync(delivered);
-    }
-    context.go(AppRoutes.bookCompleted);
   }
 
-  String _demoLabel(OrderStatus? status) {
-    if (status == OrderStatus.nearDestination) {
-      return 'Mark Delivered (Demo)';
+  Future<void> _refreshRiderLocation(String apiId) async {
+    try {
+      final loc = await ref.read(ordersApiProvider).riderLocation(apiId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        if (loc == null) {
+          _riderPoint = null;
+          _riderStale = true;
+        } else {
+          _riderPoint = GeoPoint(
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+          );
+          _riderStale = loc.stale;
+        }
+      });
+    } catch (_) {
+      // Keep last rider pin; status poll remains authoritative.
     }
-    return 'Next status (Demo)';
   }
 
   int _timelineIndex(OrderStatus? status) {
@@ -198,6 +244,14 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
           title: 'Drop',
           snippet: order?.drop.address ?? '',
         ),
+      if (_riderPoint != null)
+        MapMarkerSpec(
+          id: 'rider',
+          point: _riderPoint!,
+          hue: BitmapDescriptor.hueGreen,
+          title: _riderStale ? 'Rider (last known)' : 'Rider',
+          snippet: order?.rider?.name ?? 'Partner',
+        ),
     ];
 
     return GlassPageScaffold(
@@ -205,8 +259,16 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           AnimatedPrimaryButton(
-            label: _demoLabel(order?.status),
-            onPressed: _advance,
+            label: order?.status == OrderStatus.delivered
+                ? 'View summary'
+                : 'Refresh status',
+            onPressed: () {
+              if (order?.status == OrderStatus.delivered) {
+                context.go(AppRoutes.bookCompleted);
+                return;
+              }
+              unawaited(_refreshFromServer());
+            },
           ),
           if (canCancel) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -220,11 +282,27 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                   order: current,
                 );
                 if (!ok) return;
-                final cancelled = ref
-                    .read(bookingDraftProvider.notifier)
-                    .cancelBooking(order: current);
-                if (cancelled != null) {
-                  ref.read(sessionProvider.notifier).updateOrder(cancelled);
+                final String? apiId = current.backendOrderId;
+                if (apiId != null && apiId.isNotEmpty) {
+                  try {
+                    final latest =
+                        await ref.read(ordersApiProvider).cancel(apiId);
+                    final mapped = OrderMapper.toMockOrder(
+                      latest,
+                      vehicle: current.vehicle,
+                    );
+                    ref.read(sessionProvider.notifier).updateOrder(mapped);
+                    ref.read(bookingDraftProvider.notifier).attachActive(mapped);
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Could not cancel on the server.'),
+                        ),
+                      );
+                    }
+                    return;
+                  }
                 }
                 if (context.mounted) context.go(AppRoutes.home);
               },
@@ -262,11 +340,6 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
               color: AppColors.orange,
             ),
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'ETA ${order?.etaMinutes ?? 18} min',
-            style: AppTextStyles.body,
-          ),
           if (_route != null) ...[
             const SizedBox(height: AppSpacing.xs),
             Text(
@@ -277,14 +350,21 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
             ),
           ],
           Text(
-            'Live rider GPS is not provided by the current backend.',
+            'Status updates when your rider advances the delivery.',
             style: AppTextStyles.caption.copyWith(
               color: AppColors.textSecondary,
             ),
           ),
-          if (order?.id != null) ...[
+          if (order != null &&
+              order.displayId != null &&
+              order.displayId!.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
-            Text(order!.id, style: AppTextStyles.caption),
+            Text(
+              order.displayId!,
+              style: AppTextStyles.caption.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
           ],
           const SizedBox(height: AppSpacing.lg),
           GlassContainer(
@@ -377,7 +457,7 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        order?.rider?.name ?? 'Rider',
+                        order?.rider?.name ?? 'Your rider',
                         style: AppTextStyles.bodyMedium,
                       ),
                       Text(

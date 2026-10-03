@@ -8,6 +8,8 @@ import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
 import { AuthContext } from '../auth/types/auth-context';
 import { SettlementService } from '../settlement/settlement.service';
+import { FinanceService } from '../payments/finance.service';
+import { LocationService } from '../location/location.service';
 import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 import { OrderNotificationDispatcher } from '../notifications/order-notification.dispatcher';
 import {
@@ -58,6 +60,9 @@ export class OrdersService {
     private readonly walletCod: WalletCodService,
     private readonly orderNotifications: OrderNotificationDispatcher,
     private readonly settlement: SettlementService,
+    @Inject(forwardRef(() => FinanceService))
+    private readonly finance: FinanceService,
+    private readonly locations: LocationService,
   ) {}
 
   async create(auth: OrderActor, body: CreateOrderDto, idempotencyKey: string) {
@@ -184,16 +189,26 @@ export class OrdersService {
   async getById(auth: OrderActor, orderId: string) {
     const order = await this.requireOrder(orderId);
     await this.assertCanReadOrder(auth, order);
-    const [stops, snapshot, waiting] = await Promise.all([
+    const [stops, snapshot, waiting, assignedRider] = await Promise.all([
       this.orders.listStops(order.order_id),
       this.fares.findSnapshotByOrder(order.order_id),
       auth.role === 'RIDER'
         ? Promise.resolve(null)
         : this.settlement.waitingSummary(order.order_id, this.postgres),
+      order.rider_profile_id
+        ? this.catalog.findAssignedRiderDisplay(order.rider_profile_id)
+        : Promise.resolve(null),
     ]);
     return {
       ...this.serializeOrder(order, stops),
       fare_snapshot: snapshot ? serializeSnapshot(snapshot) : null,
+      assigned_rider: assignedRider
+        ? {
+            name: assignedRider.name,
+            vehicle_registration: assignedRider.vehicle_registration,
+            vehicle_category_name: assignedRider.vehicle_category_name,
+          }
+        : null,
       ...(auth.role === 'RIDER'
         ? snapshot
           ? { rider_amount: snapshot.rider_amount }
@@ -207,6 +222,53 @@ export class OrdersService {
     await this.assertCanReadOrder(auth, order);
     const stops = await this.orders.listStops(order.order_id);
     return { stops: stops.map((stop) => this.serializeStop(stop)) };
+  }
+
+  /**
+   * Customer/admin live rider pin for an assigned in-progress order.
+   * Does not expose location before assignment or after terminal states.
+   */
+  async getAssignedRiderLocation(auth: OrderActor, orderId: string) {
+    if (auth.role !== 'CUSTOMER' && auth.role !== 'ADMIN') {
+      throw new ApiError(
+        ErrorCodes.FORBIDDEN,
+        'Only the customer or an admin may read rider location for this order',
+        403,
+      );
+    }
+    const order = await this.requireOrder(orderId);
+    await this.assertCanReadOrder(auth, order);
+    if (!order.rider_profile_id) {
+      throw new ApiError(
+        ErrorCodes.ORDER_NOT_MODIFIABLE,
+        'No rider is assigned to this order yet',
+        409,
+      );
+    }
+    const live = new Set<OrderStatus>([
+      'ASSIGNED',
+      'EN_ROUTE_PICKUP',
+      'ARRIVED_PICKUP',
+      'PICKED_UP',
+      'IN_TRANSIT',
+      'NEAR_DROP',
+      'DELIVERY_ATTEMPT',
+    ]);
+    if (!live.has(order.canonical_status)) {
+      throw new ApiError(
+        ErrorCodes.ORDER_NOT_MODIFIABLE,
+        'Rider location is only available during an active delivery',
+        409,
+      );
+    }
+    const payload = await this.locations.getRiderLocationForConsumer(
+      order.rider_profile_id,
+    );
+    return {
+      order_id: order.order_id,
+      rider_profile_id: order.rider_profile_id,
+      ...payload,
+    };
   }
 
   async quote(auth: OrderActor, orderId: string) {
@@ -374,6 +436,15 @@ export class OrdersService {
         fare_quote: serializeQuote(quote),
         fare_snapshot: serializeSnapshot(snapshot),
       };
+    }).then(async (payload) => {
+      // Confirm must succeed even if no riders are online yet.
+      // Dispatch uses the same order_offers seam as admin offer creation.
+      try {
+        await this.dispatchOffersForSearchingOrder(payload.order_id as string);
+      } catch {
+        // Leave order in SEARCHING; customer poll / admin can still dispatch.
+      }
+      return payload;
     });
   }
 
@@ -480,69 +551,126 @@ export class OrdersService {
   async offerToRider(auth: OrderActor, orderId: string, riderProfileId: string) {
     this.assertAdmin(auth);
     return this.postgres.transaction(async (tx) => {
+      return this.createOfferInTx({
+        orderId,
+        riderProfileId,
+        actor: 'ADMIN',
+        actorProfileId: auth.profileId,
+        tx,
+      });
+    });
+  }
+
+  /**
+   * SYSTEM broadcast after fare confirm. Creates pending offers for eligible
+   * ONLINE riders with a matching active vehicle. No GPS radius (architecture
+   * seam: PostgreSQL offers; Redis/geo matching is a later decision).
+   */
+  async dispatchOffersForSearchingOrder(orderId: string) {
+    return this.postgres.transaction(async (tx) => {
       const order = await this.orders.lockById(orderId, tx);
-      if (!order) {
-        throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
+      if (!order || order.canonical_status !== 'SEARCHING') {
+        return { offered: 0 };
       }
       const snapshot = await this.fares.findSnapshotByOrder(order.order_id, tx);
       if (!snapshot) {
-        throw new ApiError(
-          ErrorCodes.FARE_NOT_CONFIRMED,
-          'Dispatch requires a confirmed fare snapshot',
-          409,
-        );
+        return { offered: 0 };
       }
-      if (order.canonical_status !== 'SEARCHING' && order.canonical_status !== 'OFFERED') {
-        throw new ApiError(
-          ErrorCodes.ORDER_NOT_MODIFIABLE,
-          'Offers can only be created while searching or offered',
-          409,
-        );
-      }
-      await this.assertRiderEligible(riderProfileId, tx);
-      let offer: OrderOfferRow;
-      try {
-        offer = await this.orders.insertOffer(
-          { orderId: order.order_id, riderProfileId },
-          tx,
-        );
-      } catch (err) {
-        if (isUniqueViolation(err, 'order_offers_pair_unique')) {
-          throw new ApiError(
-            ErrorCodes.OFFER_ALREADY_EXISTS,
-            'This rider already has an offer for this order',
-            409,
-          );
-        }
-        throw err;
-      }
-      let updated = order;
-      if (order.canonical_status === 'SEARCHING') {
-        updated = await this.applyTransition(
-          {
-            order,
-            to: 'OFFERED',
-            actor: 'ADMIN',
-            actorProfileId: auth.profileId,
-            reason: 'offer_created',
-            eventKey: `SEARCHING->OFFERED:${offer.order_offer_id}`,
-          },
-          tx,
-        );
-      }
-      await this.orderNotifications.onNewOffer(
-        {
-          order: updated,
-          offerId: offer.order_offer_id,
-          riderProfileId,
-        },
+      const candidates = await this.catalog.listEligibleOnlineRidersForCategory(
+        order.vehicle_category_id,
         tx,
       );
-      return {
-        ...this.serializeOffer(offer),
-        order: this.serializeOrder(updated),
-      };
+      let offered = 0;
+      for (const riderProfileId of candidates) {
+        if (await this.orders.riderHasLiveOrder(riderProfileId, tx)) {
+          continue;
+        }
+        try {
+          await this.createOfferInTx({
+            orderId: order.order_id,
+            riderProfileId,
+            actor: 'SYSTEM',
+            actorProfileId: null,
+            tx,
+          });
+          offered += 1;
+        } catch {
+          // Skip ineligible / duplicate / racing riders; keep dispatching others.
+        }
+      }
+      return { offered };
     });
+  }
+
+  private async createOfferInTx(input: {
+    orderId: string;
+    riderProfileId: string;
+    actor: TransitionActor;
+    actorProfileId: string | null;
+    tx: Queryable;
+  }) {
+    const order = await this.orders.lockById(input.orderId, input.tx);
+    if (!order) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
+    }
+    const snapshot = await this.fares.findSnapshotByOrder(order.order_id, input.tx);
+    if (!snapshot) {
+      throw new ApiError(
+        ErrorCodes.FARE_NOT_CONFIRMED,
+        'Dispatch requires a confirmed fare snapshot',
+        409,
+      );
+    }
+    if (order.canonical_status !== 'SEARCHING' && order.canonical_status !== 'OFFERED') {
+      throw new ApiError(
+        ErrorCodes.ORDER_NOT_MODIFIABLE,
+        'Offers can only be created while searching or offered',
+        409,
+      );
+    }
+    await this.assertRiderEligible(input.riderProfileId, input.tx);
+    let offer: OrderOfferRow;
+    try {
+      offer = await this.orders.insertOffer(
+        { orderId: order.order_id, riderProfileId: input.riderProfileId },
+        input.tx,
+      );
+    } catch (err) {
+      if (isUniqueViolation(err, 'order_offers_pair_unique')) {
+        throw new ApiError(
+          ErrorCodes.OFFER_ALREADY_EXISTS,
+          'This rider already has an offer for this order',
+          409,
+        );
+      }
+      throw err;
+    }
+    let updated = order;
+    if (order.canonical_status === 'SEARCHING') {
+      updated = await this.applyTransition(
+        {
+          order,
+          to: 'OFFERED',
+          actor: input.actor,
+          actorProfileId: input.actorProfileId,
+          reason: 'offer_created',
+          eventKey: `SEARCHING->OFFERED:${offer.order_offer_id}`,
+        },
+        input.tx,
+      );
+    }
+    await this.orderNotifications.onNewOffer(
+      {
+        order: updated,
+        offerId: offer.order_offer_id,
+        riderProfileId: input.riderProfileId,
+      },
+      input.tx,
+    );
+    return {
+      ...this.serializeOffer(offer),
+      order: this.serializeOrder(updated),
+    };
   }
 
   async assignRider(auth: OrderActor, orderId: string, riderProfileId: string) {
@@ -631,7 +759,8 @@ export class OrdersService {
     }
 
     try {
-      return await this.postgres.transaction(async (tx) => {
+      let redispatchOrderId: string | null = null;
+      const payload = await this.postgres.transaction(async (tx) => {
         const replay = await this.idempotency.find('accept-offer', idempotencyKey, tx);
         if (replay) {
           return this.replayOrConflict(replay.request_hash, requestHash, replay.result_payload);
@@ -679,6 +808,8 @@ export class OrdersService {
           offer.status === 'PENDING' &&
           offer.created_at.getTime() + this.offerTtlMs() <= Date.now()
         ) {
+          // Commit expire (+ optional SEARCHING) before surfacing 409 so
+          // the status change is not rolled back with the error.
           await this.orders.updateOfferStatus(
             {
               offerId: offer.order_offer_id,
@@ -713,8 +844,9 @@ export class OrdersService {
               },
               tx,
             );
+            redispatchOrderId = order.order_id;
           }
-          throw new ApiError(ErrorCodes.OFFER_EXPIRED, 'Offer has expired', 409);
+          return { __offerExpired: true as const };
         }
         this.assertOfferAcceptable(offer, order);
         await this.assertRiderEligible(auth.profileId, tx);
@@ -759,7 +891,7 @@ export class OrdersService {
           },
           tx,
         );
-        const payload = {
+        const acceptedPayload = {
           ...this.serializeOffer(accepted),
           order: this.serializeOrder(updated),
         };
@@ -770,12 +902,24 @@ export class OrdersService {
             actorIdentityId: auth.identityId,
             requestHash,
             resultEntityId: updated.order_id,
-            resultPayload: payload,
+            resultPayload: acceptedPayload,
           },
           tx,
         );
-        return payload;
+        return acceptedPayload;
       });
+      if (
+        payload &&
+        typeof payload === 'object' &&
+        '__offerExpired' in payload &&
+        (payload as { __offerExpired?: boolean }).__offerExpired
+      ) {
+        if (redispatchOrderId) {
+          await this.redispatchSearchingQuietly(redispatchOrderId);
+        }
+        throw new ApiError(ErrorCodes.OFFER_EXPIRED, 'Offer has expired', 409);
+      }
+      return payload;
     } catch (err) {
       if (isUniqueViolation(err, 'order_offers_one_accepted')) {
         throw new ApiError(
@@ -801,7 +945,7 @@ export class OrdersService {
 
   async rejectOffer(auth: OrderActor, offerId: string) {
     this.assertRider(auth);
-    return this.postgres.transaction(async (tx) => {
+    const result = await this.postgres.transaction(async (tx) => {
       const unlocked = await this.orders.findOffer(offerId, tx);
       if (!unlocked) {
         throw new ApiError(ErrorCodes.OFFER_NOT_FOUND, 'Offer was not found', 404);
@@ -859,6 +1003,10 @@ export class OrdersService {
       }
       return { ...this.serializeOffer(rejected), order: this.serializeOrder(updated) };
     });
+    if (result.order?.canonical_status === 'SEARCHING') {
+      await this.redispatchSearchingQuietly(result.order.order_id as string);
+    }
+    return result;
   }
 
   private async applyTransition(
@@ -919,11 +1067,22 @@ export class OrdersService {
     }
     if (input.to === 'DELIVERED') {
       await this.settlement.settleDelivered(updated, tx);
+      // Trip Fare 85/15 freeze + wallet/COD sync (idempotent).
+      await this.finance.captureOnDelivered(updated, tx);
     }
     if (input.to === 'CANCELLED') {
       await this.settlement.onCancelled(updated.order_id, tx);
     }
     return updated;
+  }
+
+  /** Best-effort SYSTEM redispatch; never fails the caller path. */
+  private async redispatchSearchingQuietly(orderId: string): Promise<void> {
+    try {
+      await this.dispatchOffersForSearchingOrder(orderId);
+    } catch {
+      // Leave SEARCHING; admin or a later retry can dispatch.
+    }
   }
 
   private assertOfferAcceptable(offer: OrderOfferRow, order: OrderRow): void {

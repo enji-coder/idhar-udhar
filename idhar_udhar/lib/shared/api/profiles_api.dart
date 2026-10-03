@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import 'api_client.dart';
 import 'json_codec.dart';
 
@@ -47,6 +49,11 @@ class RiderApiProfile {
     this.onlineStatus,
     this.codOperationalStatus,
     this.phoneNormalized,
+    this.email,
+    this.name,
+    this.dateOfBirth,
+    this.preferredLanguage,
+    this.hasProfilePicture = false,
   });
 
   final String identityId;
@@ -56,6 +63,11 @@ class RiderApiProfile {
   final String? onlineStatus;
   final String? codOperationalStatus;
   final String? phoneNormalized;
+  final String? email;
+  final String? name;
+  final DateTime? dateOfBirth;
+  final String? preferredLanguage;
+  final bool hasProfilePicture;
 
   factory RiderApiProfile.fromJson(Map<String, Object?> json) {
     return RiderApiProfile(
@@ -66,6 +78,30 @@ class RiderApiProfile {
       onlineStatus: jsonString(json['online_status']),
       codOperationalStatus: jsonString(json['cod_operational_status']),
       phoneNormalized: jsonString(json['phone_normalized']),
+      email: jsonString(json['email']),
+      name: jsonString(json['name']),
+      dateOfBirth: jsonDate(json['date_of_birth']),
+      preferredLanguage: jsonString(json['preferred_language']),
+      hasProfilePicture: json['has_profile_picture'] == true,
+    );
+  }
+}
+
+class RiderProfilePicture {
+  const RiderProfilePicture({
+    required this.downloadUrl,
+    this.expiresIn,
+  });
+
+  final String downloadUrl;
+  final int? expiresIn;
+
+  factory RiderProfilePicture.fromJson(Map<String, Object?> json) {
+    return RiderProfilePicture(
+      downloadUrl: jsonString(json['download_url']) ?? '',
+      expiresIn: json['download_url_expires_in'] is num
+          ? (json['download_url_expires_in'] as num).toInt()
+          : null,
     );
   }
 }
@@ -96,5 +132,68 @@ class ProfilesApi {
 
   Future<RiderApiProfile> rider() async {
     return RiderApiProfile.fromJson(await _client.get('/v1/rider/profile'));
+  }
+
+  Future<RiderApiProfile> updateRider({
+    String? name,
+    String? email,
+    DateTime? dateOfBirth,
+    bool clearDateOfBirth = false,
+    String? preferredLanguage,
+  }) async {
+    return RiderApiProfile.fromJson(
+      await _client.patch(
+        '/v1/rider/profile',
+        data: <String, Object?>{
+          if (name != null) 'name': name.trim(),
+          if (email != null) 'email': email.trim(),
+          if (clearDateOfBirth) 'date_of_birth': null,
+          if (dateOfBirth != null)
+            'date_of_birth':
+                '${dateOfBirth.year.toString().padLeft(4, '0')}-${dateOfBirth.month.toString().padLeft(2, '0')}-${dateOfBirth.day.toString().padLeft(2, '0')}',
+          if (preferredLanguage != null)
+            'preferred_language': preferredLanguage,
+        },
+      ),
+    );
+  }
+
+  Future<RiderApiProfile> setRiderAvailability({required bool online}) async {
+    final Map<String, Object?> body = await _client.post(
+      '/v1/rider/availability',
+      data: <String, Object?>{'online': online},
+    );
+    return RiderApiProfile(
+      identityId: '',
+      riderProfileId: '',
+      approvalStatus: jsonString(body['approval_status']),
+      onlineStatus: jsonString(body['online_status']),
+    );
+  }
+
+  Future<void> setRiderLanguage(String preferredLanguage) async {
+    await _client.put(
+      '/v1/rider/profile/language',
+      data: <String, Object?>{'preferred_language': preferredLanguage},
+    );
+  }
+
+  Future<RiderProfilePicture?> riderProfilePicture() async {
+    try {
+      return RiderProfilePicture.fromJson(
+        await _client.get('/v1/rider/profile/picture'),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<RiderProfilePicture> uploadRiderProfilePicture(String filePath) async {
+    final FormData form = FormData.fromMap(<String, Object?>{
+      'file': await MultipartFile.fromFile(filePath),
+    });
+    return RiderProfilePicture.fromJson(
+      await _client.postForm('/v1/rider/profile/picture', data: form),
+    );
   }
 }

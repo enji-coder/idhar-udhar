@@ -4,8 +4,10 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { AuthService } from '../src/auth/auth.service';
 import { PasswordService } from '../src/auth/password.service';
-import { PostgresService } from '../src/database/postgres.service';
 import { ProfileRole, TokenPair } from '../src/auth/types/auth-context';
+import { PostgresService } from '../src/database/postgres.service';
+import { parseCashfreeWebhook } from '../src/payments/cashfree-webhook.parse';
+import { CashfreeWebhookService } from '../src/payments/cashfree-webhook.service';
 
 export async function createTestApp(): Promise<INestApplication> {
   const moduleRef = await Test.createTestingModule({
@@ -681,5 +683,72 @@ export async function issueAdminSession(
     profileId: fixture.profileId,
   });
   return { identityId: fixture.identityId, profileId: fixture.profileId, tokens };
+}
+
+/**
+ * Completes a PENDING WALLET_TOPUP the same way production does: attach a
+ * Cashfree gateway attempt, then apply a verified success webhook. Does not
+ * credit from the Flutter/client callback.
+ */
+export async function verifyPendingWalletTopUp(
+  app: INestApplication,
+  pending: { payment_transaction_id: string; amount: string },
+): Promise<'applied' | 'duplicate' | 'ignored' | 'rejected'> {
+  const postgres = app.get(PostgresService);
+  const gatewayOrderId = `iu${pending.payment_transaction_id
+    .replace(/-/g, '')
+    .slice(0, 32)}`;
+  const existing = await postgres.query<{ n: string }>(
+    `
+    SELECT count(*)::text AS n
+    FROM payment_gateway_attempts
+    WHERE payment_transaction_id = $1
+    `,
+    [pending.payment_transaction_id],
+  );
+  if (Number(existing.rows[0]?.n || 0) === 0) {
+    await postgres.query(
+      `
+      INSERT INTO payment_gateway_attempts (
+        payment_transaction_id, provider, environment, gateway_order_id,
+        cf_order_id, payment_session_id, currency, amount, gateway_status
+      )
+      VALUES (
+        $1, 'cashfree', 'sandbox', $2, $3, $4, 'INR', $5::numeric(12,2), 'ACTIVE'
+      )
+      `,
+      [
+        pending.payment_transaction_id,
+        gatewayOrderId,
+        `cf-${pending.payment_transaction_id.slice(0, 8)}`,
+        `session-${pending.payment_transaction_id.slice(0, 8)}`,
+        pending.amount,
+      ],
+    );
+  }
+  const amountNumber = Number(pending.amount);
+  const rawBody = JSON.stringify({
+    type: 'PAYMENT_SUCCESS_WEBHOOK',
+    data: {
+      order: {
+        order_id: gatewayOrderId,
+        order_amount: amountNumber,
+        order_currency: 'INR',
+      },
+      payment: {
+        cf_payment_id: `pay-${pending.payment_transaction_id.slice(0, 12)}`,
+        payment_status: 'SUCCESS',
+        payment_amount: amountNumber,
+        payment_currency: 'INR',
+      },
+    },
+  });
+  const parsed = parseCashfreeWebhook(JSON.parse(rawBody));
+  const webhooks = app.get(CashfreeWebhookService);
+  return webhooks.apply({
+    eventId: `evt-wallet-${pending.payment_transaction_id}`,
+    rawBody,
+    parsed,
+  });
 }
 

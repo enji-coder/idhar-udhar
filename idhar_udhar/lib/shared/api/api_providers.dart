@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api_client.dart';
 import 'auth_api.dart';
+import 'device_tokens_api.dart';
 import 'notifications_api.dart';
 import 'orders_api.dart';
 import 'profiles_api.dart';
@@ -38,4 +39,8 @@ final walletApiProvider = Provider<WalletApi>((ref) {
 
 final notificationsApiProvider = Provider<NotificationsApi>((ref) {
   return NotificationsApi(ref.watch(apiClientProvider));
+});
+
+final deviceTokensApiProvider = Provider<DeviceTokensApi>((ref) {
+  return DeviceTokensApi(ref.watch(apiClientProvider));
 });

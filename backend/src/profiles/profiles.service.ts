@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
+import { isUniqueViolation } from '../common/pg-error';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository, PROVISIONAL_CUSTOMER_DISPLAY_NAME } from '../auth/identity/identity.repository';
 import { riderMayGoOnline } from '../files/rider-verification';
+
+/** Admin must not show ONLINE forever after app kill / network loss. */
+const RIDER_ONLINE_STALE_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class ProfilesService {
@@ -63,6 +67,7 @@ export class ProfilesService {
       throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
     }
     const identity = await this.identities.findById(auth.identityId);
+    const driver = await this.identities.findRiderDriver(profile.rider_profile_id);
     return {
       identity_id: profile.identity_id,
       rider_profile_id: profile.rider_profile_id,
@@ -73,9 +78,77 @@ export class ProfilesService {
       home_zone_id: profile.home_zone_id,
       cod_operational_status: profile.cod_operational_status,
       phone_normalized: identity?.phone_normalized ?? null,
+      email: identity?.email ?? null,
+      name: driver?.name ?? null,
+      date_of_birth: driver?.date_of_birth ?? null,
       preferred_language: profile.preferred_language ?? null,
       has_profile_picture: Boolean(profile.profile_picture_file_id),
     };
+  }
+
+  async updateRider(
+    auth: AuthContext,
+    input: {
+      name?: string;
+      email?: string | null;
+      dateOfBirth?: string | null;
+      preferredLanguage?: string;
+    },
+  ) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
+    }
+    const profile = await this.identities.findRiderProfile(auth.identityId);
+    if (!profile || profile.rider_profile_id !== auth.profileId) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+
+    if (input.email !== undefined) {
+      const email =
+        input.email === null || input.email.trim() === ''
+          ? null
+          : input.email.trim().toLowerCase();
+      try {
+        await this.identities.updateIdentityEmail(auth.identityId, email);
+      } catch (err) {
+        if (isUniqueViolation(err, 'identities_email_unique')) {
+          throw new ApiError(
+            ErrorCodes.VALIDATION_ERROR,
+            'Email is already in use',
+            409,
+          );
+        }
+        throw err;
+      }
+    }
+
+    if (input.name !== undefined || input.dateOfBirth !== undefined) {
+      const name =
+        input.name === undefined ? undefined : input.name.trim();
+      if (name !== undefined && name.length < 2) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Name must be at least 2 characters',
+          400,
+        );
+      }
+      await this.identities.upsertRiderDriverDetails({
+        riderProfileId: auth.profileId,
+        name,
+        dateOfBirth: input.dateOfBirth,
+        updateName: input.name !== undefined,
+        updateDob: input.dateOfBirth !== undefined,
+      });
+    }
+
+    if (input.preferredLanguage !== undefined) {
+      await this.identities.updateRiderLanguage(
+        auth.profileId,
+        input.preferredLanguage,
+      );
+    }
+
+    return this.rider(auth);
   }
 
   async setRiderLanguage(auth: AuthContext, preferredLanguage: string) {
@@ -220,21 +293,65 @@ export class ProfilesService {
     };
   }
 
+  private effectiveOnlineStatus(
+    onlineStatus: string,
+    lastSeenAt: Date | string | null | undefined,
+  ): string {
+    if (onlineStatus !== 'ONLINE') {
+      return onlineStatus;
+    }
+    if (!lastSeenAt) {
+      return 'OFFLINE';
+    }
+    const seen =
+      lastSeenAt instanceof Date ? lastSeenAt : new Date(lastSeenAt);
+    if (Number.isNaN(seen.getTime())) {
+      return 'OFFLINE';
+    }
+    if (Date.now() - seen.getTime() > RIDER_ONLINE_STALE_MS) {
+      return 'OFFLINE';
+    }
+    return 'ONLINE';
+  }
+
   private serializeRiderDirectory(
     row: Awaited<ReturnType<IdentityRepository['listRiders']>>[number],
   ) {
+    const lastSeen =
+      'last_seen_at' in row
+        ? (row as { last_seen_at?: Date | string | null }).last_seen_at
+        : null;
     return {
       rider_profile_id: row.rider_profile_id,
       identity_id: row.identity_id,
       phone_normalized: row.phone_normalized,
       onboarding_kyc_status: row.onboarding_kyc_status,
       approval_status: row.approval_status,
-      online_status: row.online_status,
+      online_status: this.effectiveOnlineStatus(row.online_status, lastSeen),
+      last_seen_at: lastSeen ?? null,
       cod_operational_status: row.cod_operational_status,
       home_city_id: row.home_city_id,
       home_zone_id: row.home_zone_id,
       city_code: row.city_code,
       zone_name: row.zone_name,
+      name: 'name' in row ? (row as { name?: string | null }).name ?? null : null,
+      email: 'email' in row ? (row as { email?: string | null }).email ?? null : null,
+      date_of_birth:
+        'date_of_birth' in row
+          ? (row as { date_of_birth?: string | null }).date_of_birth ?? null
+          : null,
+      preferred_language:
+        'preferred_language' in row
+          ? (row as { preferred_language?: string | null }).preferred_language ??
+            null
+          : null,
+      has_profile_picture:
+        'profile_picture_file_id' in row
+          ? Boolean(
+              (row as { profile_picture_file_id?: string | null })
+                .profile_picture_file_id,
+            )
+          : false,
     };
   }
 

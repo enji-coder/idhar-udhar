@@ -16,11 +16,12 @@ export type GatewayAttemptRow = {
   amount: string;
   gateway_status: string;
   failure_reason: string | null;
-  order_id: string;
+  order_id: string | null;
+  rider_profile_id: string | null;
   payer_type: PayerType;
   transaction_status: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
   transaction_amount: string;
-  charge_purpose: 'BOOKING' | 'RECEIVABLE_CLEARANCE';
+  charge_purpose: 'BOOKING' | 'RECEIVABLE_CLEARANCE' | 'WALLET_TOPUP';
 };
 
 export type RefundableChargeRow = {
@@ -106,6 +107,7 @@ export class PaymentGatewayRepository {
         g.gateway_status,
         g.failure_reason,
         t.order_id,
+        t.rider_profile_id,
         t.payer_type,
         t.transaction_status,
         t.amount::text AS transaction_amount,
@@ -190,6 +192,7 @@ export class PaymentGatewayRepository {
         g.gateway_status,
         g.failure_reason,
         t.order_id,
+        t.rider_profile_id,
         t.payer_type,
         t.transaction_status,
         t.amount::text AS transaction_amount,

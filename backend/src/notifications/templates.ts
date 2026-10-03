@@ -15,6 +15,12 @@ export const NOTIFICATION_TYPES = [
   'PAYMENT_FAILED',
   'PAYMENT_REFUND_RECORDED',
   'WALLET_RECHARGE_COMPLETED',
+  'WITHDRAWAL_REQUESTED',
+  'WITHDRAWAL_PROCESSING',
+  'WITHDRAWAL_SUCCESSFUL',
+  'WITHDRAWAL_FAILED',
+  'WITHDRAWAL_REJECTED',
+  'WITHDRAWAL_REFUNDED',
   'COD_SETTLEMENT_COMPLETED',
   'COD_SUSPENDED',
   'COD_ELIGIBLE',
@@ -51,6 +57,7 @@ export function renderNotification(
 ): RenderedNotification {
   const order = displayId(vars.displayId);
   const amount = vars.amount ?? '';
+  const reason = vars.reason ?? '';
 
   switch (type) {
     case 'ORDER_CONFIRMED':
@@ -186,6 +193,54 @@ export function renderNotification(
         body: amount
           ? `Your wallet recharge of ₹${amount} is complete.`
           : 'Your wallet recharge is complete.',
+      };
+    case 'WITHDRAWAL_REQUESTED':
+      return {
+        type,
+        title: 'Withdrawal requested',
+        body: amount
+          ? `Your withdrawal request for ₹${amount} was submitted.`
+          : 'Your withdrawal request was submitted.',
+      };
+    case 'WITHDRAWAL_PROCESSING':
+      return {
+        type,
+        title: 'Withdrawal processing',
+        body: amount
+          ? `Your withdrawal of ₹${amount} is being processed.`
+          : 'Your withdrawal is being processed.',
+      };
+    case 'WITHDRAWAL_SUCCESSFUL':
+      return {
+        type,
+        title: 'Withdrawal successful',
+        body: amount
+          ? `Your withdrawal of ₹${amount} was successful${reason ? ` (ref ${reason})` : ''}.`
+          : 'Your withdrawal was successful.',
+      };
+    case 'WITHDRAWAL_FAILED':
+      return {
+        type,
+        title: 'Withdrawal failed',
+        body: amount
+          ? `Your withdrawal of ₹${amount} failed. Any restored funds appear in your wallet.`
+          : 'Your withdrawal failed. Any restored funds appear in your wallet.',
+      };
+    case 'WITHDRAWAL_REJECTED':
+      return {
+        type,
+        title: 'Withdrawal rejected',
+        body: amount
+          ? `Your withdrawal of ₹${amount} was rejected. Funds were restored to your wallet.`
+          : 'Your withdrawal was rejected. Funds were restored to your wallet.',
+      };
+    case 'WITHDRAWAL_REFUNDED':
+      return {
+        type,
+        title: 'Withdrawal refunded',
+        body: amount
+          ? `₹${amount} from a reversed withdrawal was restored to your wallet.`
+          : 'Funds from a reversed withdrawal were restored to your wallet.',
       };
     case 'COD_SETTLEMENT_COMPLETED':
       return {

@@ -15,6 +15,7 @@ import '../../data/models/recent_activity.dart';
 import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
+import '../../features/wallet/wallet_topup_checkout.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
 import '../../screens/earnings/rider_income_screen.dart';
@@ -53,6 +54,7 @@ class RiderDashboardScreen extends ConsumerStatefulWidget {
 
 class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
   int _tab = 0;
+  Timer? _offerPoll;
 
   @override
   void initState() {
@@ -62,7 +64,23 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
       unawaited(ref.read(riderSessionProvider.notifier).refreshWallet());
       unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       unawaited(ref.read(riderSessionProvider.notifier).refreshNotices());
+      _offerPoll = Timer.periodic(const Duration(seconds: 8), (_) {
+        final session = ref.read(riderSessionProvider);
+        if (!session.isAuthenticated || !session.isApproved) {
+          return;
+        }
+        if (session.onlineStatus != 'ONLINE') {
+          return;
+        }
+        unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
+      });
     });
+  }
+
+  @override
+  void dispose() {
+    _offerPoll?.cancel();
+    super.dispose();
   }
 
   @override
@@ -255,9 +273,19 @@ class _HomeTab extends ConsumerWidget {
               _DutyStatusCard(
                 online: approved && online,
                 enabled: approved,
-                onToggle: () {
+                onToggle: () async {
                   if (!approved) return;
-                  ref.read(riderOnlineProvider.notifier).state = !online;
+                  final bool next = !online;
+                  try {
+                    await ref
+                        .read(riderSessionProvider.notifier)
+                        .setOnline(next);
+                  } on ApiException catch (error) {
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(error.message)),
+                    );
+                  }
                 },
               ),
               if (approved && online && !suspended && order != null) ...[
@@ -266,26 +294,61 @@ class _HomeTab extends ConsumerWidget {
                   order: order,
                   currency: currency,
                   onReject: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        behavior: SnackBarBehavior.floating,
-                        backgroundColor: RiderColors.secondary,
-                        content: Text(
-                          'Order rejected (demo)',
-                          style: _d(RiderTextStyles.bodyMedium).copyWith(
-                            color: RiderColors.textOnPrimary,
-                          ),
-                        ),
-                      ),
-                    );
+                    unawaited(() async {
+                      final String? offerId = order.offerId;
+                      if (offerId == null || offerId.isEmpty) {
+                        return;
+                      }
+                      try {
+                        await ref.read(riderApiProvider).rejectOffer(offerId);
+                        await ref
+                            .read(riderSessionProvider.notifier)
+                            .refreshOffers();
+                      } on ApiException catch (error) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error.message)),
+                        );
+                      }
+                    }());
                   },
                   onAccept: () {
-                    if (!ref.read(riderSessionProvider).isApproved) return;
-                    if (riderIsSuspended(ref)) return;
-                    ref.read(activeOrderProvider.notifier).state = order;
-                    ref.read(deliveryStatusProvider.notifier).state =
-                        DeliveryLifecycleStatus.accepted;
-                    context.push(RiderRoutes.acceptConfirmation);
+                    unawaited(() async {
+                      if (!ref.read(riderSessionProvider).isApproved) return;
+                      if (riderIsSuspended(ref)) return;
+                      final String? offerId = order.offerId;
+                      if (offerId == null || offerId.isEmpty) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Open the full order request to accept.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                      try {
+                        await ref.read(riderApiProvider).acceptOffer(offerId);
+                        if (!context.mounted) return;
+                        ref.read(activeOrderProvider.notifier).state = order;
+                        ref.read(deliveryStatusProvider.notifier).state =
+                            DeliveryLifecycleStatus.accepted;
+                        await ref
+                            .read(riderSessionProvider.notifier)
+                            .refreshOffers();
+                        if (!context.mounted) return;
+                        context.push(RiderRoutes.acceptConfirmation);
+                      } on ApiException catch (error) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error.message)),
+                        );
+                        unawaited(
+                          ref.read(riderSessionProvider.notifier).refreshOffers(),
+                        );
+                      }
+                    }());
                   },
                 ),
               ],
@@ -339,10 +402,25 @@ class _HomeTab extends ConsumerWidget {
                   confirmLabel: 'Add',
                   onConfirm: (amount) async {
                     try {
-                      await ref.read(walletApiProvider).recharge(amount);
-                      await ref
-                          .read(riderSessionProvider.notifier)
-                          .refreshWallet();
+                      final session = await ref
+                          .read(walletApiProvider)
+                          .beginTopUp(amount);
+                      await openRiderWalletTopUpCheckout(session);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Payment submitted. Balance updates after confirmation.',
+                            ),
+                          ),
+                        );
+                      }
+                      for (var i = 0; i < 5; i++) {
+                        await Future<void>.delayed(const Duration(seconds: 2));
+                        await ref
+                            .read(riderSessionProvider.notifier)
+                            .refreshWallet();
+                      }
                     } on ApiException catch (error) {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -358,9 +436,34 @@ class _HomeTab extends ConsumerWidget {
                   title: 'Withdraw Money',
                   confirmLabel: 'Withdraw',
                   maxAmount: wallet,
-                  onConfirm: (amount) {
-                    ref.read(riderWalletBalanceProvider.notifier).state =
-                        (wallet - amount).clamp(0, double.infinity);
+                  onConfirm: (amount) async {
+                    try {
+                      final bank = ref.read(riderBankProvider);
+                      final String method =
+                          bank.upiId.trim().isNotEmpty ? 'UPI' : 'BANK';
+                      await ref.read(walletApiProvider).withdraw(
+                            amount: amount,
+                            payoutMethod: method,
+                          );
+                      await ref
+                          .read(riderSessionProvider.notifier)
+                          .refreshWallet();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Withdrawal requested. Funds are held until processed.',
+                            ),
+                          ),
+                        );
+                      }
+                    } on ApiException catch (error) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error.message)),
+                        );
+                      }
+                    }
                   },
                 ),
               ),

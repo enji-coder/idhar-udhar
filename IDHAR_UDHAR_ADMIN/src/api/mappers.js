@@ -93,10 +93,15 @@ export function mapRider(row) {
   if (approval === 'SUSPENDED' || row.cod_operational_status === 'SUSPENDED_FOR_COD') status = 'Offline';
   else if (approval === 'REJECTED') status = 'Pending';
   else if (approval === 'APPROVED') status = online ? 'Active' : 'Offline';
+  const languageMap = { en: 'English', hi: 'Hindi', gu: 'Gujarati' };
   return {
     id: row.rider_profile_id,
-    name: phone ? `Rider ${phone.slice(-4)}` : `Rider ${short}`,
+    name: row.name || (phone ? `Rider ${phone.slice(-4)}` : `Rider ${short}`),
     phone,
+    email: row.email || '',
+    dateOfBirth: row.date_of_birth || '',
+    language: languageMap[row.preferred_language] || row.preferred_language || '',
+    hasProfilePicture: Boolean(row.has_profile_picture),
     vehicle: '',
     vehicleNumber: '',
     zone: row.zone_name || row.city_code || '—',
@@ -105,6 +110,7 @@ export function mapRider(row) {
     kyc: row.onboarding_kyc_status,
     approval: row.approval_status,
     online: row.online_status,
+    lastSeenAt: row.last_seen_at || null,
     codStatus: row.cod_operational_status,
     source: 'api',
   };

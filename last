@@ -1,0 +1,18 @@
+Get-ChildItem -Recurse -File -Include *.dart,*.yaml,*.json |
+>>   Select-String -Pattern "api\.idharudhar\.co\.in|localhost|127\.0\.0\.1" |
+>>   Select-Object Path, LineNumber, Line
+
+Path
+----
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\lib\shared\api\api_config.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\lib\shared\api\api_config.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\lib\shared\api\api_config.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\lib\shared\api\api_config.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\lib\shared\api\api_config.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\test\shared\api_client_auth_retry_test.... 
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\test\shared\api_config_test.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\test\shared\api_config_test.dart
+C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar\test\shared\api_config_test.dart
+
+
+PS C:\Users\baps\Documents\GitHub\CAI_PROJECT\CURSOR_PROJECT\idhar_udhar> 

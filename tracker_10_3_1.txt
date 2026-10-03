@@ -1,0 +1,252 @@
+## Audit verdict
+
+Production had a **real accept/state machine**, but **no automatic rider dispatch** after confirm, plus **dummy accept paths** in Flutter (rider dashboard + customer Track Delivery / tracking demo).
+
+---
+
+## 1. Current production workflow
+
+```text
+Customer create → quote → confirm (fare snapshot)
+  → SEARCHING
+  → SYSTEM/admin create order_offers → OFFERED
+  → Rider accept (atomic) → ASSIGNED
+  → EN_ROUTE_PICKUP → ARRIVED_PICKUP → PICKED_UP
+  → IN_TRANSIT → NEAR_DROP → DELIVERY_ATTEMPT → DELIVERED
+```
+
+Trip **Cashfree is not** required before search today. Cashfree is used for **waiting/receivable** clearance. Summary payment method is UI/local; confirm body is only `fare_quote_id`.
+
+---
+
+## 2. What was dummy
+
+| Item | Where |
+|------|--------|
+| Dashboard Accept/Reject skipped API | Rider home card |
+| Local `acceptRider()` on Track Delivery | Customer assigned screen |
+| `advanceDemoStatus` / “Next status (Demo)” | Customer tracking |
+| `MockData.demoRider` / `assignRider()` | Draft helpers (unused by live search poll) |
+| UUID as main search/assigned label | Customer search/assigned UI |
+
+---
+
+## 3. Root causes
+
+1. Confirm only moved to `SEARCHING`; offers were **admin-only** → customers waited forever unless admin dispatched.  
+2. Rider dashboard “accepted” **locally** without `POST /accept`.  
+3. Customer UI showed **order UUID** and locally faked post-assign progression.  
+4. Mapper did not surface assigned rider display fields from API.
+
+---
+
+## 4. Roadmap (implemented vs remaining)
+
+| Phase | Status |
+|-------|--------|
+| 1 Audit | Done |
+| 2 Online eligibility | Done (ONLINE + APPROVED + matching active vehicle) |
+| 3 SYSTEM offer broadcast after confirm | Done (same `order_offers` seam) |
+| 4 Atomic accept | Already real; rider UI wired |
+| 5 Customer sync | Poll-based; IDs cleaned |
+| 6 Payment | Documented; **not** reinvented (architecture: no trip pay gate before search) |
+| 7–9 Pickup/delivery/settlement | Existing rider status hops unchanged |
+| Geo radius / Redis matcher | **Not built** (architecture: NEEDS BUSINESS DECISION) |
+| FCM for offers | Still incomplete (poll every 8s when online) |
+
+---
+
+## 5. Files changed
+
+**Backend:**  
+`catalog.repository.ts`, `orders.service.ts`, `dispatch-after-confirm.spec.ts`, `vehicle-fare.service.spec.ts`
+
+**Flutter:**  
+`orders_api.dart`, `order_mapper.dart`, `searching_rider_screen.dart`, `rider_assigned_screen.dart`, `tracking_screen.dart`, `rider_dashboard_screen.dart`, `order_mapper_test.dart`
+
+---
+
+## 6. APIs involved
+
+- `POST /v1/orders`, `/quote`, `/confirm`, `/cancel`, `GET /v1/orders/:id`
+- `POST /v1/admin/orders/:id/offers` (still valid)
+- `GET /v1/rider/offers`, `POST .../accept`, `.../reject`
+- `POST /v1/rider/orders/:id/status`
+- Payment: `/v1/orders/:id/payment/*` + Cashfree webhook (waiting/receivable; separate from search)
+
+---
+
+## 7. Payment timing
+
+| Method | Timing |
+|--------|--------|
+| **Online trip fare** | Selected on summary; **not charged at confirm** in current architecture |
+| **Cashfree webhook** | Authoritative for ONLINE intents that the backend creates (e.g. waiting clearance) |
+| **COD** | UI/cash plan; rider COD due / suspend rules on accept eligibility |
+| **Rider assignment** | After confirm → SEARCHING → offers → accept (no payment gate) |
+| **Waiting** | After ARRIVED_PICKUP assessment; Cashfree for receivable |
+| **Settlement** | On DELIVERED via existing settlement path |
+
+---
+
+## 8. Rider matching (now)
+
+After confirm → `dispatchOffersForSearchingOrder`:
+
+- Eligible: `ONLINE` + `APPROVED` + active vehicle for order’s `vehicle_category_id` + not COD-suspended + no live order  
+- Creates pending `order_offers` + `SEARCHING→OFFERED` (SYSTEM) + `OFFER_NEW` notification  
+- Rider accept remains transactional (order+offer locks, one winner)
+
+No GPS radius. No fake auto-accept.
+
+---
+
+## 9. Customer UI
+
+- Search: “Finding your rider” + steps; **no UUID**  
+- Assigned: “Driver found” + backend name/registration/category when present  
+- Tracking: polls backend; **demo advance removed**; shows `IU-…` display id only  
+
+---
+
+## 10. Tests
+
+```text
+Backend: 3 suites, 26 passed (dispatch + vehicle-fare + state machine)
+Flutter: order_mapper_test + booking_location_rules_test — All tests passed (20)
+```
+
+---
+
+## 11. Production verification
+
+| | |
+|--|--|
+| **CODE VERIFIED** | Dispatch unit test; mapper; UI dummy removal; rider dashboard API accept |
+| **LIVE AWS VERIFIED** | Not done (no deploy; AWS login was expired earlier) |
+| **NOT VERIFIED** | End-to-end with real online rider + vehicle row on prod; FCM delivery; trip Cashfree-before-search (not in architecture) |
+
+---
+
+## 12. Remaining blockers
+
+1. Riders need **active `vehicles` row** matching the booked category or SYSTEM dispatch finds nobody.  
+2. Idle ONLINE riders still don’t stream GPS (location only on active delivery).  
+3. Trip **online payment before search** is not in the order-domain architecture — product decision required.  
+4. Offer TTL is lazy (no background expire worker).  
+5. Deploy backend for SYSTEM dispatch to hit production.
+
+---
+
+## 13. Git
+
+**No commit. No push. No deployment.**
+
+
+
+Bhai ab picture genuinely clear hai. Ye audit useful hai, aur sabse important: dummy acceptance ka actual source mil gaya + real rider accept API already exists.
+
+Lekin abhi production-ready nahi hai. Sabse critical blocker is:
+
+Backend mein automatic dispatch code ban gaya hai, but deploy nahi hua, so live production mein customer confirm ke baad real rider ko offer abhi automatically nahi milega.
+
+Abhi architecture
+Customer Confirm
+      ↓
+SEARCHING
+      ↓
+SYSTEM dispatch
+      ↓
+order_offers
+      ↓
+Real ONLINE + APPROVED rider
+      ↓
+Rider sees offer
+      ↓
+POST /accept
+      ↓
+Atomic ASSIGNED
+      ↓
+Customer sees real rider
+
+Ye direction sahi hai.
+
+But 3 important things abhi pending hain
+
+1. Backend deploy pending
+
+Current code local hai. Jab tak backend deploy nahi hota:
+
+Customer Confirm
+→ SEARCHING
+→ automatic dispatch
+
+production API par active nahi hoga.
+
+2. Rider ke paas matching active vehicle hona mandatory hai
+
+Audit ke according rider eligibility:
+
+ONLINE
++ APPROVED
++ active vehicle
++ same vehicle category
++ not COD suspended
++ no live order
+
+Agar rider online hai but vehicles row/category mapping missing hai → offer nahi milega.
+
+3. GPS matching abhi nahi hai
+
+Current system basically eligible riders ko offer create karta hai; nearby-distance filtering nahi hai.
+
+Ye immediately fake behavior nahi hai, but production scale ke liye later proper matching/radius logic chahiye.
+
+Payment wali important baat
+
+Audit ne ek important product decision uncover kiya:
+
+Currently:
+
+Customer Confirm
+→ Rider Search
+
+trip fare Cashfree payment ke baad rider search nahi ho raha.
+
+Isliye abhi automatically payment-before-search implement nahi karna chahiye.
+
+Pehle existing payment architecture ko preserve karna better hai; otherwise hum ek saath rider dispatch + payment lifecycle dono change karke unnecessary risk create karenge.
+
+Mere hisaab se ab next step
+
+Abhi aur Cursor changes mat karvao.
+
+Pehle Cursor se jo code changes hue hain unka test + diff review karvao, phir backend deploy karenge.
+
+Aur deployment ke baad real rider account + real active vehicle + matching category + ONLINE status ke saath end-to-end test karna hoga.
+
+Expected real test:
+
+Customer
+↓
+Confirm booking
+↓
+Searching
+↓
+Real rider gets offer
+↓
+Rider taps Accept
+↓
+Backend confirms
+↓
+Customer sees "Driver found"
+↓
+Real rider details
+↓
+Pickup
+↓
+Delivery
+
+No dummy accept. No UUID as customer-facing rider identity. No demo status advancement.
+
+Aur haan — abhi commit/push/deploy khud se mat karna. Pehle changes verify karte hain.

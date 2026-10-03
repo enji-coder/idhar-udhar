@@ -6,6 +6,7 @@ import 'package:idhar_udhar/shared/api/notifications_api.dart';
 import 'package:idhar_udhar/shared/api/profiles_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/api/wallet_api.dart';
+import 'package:idhar_udhar/shared/push/push_token_sync.dart';
 
 import 'package:intl/intl.dart';
 
@@ -117,6 +118,9 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       await _auth.session();
       await _load();
       await RiderPrefs.setLoggedIn();
+      try {
+        await _ref.read(pushTokenSyncProvider).syncAfterAuth();
+      } catch (_) {}
       return true;
     } catch (_) {
       await _ref.read(tokenStoreProvider).clear();
@@ -153,22 +157,66 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     );
     await _load();
     await RiderPrefs.setLoggedIn();
+    try {
+      await _ref.read(pushTokenSyncProvider).syncAfterAuth();
+    } catch (_) {}
   }
 
   Future<void> logout() async {
+    try {
+      if (state.onlineStatus == 'ONLINE') {
+        await _profiles.setRiderAvailability(online: false);
+      }
+    } catch (_) {}
+    try {
+      await _ref.read(pushTokenSyncProvider).unregisterOnLogout();
+    } catch (_) {}
     await _auth.logout();
     await RiderPrefs.clearLoggedIn();
     _ref.read(riderProfileStateProvider.notifier).state = RiderProfile.empty;
     _ref.read(riderVehicleProvider.notifier).state = VehicleInfo.empty;
     _ref.read(riderBankProvider.notifier).state = RiderBankDetails.empty;
     _ref.read(riderDriverProvider.notifier).state = RiderDriverDetails.empty;
+    _ref.read(riderOnlineProvider.notifier).state = false;
     state = const RiderSessionState();
   }
 
   Future<void> refreshProfile() async {
     try {
-      _rememberProfile(await _profiles.rider());
+      await _rememberProfile(await _profiles.rider());
     } catch (_) {}
+  }
+
+  Future<void> setOnline(bool online) async {
+    final result = await _profiles.setRiderAvailability(online: online);
+    state = state.copyWith(onlineStatus: result.onlineStatus);
+    _ref.read(riderOnlineProvider.notifier).state =
+        result.onlineStatus == 'ONLINE';
+  }
+
+  Future<void> updateProfile({
+    String? name,
+    String? email,
+    DateTime? dateOfBirth,
+    String? preferredLanguage,
+    String? photoPath,
+  }) async {
+    if (photoPath != null &&
+        photoPath.isNotEmpty &&
+        !photoPath.startsWith('http')) {
+      final picture = await _profiles.uploadRiderProfilePicture(photoPath);
+      final RiderProfile current = _ref.read(riderProfileStateProvider);
+      _ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
+        photoUrl: picture.downloadUrl,
+      );
+    }
+    final updated = await _profiles.updateRider(
+      name: name,
+      email: email,
+      dateOfBirth: dateOfBirth,
+      preferredLanguage: preferredLanguage,
+    );
+    await _rememberProfile(updated);
   }
 
   Future<void> refreshOffers() async {
@@ -245,7 +293,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     state = state.copyWith(isAuthenticated: true);
   }
 
-  void _rememberProfile(RiderApiProfile profile) {
+  Future<void> _rememberProfile(RiderApiProfile profile) async {
     final String rawPhone = profile.phoneNormalized ?? state.phone;
     state = state.withServerProfile(
       approvalStatus: profile.approvalStatus,
@@ -253,12 +301,57 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       onlineStatus: profile.onlineStatus,
       phone: rawPhone,
     );
+    _ref.read(riderOnlineProvider.notifier).state =
+        profile.onlineStatus == 'ONLINE';
     final String formatted = formatRiderPhone(state.phone);
-    if (formatted.isEmpty) return;
+    final String languageLabel = _languageLabel(profile.preferredLanguage);
+    String? photoUrl = _ref.read(riderProfileStateProvider).photoUrl;
+    if (profile.hasProfilePicture) {
+      final picture = await _profiles.riderProfilePicture();
+      if (picture != null && picture.downloadUrl.isNotEmpty) {
+        photoUrl = picture.downloadUrl;
+      }
+    }
     final RiderProfile current = _ref.read(riderProfileStateProvider);
-    if (current.mobile == formatted) return;
-    _ref.read(riderProfileStateProvider.notifier).state =
-        current.copyWith(mobile: formatted);
+    _ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
+      id: profile.riderProfileId.isNotEmpty
+          ? profile.riderProfileId
+          : current.id,
+      name: profile.name?.trim().isNotEmpty == true
+          ? profile.name!.trim()
+          : current.name,
+      mobile: formatted.isNotEmpty ? formatted : current.mobile,
+      email: profile.email ?? current.email,
+      dateOfBirth: profile.dateOfBirth ?? current.dateOfBirth,
+      language: languageLabel.isNotEmpty ? languageLabel : current.language,
+      photoUrl: photoUrl,
+    );
+  }
+
+  static String _languageLabel(String? code) {
+    switch (code) {
+      case 'en':
+        return 'English';
+      case 'hi':
+        return 'Hindi';
+      case 'gu':
+        return 'Gujarati';
+      default:
+        return '';
+    }
+  }
+
+  static String? languageCode(String? label) {
+    switch (label) {
+      case 'English':
+        return 'en';
+      case 'Hindi':
+        return 'hi';
+      case 'Gujarati':
+        return 'gu';
+      default:
+        return null;
+    }
   }
 }
 

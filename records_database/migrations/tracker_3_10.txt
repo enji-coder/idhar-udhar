@@ -1,0 +1,19 @@
+Customer
+↓
+Confirm booking
+↓
+Searching
+↓
+Real rider gets offer
+↓
+Rider taps Accept
+↓
+Backend confirms
+↓
+Customer sees "Driver found"
+↓
+Real rider details
+↓
+Pickup
+↓
+Delivery

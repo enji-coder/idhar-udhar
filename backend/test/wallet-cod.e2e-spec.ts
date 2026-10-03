@@ -14,6 +14,7 @@ import {
   OrderCatalog,
   sampleStops,
   uniqueIdempotencyKey,
+  verifyPendingWalletTopUp,
 } from './helpers';
 
 describe('Rider wallet and COD (e2e)', () => {
@@ -336,7 +337,17 @@ describe('Rider wallet and COD (e2e)', () => {
       .set('Idempotency-Key', uniqueIdempotencyKey())
       .send({ amount: '85.00' });
     expect(topup.status).toBe(201);
-    expect(topup.body.available_balance).toBe('85.00');
+    expect(topup.body.charge_purpose).toBe('WALLET_TOPUP');
+    expect(topup.body.payment_transaction_id).toBeTruthy();
+    const beforeCredit = await request(app.getHttpServer())
+      .get('/v1/rider/wallet')
+      .set(bearer(rider.tokens.accessToken));
+    expect(beforeCredit.body.available_balance).toBe('0.00');
+    expect(await verifyPendingWalletTopUp(app, topup.body)).toBe('applied');
+    const afterTopup = await request(app.getHttpServer())
+      .get('/v1/rider/wallet')
+      .set(bearer(rider.tokens.accessToken));
+    expect(afterTopup.body.available_balance).toBe('85.00');
     await fixtureCodDue(rider.profileId, '15.00');
     const recharge = await request(app.getHttpServer())
       .post('/v1/rider/wallet/recharge')
@@ -344,23 +355,27 @@ describe('Rider wallet and COD (e2e)', () => {
       .set('Idempotency-Key', uniqueIdempotencyKey())
       .send({ amount: '20.00' });
     expect(recharge.status).toBe(201);
-    expect(recharge.body.cod_due).toBe('0.00');
-    expect(recharge.body.available_balance).toBe('90.00');
-    expect(recharge.body.settled_against_cod).toBe('15.00');
-    expect(recharge.body.wallet_credited).toBe('5.00');
+    expect(recharge.body.charge_purpose).toBe('WALLET_TOPUP');
+    expect(await verifyPendingWalletTopUp(app, recharge.body)).toBe('applied');
     const wallet = await request(app.getHttpServer())
       .get('/v1/rider/wallet')
       .set(bearer(rider.tokens.accessToken));
+    const cod = await request(app.getHttpServer())
+      .get('/v1/rider/cod')
+      .set(bearer(rider.tokens.accessToken));
     expect(wallet.body.available_balance).toBe('90.00');
+    expect(cod.body.cod_due).toBe('0.00');
   });
 
   it('rejects a second wallet debit that would go negative via the CHECK constraint', async () => {
     const rider = await issueRiderSession(app);
-    await request(app.getHttpServer())
+    const topup = await request(app.getHttpServer())
       .post('/v1/rider/wallet/recharge')
       .set(bearer(rider.tokens.accessToken))
       .set('Idempotency-Key', uniqueIdempotencyKey())
       .send({ amount: '5.00' });
+    expect(topup.status).toBe(201);
+    expect(await verifyPendingWalletTopUp(app, topup.body)).toBe('applied');
     const failed = await postgres.query(
       `
       UPDATE rider_wallet_accounts
@@ -452,13 +467,15 @@ describe('Rider wallet and COD (e2e)', () => {
     await assignRider(order.orderId, rider);
   });
 
-  it('serializes concurrent recharges without lost updates', async () => {
+  it('serializes concurrent verified recharges without lost updates', async () => {
     const rider = await issueRiderSession(app);
-    await request(app.getHttpServer())
+    const seed = await request(app.getHttpServer())
       .post('/v1/rider/wallet/recharge')
       .set(bearer(rider.tokens.accessToken))
       .set('Idempotency-Key', uniqueIdempotencyKey())
       .send({ amount: '85.00' });
+    expect(seed.status).toBe(201);
+    expect(await verifyPendingWalletTopUp(app, seed.body)).toBe('applied');
     await fixtureCodDue(rider.profileId, '15.00');
     const [first, second] = await Promise.all([
       request(app.getHttpServer())
@@ -474,6 +491,11 @@ describe('Rider wallet and COD (e2e)', () => {
     ]);
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
+    const [creditA, creditB] = await Promise.all([
+      verifyPendingWalletTopUp(app, first.body),
+      verifyPendingWalletTopUp(app, second.body),
+    ]);
+    expect([creditA, creditB].sort()).toEqual(['applied', 'applied']);
     const wallet = await request(app.getHttpServer())
       .get('/v1/rider/wallet')
       .set(bearer(rider.tokens.accessToken));
@@ -500,6 +522,7 @@ describe('Rider wallet and COD (e2e)', () => {
     expect(first.status).toBe(201);
     expect(replay.status).toBe(201);
     expect(replay.body).toEqual(first.body);
+    expect(first.body.charge_purpose).toBe('WALLET_TOPUP');
     const conflict = await request(app.getHttpServer())
       .post('/v1/rider/wallet/recharge')
       .set(bearer(rider.tokens.accessToken))
@@ -507,6 +530,12 @@ describe('Rider wallet and COD (e2e)', () => {
       .send({ amount: '11.00' });
     expect(conflict.status).toBe(409);
     expect(conflict.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    const unpaid = await request(app.getHttpServer())
+      .get('/v1/rider/wallet')
+      .set(bearer(rider.tokens.accessToken));
+    expect(unpaid.body.available_balance).toBe('0.00');
+    expect(await verifyPendingWalletTopUp(app, first.body)).toBe('applied');
+    expect(await verifyPendingWalletTopUp(app, first.body)).toBe('duplicate');
     const wallet = await request(app.getHttpServer())
       .get('/v1/rider/wallet')
       .set(bearer(rider.tokens.accessToken));
@@ -549,11 +578,13 @@ describe('Rider wallet and COD (e2e)', () => {
 
   it('rejects UPDATE/DELETE of wallet and COD ledger rows', async () => {
     const rider = await issueRiderSession(app);
-    await request(app.getHttpServer())
+    const topup = await request(app.getHttpServer())
       .post('/v1/rider/wallet/recharge')
       .set(bearer(rider.tokens.accessToken))
       .set('Idempotency-Key', uniqueIdempotencyKey())
       .send({ amount: '10.00' });
+    expect(topup.status).toBe(201);
+    expect(await verifyPendingWalletTopUp(app, topup.body)).toBe('applied');
     await expect(
       postgres.query(
         `
@@ -590,6 +621,70 @@ describe('Rider wallet and COD (e2e)', () => {
         [rider.profileId],
       ),
     ).rejects.toThrow(/immutable|cannot/i);
+  });
+
+  it('requests a withdrawal, rejects duplicate keys, and restores funds on admin reject', async () => {
+    const rider = await issueRiderSession(app);
+    await postgres.query(
+      `
+      INSERT INTO rider_upis (
+        rider_profile_id, vpa_masked, vpa_encrypted_or_token, is_current, verification_status
+      )
+      VALUES ($1, 'e2e***@upi', $2, true, 'VERIFIED')
+      `,
+      [rider.profileId, `token-e2e-${Date.now()}`],
+    );
+    const topup = await request(app.getHttpServer())
+      .post('/v1/rider/wallet/recharge')
+      .set(bearer(rider.tokens.accessToken))
+      .set('Idempotency-Key', uniqueIdempotencyKey())
+      .send({ amount: '40.00' });
+    expect(topup.status).toBe(201);
+    expect(await verifyPendingWalletTopUp(app, topup.body)).toBe('applied');
+
+    const key = uniqueIdempotencyKey();
+    const first = await request(app.getHttpServer())
+      .post('/v1/rider/wallet/withdraw')
+      .set(bearer(rider.tokens.accessToken))
+      .set('Idempotency-Key', key)
+      .send({ amount: '15.00', payout_method: 'UPI' });
+    expect(first.status).toBe(201);
+    expect(first.body.status).toBe('REQUESTED');
+    expect(first.body.available_balance).toBe('25.00');
+
+    const replay = await request(app.getHttpServer())
+      .post('/v1/rider/wallet/withdraw')
+      .set(bearer(rider.tokens.accessToken))
+      .set('Idempotency-Key', key)
+      .send({ amount: '15.00', payout_method: 'UPI' });
+    expect(replay.status).toBe(201);
+    expect(replay.body.withdrawal_id).toBe(first.body.withdrawal_id);
+
+    const conflict = await request(app.getHttpServer())
+      .post('/v1/rider/wallet/withdraw')
+      .set(bearer(rider.tokens.accessToken))
+      .set('Idempotency-Key', key)
+      .send({ amount: '16.00', payout_method: 'UPI' });
+    expect(conflict.status).toBe(409);
+
+    const rejected = await request(app.getHttpServer())
+      .post(`/v1/admin/wallet/withdrawals/${first.body.withdrawal_id}/reject`)
+      .set(bearer(admin.tokens.accessToken))
+      .send({ reason: 'e2e reject' });
+    expect(rejected.status).toBe(200);
+    expect(rejected.body.status).toBe('REJECTED');
+    expect(rejected.body.available_balance).toBe('40.00');
+
+    const listed = await request(app.getHttpServer())
+      .get('/v1/admin/wallet/withdrawals')
+      .set(bearer(admin.tokens.accessToken));
+    expect(listed.status).toBe(200);
+    expect(
+      listed.body.withdrawals.some(
+        (row: { withdrawal_id: string }) =>
+          row.withdrawal_id === first.body.withdrawal_id,
+      ),
+    ).toBe(true);
   });
 
   it('keeps resend Case A on 85/15 of extra km bill and Case B on 10/8/2', async () => {

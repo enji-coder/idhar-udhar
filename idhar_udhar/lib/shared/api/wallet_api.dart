@@ -96,6 +96,37 @@ class CustomerWalletEntry {
   }
 }
 
+class WalletTopUpSession {
+  const WalletTopUpSession({
+    required this.paymentTransactionId,
+    required this.amount,
+    required this.paymentSessionId,
+    required this.cashfreeOrderId,
+    required this.environment,
+  });
+
+  final String paymentTransactionId;
+  final double amount;
+  final String paymentSessionId;
+  final String cashfreeOrderId;
+  final String environment;
+
+  factory WalletTopUpSession.fromJson(Map<String, Object?> json) {
+    return WalletTopUpSession(
+      paymentTransactionId: jsonString(json['payment_transaction_id']) ?? '',
+      amount: jsonDouble(json['amount']),
+      paymentSessionId: jsonString(json['payment_session_id']) ?? '',
+      cashfreeOrderId: jsonString(json['cashfree_order_id']) ?? '',
+      environment: jsonString(json['cashfree_environment']) ?? '',
+    );
+  }
+
+  bool get canOpenCheckout =>
+      paymentSessionId.isNotEmpty &&
+      cashfreeOrderId.isNotEmpty &&
+      environment.isNotEmpty;
+}
+
 class WalletApi {
   WalletApi(this._client);
 
@@ -112,10 +143,27 @@ class WalletApi {
     return jsonList(body['entries']).map(jsonObject).toList(growable: false);
   }
 
-  Future<void> recharge(double amount) async {
-    await _client.post(
-      '/v1/rider/wallet/recharge',
-      data: <String, String>{'amount': amount.toStringAsFixed(2)},
+  /// Creates a Cashfree PENDING top-up. Does not credit the wallet.
+  Future<WalletTopUpSession> beginTopUp(double amount) async {
+    return WalletTopUpSession.fromJson(
+      await _client.post(
+        '/v1/rider/wallet/recharge',
+        data: <String, String>{'amount': amount.toStringAsFixed(2)},
+        headers: <String, String>{'Idempotency-Key': _uuid.v4()},
+      ),
+    );
+  }
+
+  Future<Map<String, Object?>> withdraw({
+    required double amount,
+    required String payoutMethod,
+  }) async {
+    return _client.post(
+      '/v1/rider/wallet/withdraw',
+      data: <String, String>{
+        'amount': amount.toStringAsFixed(2),
+        'payout_method': payoutMethod,
+      },
       headers: <String, String>{'Idempotency-Key': _uuid.v4()},
     );
   }

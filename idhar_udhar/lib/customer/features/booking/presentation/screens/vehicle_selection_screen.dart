@@ -90,24 +90,22 @@ List<MockVehicle> vehiclesForBookingFamily(
   if (family == null) {
     return vehicles;
   }
-  return vehicles
-      .where((MockVehicle vehicle) {
-        if (vehicle.serviceFamily != null) {
-          return vehicle.serviceFamily == family;
-        }
-        switch (family) {
-          case ServiceFamily.twoWheeler:
-            return vehicle.type == VehicleType.bike ||
-                vehicle.type == VehicleType.scooty;
-          case ServiceFamily.threeWheeler:
-            return vehicle.type == VehicleType.auto;
-          case ServiceFamily.truck:
-            return vehicle.type == VehicleType.truck ||
-                vehicle.type == VehicleType.pickup ||
-                vehicle.type == VehicleType.car;
-        }
-      })
-      .toList(growable: false);
+  return vehicles.where((MockVehicle vehicle) {
+    if (vehicle.serviceFamily != null) {
+      return vehicle.serviceFamily == family;
+    }
+    switch (family) {
+      case ServiceFamily.twoWheeler:
+        return vehicle.type == VehicleType.bike ||
+            vehicle.type == VehicleType.scooty;
+      case ServiceFamily.threeWheeler:
+        return vehicle.type == VehicleType.auto;
+      case ServiceFamily.truck:
+        return vehicle.type == VehicleType.truck ||
+            vehicle.type == VehicleType.pickup ||
+            vehicle.type == VehicleType.car;
+    }
+  }).toList(growable: false);
 }
 
 MockVehicle customerVehicleFromCategory(VehicleCategory category) {
@@ -152,15 +150,6 @@ class VehicleSelectionScreen extends ConsumerWidget {
         draft.serviceFamily,
       ),
       orElse: () => const <MockVehicle>[],
-    );
-    // Temporary diagnostics — tag IU_FARE_PREVIEW
-    debugPrint(
-      '[IU_FARE_PREVIEW] ui hasRoute=${draft.hasRouteForCurrentStops} '
-      'loading=${farePreview.isLoading} hasError=${farePreview.hasError} '
-      'hasData=${farePreview.hasValue} '
-      'mapKeys=${farePreview.asData?.value.keys.toList() ?? const <String>[]} '
-      'error=${farePreview.hasError ? farePreview.error : null} '
-      'optionIds=${options.map((MockVehicle v) => '${v.name}:${v.id}').toList()}',
     );
     final bool showTwoWheelerNote = options.any(MockData.isTwoWheeler) &&
         (draft.serviceFamily == ServiceFamily.twoWheeler ||
@@ -280,153 +269,163 @@ class VehicleSelectionScreen extends ConsumerWidget {
                             ),
                           )
                         : ListView.separated(
-              itemCount: options.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(height: AppSpacing.md),
-              itemBuilder: (context, index) {
-                final v = options[index];
-                final selected = draft.vehicle?.id == v.id;
-                final String? serverFare = farePreview.asData?.value[v.id];
-                debugPrint(
-                  '[IU_FARE_PREVIEW] card name=${v.name} lookupKey=${v.id} '
-                  'mapHasKey=${farePreview.asData?.value.containsKey(v.id) == true} '
-                  'serverFare=$serverFare',
-                );
-                final String priceLabel = serverFare != null &&
-                        serverFare.isNotEmpty
-                    ? '₹$serverFare'
-                    : farePreview.hasError && draft.hasRouteForCurrentStops
-                        ? 'Fare unavailable'
-                        : draft.hasRouteForCurrentStops
-                            ? 'Fare after route'
-                            : 'Fare calculated after pickup & drop';
-                debugPrint(
-                  '[IU_FARE_PREVIEW] card name=${v.name} priceLabel=$priceLabel',
-                );
-                final String waitingNote = v.waitingPerMinute > 0
-                    ? 'Waiting: ₹${v.waitingPerMinute.toStringAsFixed(v.waitingPerMinute == v.waitingPerMinute.roundToDouble() ? 0 : 2)}/min after ${v.initialWaitingMinutes} min'
-                    : '';
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: AppRadius.xlAll,
-                    onTap: () =>
-                        ref.read(bookingDraftProvider.notifier).setVehicle(v),
-                    child: GlassContainer(
-                      hero: selected,
-                      showAmbientGlow: selected,
-                      ambientColor: AppColors.orange,
-                      depth: selected
-                          ? GlassDepthLevel.hero
-                          : GlassDepthLevel.normal,
-                      borderColor:
-                          selected ? AppColors.orange : AppColors.borderGlass,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 88,
-                            height: 72,
-                            child: AmbientGlow(
-                              diameter: 88,
-                              opacity: selected ? 0.28 : 0.12,
-                              child: SafeAssetImage(
-                                path: v.imagePath,
-                                width: 88,
-                                height: 72,
-                                fit: BoxFit.contain,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  v.name,
-                                  style: AppTextStyles.headingS,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                Text(
-                                  v.description,
-                                  style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: AppSpacing.xs),
-                                Text(
-                                  v.etaMinutes > 0
-                                      ? '${v.capacity} · ${v.etaMinutes} min'
-                                      : v.capacity,
-                                  style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.navy,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (MockData.isTwoWheeler(v)) ...[
-                                  const SizedBox(height: AppSpacing.xs),
-                                  Text(
-                                    AppCopy.bikeScootyParcelLimit,
-                                    style: AppTextStyles.caption.copyWith(
-                                      color: AppColors.orange,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 11,
+                            itemCount: options.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: AppSpacing.md),
+                            itemBuilder: (context, index) {
+                              final v = options[index];
+                              final selected = draft.vehicle?.id == v.id;
+                              final String? serverFare =
+                                  farePreview.asData?.value[v.id];
+                              final String priceLabel = serverFare != null &&
+                                      serverFare.isNotEmpty
+                                  ? '₹$serverFare'
+                                  : farePreview.hasError &&
+                                          draft.hasRouteForCurrentStops
+                                      ? 'Fare unavailable'
+                                      : draft.hasRouteForCurrentStops
+                                          ? 'Fare after route'
+                                          : 'Fare calculated after pickup & drop';
+                              final String waitingNote = v.waitingPerMinute > 0
+                                  ? 'Waiting: ₹${v.waitingPerMinute.toStringAsFixed(v.waitingPerMinute == v.waitingPerMinute.roundToDouble() ? 0 : 2)}/min after ${v.initialWaitingMinutes} min'
+                                  : '';
+                              return Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: AppRadius.xlAll,
+                                  onTap: () => ref
+                                      .read(bookingDraftProvider.notifier)
+                                      .setVehicle(v),
+                                  child: GlassContainer(
+                                    hero: selected,
+                                    showAmbientGlow: selected,
+                                    ambientColor: AppColors.orange,
+                                    depth: selected
+                                        ? GlassDepthLevel.hero
+                                        : GlassDepthLevel.normal,
+                                    borderColor: selected
+                                        ? AppColors.orange
+                                        : AppColors.borderGlass,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        SizedBox(
+                                          width: 88,
+                                          height: 72,
+                                          child: AmbientGlow(
+                                            diameter: 88,
+                                            opacity: selected ? 0.28 : 0.12,
+                                            child: SafeAssetImage(
+                                              path: v.imagePath,
+                                              width: 88,
+                                              height: 72,
+                                              fit: BoxFit.contain,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: AppSpacing.md),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                v.name,
+                                                style: AppTextStyles.headingS,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                v.description,
+                                                style: AppTextStyles.caption
+                                                    .copyWith(
+                                                  color:
+                                                      AppColors.textSecondary,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(
+                                                  height: AppSpacing.xs),
+                                              Text(
+                                                v.etaMinutes > 0
+                                                    ? '${v.capacity} · ${v.etaMinutes} min'
+                                                    : v.capacity,
+                                                style: AppTextStyles.caption
+                                                    .copyWith(
+                                                  color: AppColors.navy,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              if (MockData.isTwoWheeler(v)) ...[
+                                                const SizedBox(
+                                                    height: AppSpacing.xs),
+                                                Text(
+                                                  AppCopy.bikeScootyParcelLimit,
+                                                  style: AppTextStyles.caption
+                                                      .copyWith(
+                                                    color: AppColors.orange,
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 11,
+                                                  ),
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: AppSpacing.sm),
+                                        Flexible(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                priceLabel,
+                                                textAlign: TextAlign.end,
+                                                maxLines: 3,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: AppTextStyles.caption
+                                                    .copyWith(
+                                                  color: AppColors.orange,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              if (waitingNote.isNotEmpty)
+                                                Text(
+                                                  waitingNote,
+                                                  textAlign: TextAlign.end,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: AppTextStyles.caption
+                                                      .copyWith(
+                                                    color:
+                                                        AppColors.textSecondary,
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                              if (selected)
+                                                const Icon(
+                                                  Icons.check_circle,
+                                                  color: AppColors.orange,
+                                                  size: 22,
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          Flexible(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  priceLabel,
-                                  textAlign: TextAlign.end,
-                                  maxLines: 3,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.orange,
-                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                                if (waitingNote.isNotEmpty)
-                                  Text(
-                                    waitingNote,
-                                    textAlign: TextAlign.end,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: AppTextStyles.caption.copyWith(
-                                      color: AppColors.textSecondary,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                if (selected)
-                                  const Icon(
-                                    Icons.check_circle,
-                                    color: AppColors.orange,
-                                    size: 22,
-                                  ),
-                              ],
-                            ),
+                              );
+                            },
                           ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
           ),
         ],
       ),

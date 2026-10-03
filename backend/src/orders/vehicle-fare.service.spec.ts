@@ -201,6 +201,9 @@ function build() {
     })),
     findActiveVehicleCategory: jest.fn(async () => category()),
     findZone: jest.fn(),
+    listEligibleOnlineRidersForCategory: jest.fn(async () => []),
+    findAssignedRiderDisplay: jest.fn(async () => null),
+    findRider: jest.fn(async () => null),
   };
   const fares = {
     previewActiveVehicleFares: jest.fn(),
@@ -226,13 +229,19 @@ function build() {
     new OrderStateMachine(),
     { getOrThrow: jest.fn() } as never,
     {} as never,
-    { onStatusChange: jest.fn(async () => undefined) } as never,
+    {
+      onStatusChange: jest.fn(async () => undefined),
+      onNewOffer: jest.fn(async () => undefined),
+      onOffersUnavailable: jest.fn(async () => undefined),
+    } as never,
     {
       assertNoOutstanding: jest.fn(async () => undefined),
       onPickedUp: jest.fn(async () => undefined),
       onCancelled: jest.fn(async () => undefined),
       settleDelivered: jest.fn(async () => undefined),
     } as never,
+    { captureOnDelivered: jest.fn(async () => undefined) } as never,
+    { getRiderLocationForConsumer: jest.fn() } as never,
   );
   return { service, orders, catalog, fares, routing };
 }

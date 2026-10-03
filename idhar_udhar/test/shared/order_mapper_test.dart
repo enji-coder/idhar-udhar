@@ -37,4 +37,29 @@ void main() {
     expect(order.apiId, '11111111-1111-1111-1111-111111111111');
     expect(order.fare, 79);
   });
+
+  test('maps assigned rider display fields without inventing rating', () {
+    final MockOrder order = OrderMapper.toMockOrder(
+      ApiOrder(
+        orderId: '11111111-1111-1111-1111-111111111111',
+        displayId: 'IU-AMD-0002',
+        canonicalStatus: 'ASSIGNED',
+        createdAt: DateTime.utc(2026, 1, 1),
+        riderProfileId: '22222222-2222-4222-8222-222222222222',
+        vehicleCategoryName: 'Bike',
+        assignedRider: const ApiAssignedRider(
+          name: 'Ravi',
+          vehicleRegistration: 'GJ-01-AB-1234',
+          vehicleCategoryName: 'Bike',
+        ),
+        tripFare: 120,
+      ),
+    );
+    expect(order.status, OrderStatus.assigned);
+    expect(order.rider, isNotNull);
+    expect(order.rider!.name, 'Ravi');
+    expect(order.rider!.vehicleLabel, contains('Bike'));
+    expect(order.rider!.vehicleLabel, contains('GJ-01-AB-1234'));
+    expect(order.rider!.rating, 0);
+  });
 }

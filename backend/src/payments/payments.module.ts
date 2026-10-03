@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
@@ -23,6 +23,7 @@ import { TaxConfigRepository } from './tax-config.repository';
 import { TaxConfigService } from './tax-config.service';
 import { UnconfiguredPaymentProvider } from './unconfigured-payment.provider';
 import { CashfreePaymentService } from './cashfree-payment.service';
+import { CashfreePayoutWebhookController } from './cashfree-payout-webhook.controller';
 import { CashfreeWebhookController } from './cashfree-webhook.controller';
 import { CashfreeWebhookService } from './cashfree-webhook.service';
 
@@ -30,9 +31,10 @@ import { CashfreeWebhookService } from './cashfree-webhook.service';
   imports: [
     AuthModule,
     FareModule,
-    OrdersModule,
+    // Cycle: OrdersModule → WalletCodModule → PaymentsModule → OrdersModule
+    forwardRef(() => OrdersModule),
     SettlementModule,
-    WalletCodModule,
+    forwardRef(() => WalletCodModule),
     NotificationsModule,
     AuditModule,
   ],
@@ -42,6 +44,7 @@ import { CashfreeWebhookService } from './cashfree-webhook.service';
     AdminLedgerController,
     AdminTaxConfigController,
     CashfreeWebhookController,
+    CashfreePayoutWebhookController,
   ],
   providers: [
     PaymentsService,
@@ -68,6 +71,12 @@ import { CashfreeWebhookService } from './cashfree-webhook.service';
       inject: [ConfigService, UnconfiguredPaymentProvider, CashfreePaymentService],
     },
   ],
-  exports: [TaxConfigRepository, OrderTaxSnapshotRepository],
+  exports: [
+    PaymentsService,
+    CashfreePaymentService,
+    FinanceService,
+    TaxConfigRepository,
+    OrderTaxSnapshotRepository,
+  ],
 })
 export class PaymentsModule {}

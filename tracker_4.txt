@@ -1,0 +1,23 @@
+| Area                             | Status               |
+| -------------------------------- | -------------------- |
+| Customer booking lifecycle       | ✅ Done               |
+| Backend fare/quote               | ✅ Done               |
+| Automatic dispatch               | ✅ Done               |
+| Redispatch                       | ✅ Done               |
+| Concurrent rider accept          | ✅ Done               |
+| DELIVERED → 85/15 finance        | ✅ Done               |
+| Wallet/COD sync                  | ✅ Done               |
+| Customer live rider location API | ✅ Done               |
+| Server-side cancellation         | ✅ Done               |
+| Local rider financial mutation   | ✅ Removed            |
+| Fake order seeding               | ✅ Removed            |
+| Push-token backend plumbing      | ✅ Done               |
+| Trip Cashfree session            | 🟡 Partial           |
+| Real FCM device delivery         | 🟡 Partial           |
+| Admin mock cleanup               | 🟡 Partial           |
+| Searching layout tests           | 🔴 Pending           |
+| AWS production verification      | 🔴 Pending           |
+| Rate limiting                    | 🔴 Pending           |
+| Device E2E                       | 🔴 Pending           |
+| Production secrets/config        | 🔴 Pending           |
+| Geo-radius dispatch              | 🟡 Business decision |

@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { cashfreeApiBaseUrl } from '../payments/cashfree-environment';
+import {
+  cashfreeApiBaseUrl,
+  cashfreePayoutApiBaseUrl,
+} from '../payments/cashfree-environment';
 import { parseFirebaseServiceAccountJson } from './firebase-credentials';
 
 export type AppConfig = {
@@ -89,8 +92,8 @@ export type AppConfig = {
   payment: {
     /**
      * unconfigured records an ONLINE intent and never marks PAID.
-     * cashfree calls Sandbox only. Production is parsed so the host can
-     * switch later, and is refused at startup in this phase.
+     * cashfree uses CASHFREE_ENVIRONMENT (sandbox|production) with matching hosts.
+     * Production never falls back to sandbox credentials or hosts.
      */
     provider: 'unconfigured' | 'cashfree';
     cashfree: {
@@ -99,7 +102,15 @@ export type AppConfig = {
       clientSecret: string | null;
       apiVersion: string;
       apiBaseUrl: string;
+      payoutApiBaseUrl: string;
+      payoutApiVersion: string;
       timeoutMs: number;
+    };
+    payoutReconcile: {
+      workerEnabled: boolean;
+      pollMs: number;
+      minAgeSeconds: number;
+      batchSize: number;
     };
   };
   location: {
@@ -327,17 +338,17 @@ export function loadAppConfig(): AppConfig {
     throw new Error('CASHFREE_ENVIRONMENT must be sandbox or production');
   }
   const cashfreeEnvironment = cashfreeEnvironmentRaw as 'sandbox' | 'production';
-  if (paymentProvider === 'cashfree' && cashfreeEnvironment === 'production') {
-    throw new Error(
-      'CASHFREE_ENVIRONMENT=production is not enabled. Use sandbox. The production host is selected later by this same setting.',
-    );
-  }
   const cashfreeClientId = (process.env.CASHFREE_CLIENT_ID ?? '').trim() || null;
   const cashfreeClientSecret = (process.env.CASHFREE_CLIENT_SECRET ?? '').trim() || null;
   const cashfreeApiVersion =
     (process.env.CASHFREE_API_VERSION ?? '').trim() || '2025-01-01';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cashfreeApiVersion)) {
     throw new Error('CASHFREE_API_VERSION must look like 2025-01-01');
+  }
+  const cashfreePayoutApiVersion =
+    (process.env.CASHFREE_PAYOUT_API_VERSION ?? '').trim() || '2024-01-01';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cashfreePayoutApiVersion)) {
+    throw new Error('CASHFREE_PAYOUT_API_VERSION must look like 2024-01-01');
   }
   const cashfreeTimeoutMs = integer('CASHFREE_TIMEOUT_MS', 10000);
   if (cashfreeTimeoutMs < 1000 || cashfreeTimeoutMs > 30000) {
@@ -347,6 +358,27 @@ export function loadAppConfig(): AppConfig {
     throw new Error(
       'PAYMENT_PROVIDER=cashfree requires CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET',
     );
+  }
+  const payoutReconcileWorkerEnabled = booleanFlag(
+    'PAYOUT_RECONCILE_WORKER_ENABLED',
+    false,
+  );
+  const payoutReconcilePollMs = integer('PAYOUT_RECONCILE_POLL_MS', 30000);
+  if (payoutReconcilePollMs < 5000 || payoutReconcilePollMs > 300000) {
+    throw new Error('PAYOUT_RECONCILE_POLL_MS must be between 5000 and 300000');
+  }
+  const payoutReconcileMinAgeSeconds = integer(
+    'PAYOUT_RECONCILE_MIN_AGE_SECONDS',
+    60,
+  );
+  if (payoutReconcileMinAgeSeconds < 15 || payoutReconcileMinAgeSeconds > 3600) {
+    throw new Error(
+      'PAYOUT_RECONCILE_MIN_AGE_SECONDS must be between 15 and 3600',
+    );
+  }
+  const payoutReconcileBatchSize = integer('PAYOUT_RECONCILE_BATCH_SIZE', 20);
+  if (payoutReconcileBatchSize < 1 || payoutReconcileBatchSize > 100) {
+    throw new Error('PAYOUT_RECONCILE_BATCH_SIZE must be between 1 and 100');
   }
 
   const redisEnabled = booleanFlag('REDIS_ENABLED', false);
@@ -461,7 +493,17 @@ export function loadAppConfig(): AppConfig {
         apiBaseUrl: cashfreeApiBaseUrl(
           paymentProvider === 'cashfree' ? cashfreeEnvironment : 'sandbox',
         ),
+        payoutApiBaseUrl: cashfreePayoutApiBaseUrl(
+          paymentProvider === 'cashfree' ? cashfreeEnvironment : 'sandbox',
+        ),
+        payoutApiVersion: cashfreePayoutApiVersion,
         timeoutMs: cashfreeTimeoutMs,
+      },
+      payoutReconcile: {
+        workerEnabled: payoutReconcileWorkerEnabled,
+        pollMs: payoutReconcilePollMs,
+        minAgeSeconds: payoutReconcileMinAgeSeconds,
+        batchSize: payoutReconcileBatchSize,
       },
     },
     location: {

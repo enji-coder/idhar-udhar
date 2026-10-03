@@ -33,12 +33,13 @@ export class CashfreeWebhookController {
     const payment = this.configService.getOrThrow<AppConfig['payment']>('payment');
     if (
       payment.provider !== 'cashfree' ||
-      payment.cashfree.environment !== 'sandbox' ||
+      (payment.cashfree.environment !== 'sandbox' &&
+        payment.cashfree.environment !== 'production') ||
       !payment.cashfree.clientSecret
     ) {
       throw new ApiError(
         ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
-        'Cashfree sandbox webhooks are not configured',
+        'Cashfree webhooks are not configured',
         503,
       );
     }

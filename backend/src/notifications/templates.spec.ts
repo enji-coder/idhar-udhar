@@ -21,6 +21,7 @@ describe('notification templates', () => {
       'ORDER_CONFIRMED',
       'PAYMENT_SUCCESSFUL',
       'WALLET_RECHARGE_COMPLETED',
+      'WITHDRAWAL_REQUESTED',
       'COD_SUSPENDED',
     ] as const;
     for (const type of types) {

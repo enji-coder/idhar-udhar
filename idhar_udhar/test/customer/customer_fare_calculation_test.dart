@@ -3,13 +3,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
+import 'package:idhar_udhar/customer/core/state/booking_api.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/package_details_screen.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/pickup_to_drop_preview_screen.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/vehicle_selection_screen.dart';
+import 'package:idhar_udhar/shared/api/api_client.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/api/token_store.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
+
+/// Prevents Package Details quote prefetch from opening a real HTTP client.
+class _SkipQuoteOrdersApi extends OrdersApi {
+  _SkipQuoteOrdersApi() : super(ApiClient(tokenStore: TokenStore()));
+
+  @override
+  Future<ApiOrder> create({
+    required String cityId,
+    required String vehicleCategoryId,
+    required List<ApiStop> stops,
+    double? packageWeightKg,
+    double? packageSizeCm,
+    String? idempotencyKey,
+  }) async {
+    throw const ApiException(
+        code: 'TEST_SKIP', message: 'quote skipped in test');
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -57,10 +81,12 @@ void main() {
 
   void seedRoute(double km) {
     notifier.setPickup(
-      MockData.locations.firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
     );
     notifier.setDrop(
-      MockData.locations.firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
     );
     notifier.applyRouteResult(
       signature: draft().currentRouteKey,
@@ -114,7 +140,9 @@ void main() {
     expect(draft().vehicle?.capacity, '15 KG');
   });
 
-  test('the same rates produce a different fare when the route distance changes', () {
+  test(
+      'the same rates produce a different fare when the route distance changes',
+      () {
     final MockVehicle bike = vehicle(
       id: 'bike-1',
       type: VehicleType.bike,
@@ -206,6 +234,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() {
+      VehicleCategoryCatalog.launchCityId = null;
+    });
 
     final VehicleCategory bike = VehicleCategory.fromJson(<String, Object>{
       'vehicle_category_id': 'bike-1',
@@ -231,21 +262,32 @@ void main() {
         'per_km': '12.00',
       },
     });
+    VehicleCategoryCatalog.launchCityId =
+        '01a0fc52-fafe-72d5-b4cc-ed34ebb3b9cc';
     final ProviderContainer priced = ProviderContainer(
       overrides: <Override>[
         vehicleCategoryCatalogProvider.overrideWith(
           (Ref ref) async => <VehicleCategory>[bike, scooty],
         ),
+        vehicleFarePreviewProvider.overrideWith(
+          (Ref ref) async => <String, String>{
+            'bike-1': '160.00',
+            'scooty-1': '140.00',
+          },
+        ),
+        ordersApiProvider.overrideWithValue(_SkipQuoteOrdersApi()),
       ],
     );
     addTearDown(priced.dispose);
     final BookingDraftNotifier pricedDraft =
         priced.read(bookingDraftProvider.notifier);
     pricedDraft.setPickup(
-      MockData.locations.firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
     );
     pricedDraft.setDrop(
-      MockData.locations.firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
     );
     pricedDraft.applyRouteResult(
       signature: priced.read(bookingDraftProvider).currentRouteKey,
@@ -261,14 +303,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Fare after route'), findsWidgets);
+    expect(find.text('₹160.00'), findsOneWidget);
+    expect(find.text('₹140.00'), findsOneWidget);
     expect(find.text('Base ₹40'), findsNothing);
     expect(find.text('Base ₹30'), findsNothing);
-    expect(find.text('₹120'), findsNothing);
     expect(find.text('20 KG'), findsOneWidget);
     expect(find.text('15 KG'), findsOneWidget);
 
     pricedDraft.setVehicle(customerVehicleFromCategory(bike));
+    pricedDraft.setReceiver(name: 'Test Receiver', mobile: '9876543210');
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: priced,
@@ -278,9 +321,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Estimated Fare'), findsOneWidget);
-    expect(find.text('—'), findsOneWidget);
-    expect(find.text('₹120'), findsNothing);
-    expect(find.text('₹40'), findsNothing);
+    expect(find.text('₹160'), findsOneWidget);
+    expect(find.text('Calculating...'), findsNothing);
+    expect(find.text('Unable to calculate fare'), findsNothing);
+    expect(find.text('Fare calculated at summary'), findsNothing);
   });
 
   test('scooty and bike each use their own admin base and per-km rate', () {
@@ -316,10 +360,12 @@ void main() {
 
   test('without a successful route there is no distance-based fare', () {
     notifier.setPickup(
-      MockData.locations.firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
     );
     notifier.setDrop(
-      MockData.locations.firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
     );
     notifier.setVehicle(
       vehicle(

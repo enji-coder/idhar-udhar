@@ -4,10 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -259,21 +261,40 @@ class _EditProfileSheet extends ConsumerStatefulWidget {
 }
 
 class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
+  static const List<String> _languages = <String>[
+    'English',
+    'Hindi',
+    'Gujarati',
+  ];
+
   late final TextEditingController _name;
+  late final TextEditingController _email;
+  late final TextEditingController _mobile;
   String? _photoUrl;
+  String? _localPhotoPath;
+  DateTime? _dobDate;
+  String? _language;
   String? _nameError;
+  String? _emailError;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     final profile = ref.read(riderProfileStateProvider);
     _name = TextEditingController(text: profile.name);
+    _email = TextEditingController(text: profile.email);
+    _mobile = TextEditingController(text: profile.mobile);
     _photoUrl = profile.photoUrl;
+    _dobDate = profile.dateOfBirth;
+    _language = profile.language.trim().isEmpty ? null : profile.language;
   }
 
   @override
   void dispose() {
     _name.dispose();
+    _email.dispose();
+    _mobile.dispose();
     super.dispose();
   }
 
@@ -300,33 +321,68 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
       imageQuality: 85,
     );
     if (photo == null || !mounted) return;
-    setState(() => _photoUrl = photo.path);
+    setState(() {
+      _localPhotoPath = photo.path;
+      _photoUrl = photo.path;
+    });
   }
 
-  void _save() {
+  Future<void> _pickDob() async {
+    final DateTime now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _dobDate ?? DateTime(now.year - 21),
+      firstDate: DateTime(1950),
+      lastDate: DateTime(now.year - 18, now.month, now.day),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _dobDate = picked);
+  }
+
+  Future<void> _save() async {
     final name = _name.text.trim();
+    final email = _email.text.trim();
     if (name.length < 2) {
       setState(() => _nameError = 'Enter your name');
       return;
     }
-    final current = ref.read(riderProfileStateProvider);
-    ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
-      name: name,
-      photoUrl: _photoUrl,
-    );
-    Navigator.of(context).pop();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: RiderColors.secondary,
-        content: Text(
-          'Name updated',
-          style: RiderTextStyles.bodyMedium.copyWith(
-            color: RiderColors.textOnPrimary,
+    if (email.isNotEmpty && !email.contains('@')) {
+      setState(() => _emailError = 'Enter a valid email');
+      return;
+    }
+    final String? languageCode =
+        RiderSessionNotifier.languageCode(_language);
+    setState(() => _saving = true);
+    try {
+      await ref.read(riderSessionProvider.notifier).updateProfile(
+            name: name,
+            email: email,
+            dateOfBirth: _dobDate,
+            preferredLanguage: languageCode,
+            photoPath: _localPhotoPath,
+          );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: RiderColors.secondary,
+          content: Text(
+            'Profile updated',
+            style: RiderTextStyles.bodyMedium.copyWith(
+              color: RiderColors.textOnPrimary,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -404,17 +460,85 @@ class _EditProfileSheetState extends ConsumerState<_EditProfileSheet> {
                       hint: 'Enter your name',
                       prefixIcon: Icons.person_outline_rounded,
                       errorText: _nameError,
-                      textInputAction: TextInputAction.done,
+                      textInputAction: TextInputAction.next,
                       onChanged: (_) {
                         if (_nameError != null) {
                           setState(() => _nameError = null);
                         }
                       },
                     ),
+                    const SizedBox(height: RiderSpacing.lg),
+                    RiderTextField(
+                      controller: _mobile,
+                      label: 'Mobile',
+                      prefixIcon: Icons.phone_rounded,
+                      enabled: false,
+                      readOnly: true,
+                    ),
+                    const SizedBox(height: RiderSpacing.lg),
+                    RiderTextField(
+                      controller: _email,
+                      label: 'Email',
+                      hint: 'name@example.com',
+                      prefixIcon: Icons.email_outlined,
+                      keyboardType: TextInputType.emailAddress,
+                      errorText: _emailError,
+                      textInputAction: TextInputAction.next,
+                      onChanged: (_) {
+                        if (_emailError != null) {
+                          setState(() => _emailError = null);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: RiderSpacing.lg),
+                    InkWell(
+                      onTap: _pickDob,
+                      borderRadius: RiderRadius.mdAll,
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: 'Date of birth',
+                          prefixIcon: const Icon(Icons.edit_calendar_rounded),
+                          border: OutlineInputBorder(
+                            borderRadius: RiderRadius.mdAll,
+                          ),
+                        ),
+                        child: Text(
+                          _dobDate == null
+                              ? 'Select date'
+                              : DateFormat('dd MMM yyyy').format(_dobDate!),
+                          style: RiderTextStyles.bodyMedium,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: RiderSpacing.lg),
+                    DropdownButtonFormField<String>(
+                      initialValue: _language,
+                      decoration: InputDecoration(
+                        labelText: 'Preferred language',
+                        prefixIcon: const Icon(Icons.language_rounded),
+                        border: OutlineInputBorder(
+                          borderRadius: RiderRadius.mdAll,
+                        ),
+                      ),
+                      hint: Text('Select language', style: RiderTextStyles.hint),
+                      items: _languages
+                          .map(
+                            (String value) => DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged: (String? value) {
+                        if (value != null) {
+                          setState(() => _language = value);
+                        }
+                      },
+                    ),
                     const SizedBox(height: RiderSpacing.xl),
                     RiderPrimaryButton(
-                      label: 'Save',
-                      onPressed: _save,
+                      label: _saving ? 'Saving…' : 'Save',
+                      onPressed: _saving ? null : _save,
                     ),
                   ],
                 ),
