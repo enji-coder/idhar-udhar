@@ -85,7 +85,14 @@ function migrationsDirectory() {
   if (configured) {
     return configured;
   }
-  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'records_database', 'migrations');
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  // Image layout: /app/scripts → /app/records_database/migrations
+  const inImage = resolve(scriptDir, '..', 'records_database', 'migrations');
+  if (existsSync(inImage)) {
+    return inImage;
+  }
+  // Monorepo layout: backend/scripts → ../../records_database/migrations
+  return resolve(scriptDir, '..', '..', 'records_database', 'migrations');
 }
 
 async function appliedVersions(client) {

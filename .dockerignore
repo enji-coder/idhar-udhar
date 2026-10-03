@@ -1,0 +1,15 @@
+# Used when building backend/Dockerfile from the repository root.
+.git
+**/.env
+**/.env.*
+**/node_modules
+**/dist
+**/coverage
+**/*.log
+**/build
+idhar_udhar
+IDHAR_UDHAR_ADMIN
+Project_Documentation
+API_KEY.txt
+*.apk
+*.md
