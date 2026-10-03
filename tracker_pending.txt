@@ -1,0 +1,76 @@
+| Area                                   | Status         |
+| -------------------------------------- | -------------- |
+| Customer Registration / Login          | ✅ Done         |
+| Customer Profile                       | ✅ Done         |
+| Customer Address / Stops               | ✅ Done         |
+| Customer Booking Flow                  | ✅ Done         |
+| Customer Fare Preview                  | ✅ Done         |
+| Customer Backend Quote                 | ✅ Done         |
+| Customer Confirm Booking               | ✅ Done         |
+| Customer Payment Responsibility / Plan | ✅ Done         |
+| Customer Trip Payment — Online Session | 🟡 Partial     |
+| Customer Wallet                        | ✅ Done         |
+| Customer Order Tracking                | ✅ Done         |
+| Customer Rider Location Tracking       | ✅ Done         |
+| Customer Cancellation                  | ✅ Done         |
+| Customer Notifications Plumbing        | 🟡 Partial     |
+| Customer FCM Push Delivery             | 🔴 Not Done    |
+| Rider Registration / Login             | ✅ Done         |
+| Rider Profile                          | ✅ Done         |
+| Rider Online / Offline                 | ✅ Done         |
+| Rider Order Offers                     | ✅ Done         |
+| Rider Accept / Reject                  | ✅ Done         |
+| Rider Redispatch                       | ✅ Done         |
+| Rider Trip Lifecycle                   | ✅ Done         |
+| Rider GPS Publishing                   | ✅ Done         |
+| Rider Wallet                           | ✅ Done         |
+| Rider Wallet Add Money                 | 🟡 Partial     |
+| Rider Wallet Withdrawal                | 🟡 Partial     |
+| Rider COD Due                          | ✅ Done         |
+| Rider Earnings                         | ✅ Done         |
+| Rider 85/15 Settlement                 | ✅ Done         |
+| Rider DELIVERED Finance Freeze         | ✅ Done         |
+| Admin Login / Auth                     | ✅ Done         |
+| Admin Vehicle Categories               | ✅ Done         |
+| Admin Fare Configuration               | ✅ Done         |
+| Admin States / Cities                  | ✅ Done         |
+| Admin Order Management                 | ✅ Done         |
+| Admin Rider Management                 | 🟡 Partial     |
+| Admin Notifications                    | 🟡 Partial     |
+| Admin Verification UI                  | 🟡 Partial     |
+| Backend Auth / Authorization           | ✅ Done         |
+| Backend Order Lifecycle                | ✅ Done         |
+| Backend Dispatch                       | ✅ Done         |
+| Backend Redispatch                     | ✅ Done         |
+| Backend Fare Engine                    | ✅ Done         |
+| Backend Financial Ledger               | ✅ Done         |
+| Backend Wallet / COD                   | ✅ Done         |
+| Backend Idempotency                    | ✅ Done         |
+| Backend Cashfree Integration           | 🟡 Partial     |
+| Cashfree Webhook                       | ✅ Done         |
+| Cashfree Payout Backend                | 🟡 Partial     |
+| MSG91 OTP Production                   | 🔴 Not Done    |
+| FCM Firebase Configuration             | 🔴 Not Done    |
+| FCM Push End-to-End                    | 🔴 Not Done    |
+| Rider → Backend → Customer Location    | 🟡 Partial     |
+| Redis Location Store Production        | 🔴 Not Done    |
+| Google Maps Production Validation      | 🟡 Partial     |
+| AWS ECS Backend                        | ✅ Done         |
+| AWS RDS                                | ✅ Done         |
+| AWS ECR / Deployment                   | ✅ Done         |
+| AWS ALB / API                          | ✅ Done         |
+| AWS Secrets / Production Config        | 🟡 Partial     |
+| Database Migrations                    | ✅ Done         |
+| Database Migration Production Apply    | ✅ Done         |
+| Rate Limiting / Abuse Protection       | 🔴 Not Done    |
+| Security Hardening                     | 🟡 Partial     |
+| Demo / Mock Data Cleanup               | 🟡 Partial     |
+| Flutter Customer Tests                 | 🟡 Partial     |
+| Flutter Rider Tests                    | 🟡 Partial     |
+| Backend Automated Tests                | ✅ Done         |
+| Device E2E Testing                     | 🔴 Not Done    |
+| Full Customer → Rider → Delivery Test  | 🔴 Not Done    |
+| Production FCM Device Test             | 🔴 Not Done    |
+| Production Cashfree Live Test          | 🔴 Not Done    |
+| Production MSG91 Live Test             | 🔴 Not Done    |
+| Production Launch Readiness            | 🟡 In Progress |
