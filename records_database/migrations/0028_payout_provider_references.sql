@@ -3,6 +3,7 @@
 ALTER TABLE rider_wallet_withdrawals
   ADD COLUMN IF NOT EXISTS merchant_transfer_id TEXT NULL,
   ADD COLUMN IF NOT EXISTS provider_status TEXT NULL,
+  ADD COLUMN IF NOT EXISTS provider_transfer_id TEXT NULL,
   ADD COLUMN IF NOT EXISTS refund_wallet_ledger_id UUID NULL,
   ADD COLUMN IF NOT EXISTS last_reconciled_at TIMESTAMPTZ NULL;
 
