@@ -22,10 +22,10 @@ class RiderOtpInput extends StatefulWidget {
   final String? errorText;
 
   @override
-  State<RiderOtpInput> createState() => _RiderOtpInputState();
+  State<RiderOtpInput> createState() => RiderOtpInputState();
 }
 
-class _RiderOtpInputState extends State<RiderOtpInput> {
+class RiderOtpInputState extends State<RiderOtpInput> {
   late final List<TextEditingController> _controllers;
   late final List<FocusNode> _nodes;
 
@@ -51,6 +51,25 @@ class _RiderOtpInputState extends State<RiderOtpInput> {
   }
 
   String get _value => _controllers.map((c) => c.text).join();
+
+  /// Fills boxes from SMS Retriever / Autofill without logging the code.
+  void fillFromAutofill(String code) {
+    final String digits = code.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      return;
+    }
+    _paste(digits);
+  }
+
+  void clear() {
+    for (final TextEditingController c in _controllers) {
+      c.clear();
+    }
+    if (_nodes.isNotEmpty) {
+      _nodes.first.requestFocus();
+    }
+    widget.onChanged?.call('');
+  }
 
   void _onChanged(int index, String value) {
     if (value.length > 1) {
@@ -87,74 +106,79 @@ class _RiderOtpInputState extends State<RiderOtpInput> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            const double gap = RiderSpacing.sm;
-            final double boxW =
-                ((constraints.maxWidth - gap * (widget.length - 1)) /
-                        widget.length)
-                    .clamp(40.0, 56.0);
-            return Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List<Widget>.generate(widget.length, (i) {
-                return SizedBox(
-                  width: boxW,
-                  child: TextField(
-                    controller: _controllers[i],
-                    focusNode: _nodes[i],
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    style: RiderTextStyles.title,
-                    cursorColor: RiderColors.primary,
-                    maxLength: 1,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(1),
-                    ],
-                    decoration: InputDecoration(
-                      counterText: '',
-                      filled: true,
-                      fillColor: RiderColors.surface.withValues(alpha: 0.92),
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: RiderSpacing.lg,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: RiderRadius.mdAll,
-                        borderSide:
-                            const BorderSide(color: RiderColors.border),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: RiderRadius.mdAll,
-                        borderSide:
-                            const BorderSide(color: RiderColors.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: RiderRadius.mdAll,
-                        borderSide: const BorderSide(
-                          color: RiderColors.primary,
-                          width: 1.5,
+    return AutofillGroup(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const double gap = RiderSpacing.sm;
+              final double boxW =
+                  ((constraints.maxWidth - gap * (widget.length - 1)) /
+                          widget.length)
+                      .clamp(40.0, 56.0);
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List<Widget>.generate(widget.length, (i) {
+                  return SizedBox(
+                    width: boxW,
+                    child: TextField(
+                      controller: _controllers[i],
+                      focusNode: _nodes[i],
+                      textAlign: TextAlign.center,
+                      keyboardType: TextInputType.number,
+                      autofillHints: i == 0
+                          ? const <String>[AutofillHints.oneTimeCode]
+                          : null,
+                      style: RiderTextStyles.title,
+                      cursorColor: RiderColors.primary,
+                      maxLength: 1,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(1),
+                      ],
+                      decoration: InputDecoration(
+                        counterText: '',
+                        filled: true,
+                        fillColor: RiderColors.surface.withValues(alpha: 0.92),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: RiderSpacing.lg,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: RiderRadius.mdAll,
+                          borderSide:
+                              const BorderSide(color: RiderColors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: RiderRadius.mdAll,
+                          borderSide:
+                              const BorderSide(color: RiderColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: RiderRadius.mdAll,
+                          borderSide: const BorderSide(
+                            color: RiderColors.primary,
+                            width: 1.5,
+                          ),
                         ),
                       ),
+                      onChanged: (v) => _onChanged(i, v),
                     ),
-                    onChanged: (v) => _onChanged(i, v),
-                  ),
-                );
-              }),
-            );
-          },
-        ),
-        if (widget.errorText != null) ...[
-          const SizedBox(height: RiderSpacing.sm),
-          Text(
-            widget.errorText!,
-            style: RiderTextStyles.caption.copyWith(color: RiderColors.error),
-            textAlign: TextAlign.center,
+                  );
+                }),
+              );
+            },
           ),
+          if (widget.errorText != null) ...[
+            const SizedBox(height: RiderSpacing.sm),
+            Text(
+              widget.errorText!,
+              style: RiderTextStyles.caption.copyWith(color: RiderColors.error),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

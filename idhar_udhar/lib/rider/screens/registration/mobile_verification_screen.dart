@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/otp/otp_autofill.dart';
 
 import '../../routing/rider_otp_args.dart';
 import '../../routing/rider_routes.dart';
@@ -61,6 +62,7 @@ class _MobileVerificationScreenState
       _sending = true;
     });
     try {
+      await OtpAutofill.armRetriever();
       await ref.read(riderSessionProvider.notifier).requestOtp(digits);
       if (!mounted) {
         return;
@@ -75,11 +77,13 @@ class _MobileVerificationScreenState
         ),
       );
     } on ApiException catch (error) {
+      await OtpAutofill.stop();
       if (!mounted) {
         return;
       }
       setState(() => _error = error.message);
     } catch (_) {
+      await OtpAutofill.stop();
       if (!mounted) {
         return;
       }

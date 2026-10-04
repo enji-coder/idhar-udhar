@@ -16,6 +16,20 @@ describe('notification templates', () => {
     expect(rendered.title).toBe('New delivery request');
   });
 
+  it('names approved and rejected rider documents clearly', () => {
+    const approved = renderNotification('RIDER_DOCUMENT_APPROVED', 'RIDER', {
+      documentName: 'Driving Licence (front)',
+    });
+    expect(approved.body).toBe('Your Driving Licence (front) has been approved.');
+
+    const rejected = renderNotification('RIDER_DOCUMENT_REJECTED', 'RIDER', {
+      documentName: 'Driving Licence',
+      reason: 'Photo is blurry',
+    });
+    expect(rejected.body).toContain('Your Driving Licence was rejected');
+    expect(rejected.body).toContain('Reason: Photo is blurry');
+  });
+
   it('does not put secrets or raw phones in bodies', () => {
     const types = [
       'ORDER_CONFIRMED',

@@ -16,7 +16,7 @@ Future<void> openRiderWalletTopUpCheckout(WalletTopUpSession session) {
   if (!session.canOpenCheckout) {
     throw const ApiException(
       code: 'PAYMENT_PROVIDER_UNAVAILABLE',
-      message: 'Wallet payment could not be started. Please try again.',
+      message: 'Wallet payment could not be started yet.',
     );
   }
   final CFEnvironment environment = session.environment == 'production'

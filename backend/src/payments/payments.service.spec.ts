@@ -325,6 +325,26 @@ describe('PaymentsService rider wallet top-up', () => {
       payment_session_id: 'session-wallet',
     });
   });
+
+  it('beginRiderWalletTopUp refuses empty checkout sessions without inserting a charge', async () => {
+    const beginOnlineCharge = jest.fn(async () =>
+      new UnconfiguredPaymentProvider().beginOnlineCharge({
+        amount: '40.00',
+        payerType: 'RIDER',
+        riderProfileId: RIDER_PROFILE_ID,
+        purpose: 'WALLET_TOPUP',
+      }),
+    );
+    const { service, inserted, walletCod } = makeService({ beginOnlineCharge });
+    await expect(
+      service.beginRiderWalletTopUp(riderAuth, '40.00', 'topup-empty'),
+    ).rejects.toMatchObject({
+      code: ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+      status: 503,
+    });
+    expect(inserted).toHaveLength(0);
+    expect(walletCod.syncOrderFinance).not.toHaveBeenCalled();
+  });
 });
 
 describe('PaymentsService receivable clearance', () => {

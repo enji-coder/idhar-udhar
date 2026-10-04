@@ -8,6 +8,7 @@ import { PostgresService } from '../database/postgres.service';
 import { AuditService } from '../audit/audit.service';
 import { NotificationService } from '../notifications/notification.service';
 import { OBJECT_STORAGE, ObjectStorage } from '../storage/object-storage';
+import { riderDocumentLabel } from './document-labels';
 import {
   isRiderDocumentType,
   UploadedBinary,
@@ -132,6 +133,7 @@ export class RiderDocumentsService {
         await this.syncVerification(auth.profileId, tx);
         return saved;
       });
+      await this.emitDocumentSubmittedNotification(saved);
       return this.serializeDocument({
         ...saved,
         storage_key: storageKey,
@@ -553,6 +555,28 @@ export class RiderDocumentsService {
     };
   }
 
+  private async emitDocumentSubmittedNotification(document: RiderDocumentRow) {
+    const documentName = riderDocumentLabel(document.document_type);
+    try {
+      await this.notifications.notifyIfRecipient(
+        {
+          eventKey: `verification:${document.rider_document_id}:SUBMITTED:${document.created_at.toISOString()}`,
+          type: 'RIDER_DOCUMENT_SUBMITTED',
+          audience: 'RIDER',
+          profileType: 'RIDER',
+          profileId: document.rider_profile_id,
+          documentName,
+        },
+        this.postgres,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Document submitted notification failed for rider ${document.rider_profile_id}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
+  }
+
   private async emitVerificationNotifications(outcome: {
     document: RiderDocumentRow;
     previousStatus: RiderDocumentRow['status'];
@@ -561,17 +585,34 @@ export class RiderDocumentsService {
   }) {
     const becameVerified =
       outcome.previousApproval !== 'APPROVED' && outcome.approval_status === 'APPROVED';
+    const approvedNow =
+      outcome.previousStatus !== 'APPROVED' && outcome.document.status === 'APPROVED';
     const rejectedNow =
       outcome.previousStatus !== 'REJECTED' && outcome.document.status === 'REJECTED';
-    if (!becameVerified && !rejectedNow) {
+    if (!becameVerified && !approvedNow && !rejectedNow) {
       return;
     }
-    const reviewedAt = outcome.document.reviewed_at?.toISOString() ?? outcome.document.rider_document_id;
+    const reviewedAt =
+      outcome.document.reviewed_at?.toISOString() ?? outcome.document.rider_document_id;
+    const documentName = riderDocumentLabel(outcome.document.document_type);
     try {
-      if (becameVerified) {
+      if (approvedNow) {
         await this.notifications.notifyIfRecipient(
           {
             eventKey: `verification:${outcome.document.rider_document_id}:APPROVED:${reviewedAt}`,
+            type: 'RIDER_DOCUMENT_APPROVED',
+            audience: 'RIDER',
+            profileType: 'RIDER',
+            profileId: outcome.document.rider_profile_id,
+            documentName,
+          },
+          this.postgres,
+        );
+      }
+      if (becameVerified) {
+        await this.notifications.notifyIfRecipient(
+          {
+            eventKey: `verification:${outcome.document.rider_document_id}:PROFILE_APPROVED:${reviewedAt}`,
             type: 'RIDER_PROFILE_VERIFIED',
             audience: 'RIDER',
             profileType: 'RIDER',
@@ -589,6 +630,7 @@ export class RiderDocumentsService {
             profileType: 'RIDER',
             profileId: outcome.document.rider_profile_id,
             reason: outcome.document.rejection_reason,
+            documentName,
           },
           this.postgres,
         );

@@ -41,6 +41,25 @@ export class RiderProfileController {
     });
   }
 
+  /**
+   * PUT alias for environments / proxies that block PATCH.
+   * Same body and persistence as PATCH /rider/profile.
+   */
+  @Roles('RIDER')
+  @Put('profile')
+  @HttpCode(HttpStatus.OK)
+  updateProfilePut(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: UpdateRiderProfileDto,
+  ) {
+    return this.profiles.updateRider(auth, {
+      name: body.name,
+      email: body.email,
+      dateOfBirth: body.date_of_birth,
+      preferredLanguage: body.preferred_language,
+    });
+  }
+
   @Roles('RIDER')
   @Post('availability')
   @HttpCode(HttpStatus.OK)

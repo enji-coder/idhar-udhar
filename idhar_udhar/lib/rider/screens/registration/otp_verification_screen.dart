@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:idhar_udhar/shared/api/api_config.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/otp/otp_autofill.dart';
 
 import '../../data/local/rider_permissions.dart';
 import '../../routing/rider_otp_args.dart';
@@ -35,6 +36,7 @@ class OtpVerificationScreen extends ConsumerStatefulWidget {
 }
 
 class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
+  final GlobalKey<RiderOtpInputState> _otpKey = GlobalKey<RiderOtpInputState>();
   String _otp = '';
   String? _error;
   bool _verifying = false;
@@ -45,11 +47,13 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   void initState() {
     super.initState();
     _startTimer();
+    OtpAutofill.listen(_onSms);
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    unawaited(OtpAutofill.stop());
     super.dispose();
   }
 
@@ -70,7 +74,30 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
     });
   }
 
+  void _onSms(String message) {
+    if (!mounted || _verifying) {
+      return;
+    }
+    final String? code =
+        OtpAutofill.exactOtpDigits(message, ApiConfig.otpLength);
+    if (code == null) {
+      return;
+    }
+    _otpKey.currentState?.fillFromAutofill(code);
+    setState(() {
+      _otp = code;
+      _error = null;
+    });
+    unawaited(_verify());
+  }
+
   Future<void> _verify() async {
+    if (_verifying) {
+      return;
+    }
+    if (_otp.length != ApiConfig.otpLength) {
+      return;
+    }
     setState(() {
       _verifying = true;
       _error = null;
@@ -82,6 +109,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
         ref.read(riderSessionProvider.notifier).bindPhone(phone);
       }
       await ref.read(riderSessionProvider.notifier).verifyOtp(_otp);
+      await OtpAutofill.stop();
       if (!mounted) {
         return;
       }
@@ -111,18 +139,24 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
   }
 
   Future<void> _resend() async {
-    if (_seconds > 0) {
+    if (_seconds > 0 || _verifying) {
       return;
     }
     try {
       final String phone =
           (widget.mobile ?? '').replaceAll(RegExp(r'\D'), '');
+      await OtpAutofill.armRetriever();
       await ref.read(riderSessionProvider.notifier).requestOtp(
             phone.length == 10 ? phone : ref.read(riderSessionProvider).phone,
           );
       if (!mounted) {
         return;
       }
+      _otpKey.currentState?.clear();
+      setState(() {
+        _otp = '';
+        _error = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
@@ -201,13 +235,17 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
                     child: Column(
                       children: [
                         RiderOtpInput(
+                          key: _otpKey,
                           length: ApiConfig.otpLength,
                           errorText: _error,
                           onChanged: (v) => setState(() {
                             _otp = v;
                             _error = null;
                           }),
-                          onCompleted: (v) => setState(() => _otp = v),
+                          onCompleted: (v) {
+                            setState(() => _otp = v);
+                            unawaited(_verify());
+                          },
                         ),
                         const SizedBox(height: RiderSpacing.xl),
                         Text(

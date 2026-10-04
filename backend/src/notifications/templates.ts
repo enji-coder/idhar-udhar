@@ -25,6 +25,8 @@ export const NOTIFICATION_TYPES = [
   'COD_SUSPENDED',
   'COD_ELIGIBLE',
   'RIDER_PROFILE_VERIFIED',
+  'RIDER_DOCUMENT_SUBMITTED',
+  'RIDER_DOCUMENT_APPROVED',
   'RIDER_DOCUMENT_REJECTED',
 ] as const;
 
@@ -53,11 +55,14 @@ export function renderNotification(
     displayId?: string | null;
     amount?: string | null;
     reason?: string | null;
+    documentName?: string | null;
   } = {},
 ): RenderedNotification {
   const order = displayId(vars.displayId);
   const amount = vars.amount ?? '';
   const reason = vars.reason ?? '';
+  const documentName =
+    vars.documentName?.trim() || 'document';
 
   switch (type) {
     case 'ORDER_CONFIRMED':
@@ -268,14 +273,26 @@ export function renderNotification(
         title: 'Profile Verified',
         body: 'Your profile has been verified. You can now access rides and go online.',
       };
+    case 'RIDER_DOCUMENT_SUBMITTED':
+      return {
+        type,
+        title: 'Document submitted',
+        body: `Your ${documentName} has been submitted and is under review.`,
+      };
+    case 'RIDER_DOCUMENT_APPROVED':
+      return {
+        type,
+        title: 'Document approved',
+        body: `Your ${documentName} has been approved.`,
+      };
     case 'RIDER_DOCUMENT_REJECTED': {
       const why = vars.reason?.trim();
       return {
         type,
-        title: 'Document Verification Required',
+        title: 'Document rejected',
         body: why
-          ? `A document was rejected: ${why}`
-          : 'A document was rejected. Upload a replacement to continue verification.',
+          ? `Your ${documentName} was rejected. Reason: ${why}. Please review and resubmit.`
+          : `Your ${documentName} was rejected. Please review and resubmit the document.`,
       };
     }
     default: {

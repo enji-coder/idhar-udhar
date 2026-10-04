@@ -55,6 +55,9 @@ export type AppConfig = {
       templateId: string | null;
       senderId: string | null;
       timeoutMs: number;
+      /** Optional Android SMS Retriever hashes for silent OTP autofill. */
+      androidAppHashCustomer: string | null;
+      androidAppHashRider: string | null;
     };
   };
   /**
@@ -462,6 +465,10 @@ export function loadAppConfig(): AppConfig {
         templateId: msg91TemplateId,
         senderId: msg91SenderId,
         timeoutMs: integer('MSG91_TIMEOUT_MS', 10000),
+        androidAppHashCustomer:
+          (process.env.OTP_ANDROID_APP_HASH_CUSTOMER ?? '').trim() || null,
+        androidAppHashRider:
+          (process.env.OTP_ANDROID_APP_HASH_RIDER ?? '').trim() || null,
       },
     },
     fare: {

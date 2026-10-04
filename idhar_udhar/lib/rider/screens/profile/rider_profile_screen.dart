@@ -13,7 +13,6 @@ import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
-import '../../widgets/rider_bike_visual.dart';
 import '../../widgets/rider_bottom_sheet.dart';
 import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_primary_button.dart';
@@ -53,7 +52,10 @@ class RiderProfileScreen extends ConsumerWidget {
           RiderGlassCard(
             child: Column(
               children: [
-                const _RiderPersonaVisual(),
+                RiderProfileAvatar(
+                  photoUrl: profile.photoUrl,
+                  radius: 48,
+                ),
                 const SizedBox(height: RiderSpacing.md),
                 Text(
                   displayName,
@@ -125,48 +127,6 @@ class RiderProfileScreen extends ConsumerWidget {
   }
 }
 
-class _RiderPersonaVisual extends StatefulWidget {
-  const _RiderPersonaVisual();
-
-  @override
-  State<_RiderPersonaVisual> createState() => _RiderPersonaVisualState();
-}
-
-class _RiderPersonaVisualState extends State<_RiderPersonaVisual>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _idle;
-
-  @override
-  void initState() {
-    super.initState();
-    _idle = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _idle.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _idle,
-      builder: (context, _) {
-        return RiderBikeVisual(
-          appear: 1,
-          yaw: 0,
-          idle: _idle.value,
-          height: 148,
-        );
-      },
-    );
-  }
-}
-
 class _RowData {
   const _RowData(this.label, this.value);
   final String label;
@@ -229,27 +189,50 @@ class RiderProfileAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    ImageProvider? image;
-    final path = photoUrl;
-    if (path != null && path.isNotEmpty) {
-      if (!kIsWeb && File(path).existsSync()) {
-        image = FileImage(File(path));
-      } else if (path.startsWith('http')) {
-        image = NetworkImage(path);
-      }
+    final String? path = photoUrl?.trim();
+    final bool localFile =
+        path != null && path.isNotEmpty && !kIsWeb && File(path).existsSync();
+    final bool network = path != null && path.startsWith('http');
+
+    Widget fallback() => CircleAvatar(
+          radius: radius,
+          backgroundColor: RiderColors.primary.withValues(alpha: 0.15),
+          child: Icon(
+            Icons.person_rounded,
+            size: radius + 4,
+            color: RiderColors.primary,
+          ),
+        );
+
+    if (localFile) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: RiderColors.primary.withValues(alpha: 0.15),
+        backgroundImage: FileImage(File(path)),
+      );
     }
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: RiderColors.primary.withValues(alpha: 0.15),
-      backgroundImage: image,
-      child: image == null
-          ? Icon(
-              Icons.person_rounded,
-              size: radius + 4,
-              color: RiderColors.primary,
-            )
-          : null,
-    );
+    if (network) {
+      return ClipOval(
+        child: Image.network(
+          path,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => fallback(),
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) {
+              return child;
+            }
+            return SizedBox(
+              width: radius * 2,
+              height: radius * 2,
+              child: fallback(),
+            );
+          },
+        ),
+      );
+    }
+    return fallback();
   }
 }
 

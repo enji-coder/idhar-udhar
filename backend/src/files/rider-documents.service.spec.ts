@@ -279,7 +279,14 @@ describe('RiderDocumentsService', () => {
     expect(result.approval_status).toBe('APPROVED');
     expect(result.document.reviewer_admin_profile_id).toBe(adminId);
     expect(result.document).not.toHaveProperty('storage_key');
-    expect(notifications.notifyIfRecipient).toHaveBeenCalledTimes(1);
+    expect(notifications.notifyIfRecipient).toHaveBeenCalledTimes(2);
+    expect(notifications.notifyIfRecipient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'RIDER_DOCUMENT_APPROVED',
+        documentName: 'Aadhaar (front)',
+      }),
+      postgres,
+    );
     expect(notifications.notifyIfRecipient).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'RIDER_PROFILE_VERIFIED' }),
       postgres,
@@ -355,6 +362,7 @@ describe('RiderDocumentsService', () => {
       expect.objectContaining({
         type: 'RIDER_DOCUMENT_REJECTED',
         reason: 'Photo is blurry',
+        documentName: 'Aadhaar (front)',
       }),
       postgres,
     );
@@ -419,7 +427,18 @@ describe('RiderDocumentsService', () => {
       }),
       {},
     );
-    expect(notifications.notifyIfRecipient).not.toHaveBeenCalled();
+    // Document approval still notifies even when rider stays SUSPENDED.
+    expect(notifications.notifyIfRecipient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'RIDER_DOCUMENT_APPROVED',
+        documentName: 'Aadhaar (front)',
+      }),
+      postgres,
+    );
+    expect(notifications.notifyIfRecipient).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'RIDER_PROFILE_VERIFIED' }),
+      postgres,
+    );
   });
 
   it('records an IDfy decision through the same approval update', async () => {
@@ -525,7 +544,12 @@ describe('RiderDocumentsService', () => {
       }),
       {},
     );
-    expect(notifications.notifyIfRecipient).not.toHaveBeenCalled();
+    expect(notifications.notifyIfRecipient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'RIDER_DOCUMENT_SUBMITTED',
+      }),
+      postgres,
+    );
   });
 
   it('lets an unverified rider upload and refuses an approved rider', async () => {

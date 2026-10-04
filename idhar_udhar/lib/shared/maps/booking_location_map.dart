@@ -39,17 +39,18 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
   Timer? _geocodeDebounce;
   String? _status;
   bool _locating = false;
+  bool _locateRequestInFlight = false;
   GeoPoint? _lastGeocoded;
 
-  GeoPoint? get _cameraTarget {
+  GeoPoint get _cameraTarget {
     final MockLocation? selected = widget.selected;
-    if (selected?.latitude == null || selected?.longitude == null) {
-      return null;
+    if (selected?.latitude != null && selected?.longitude != null) {
+      return GeoPoint(
+        latitude: selected!.latitude!,
+        longitude: selected.longitude!,
+      );
     }
-    return GeoPoint(
-      latitude: selected!.latitude!,
-      longitude: selected.longitude!,
-    );
+    return MapsDefaults.cityCenter;
   }
 
   @override
@@ -57,11 +58,20 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     super.initState();
     _rememberSelected();
     if (widget.locateOnStart) {
+      // Block pin commits until the first GPS attempt finishes.
+      _locating = true;
+      _status = 'Getting your current location...';
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _useCurrentLocation(
             requestPermission: widget.requestPermissionOnStart,
           );
+        }
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _fillMissingAddress(widget.selected);
         }
       });
     }
@@ -71,6 +81,16 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
   void didUpdateWidget(covariant BookingLocationMap oldWidget) {
     super.didUpdateWidget(oldWidget);
     _rememberSelected();
+    final MockLocation? next = widget.selected;
+    final MockLocation? prev = oldWidget.selected;
+    if (next != null &&
+        next.address.trim().isEmpty &&
+        (prev == null ||
+            prev.latitude != next.latitude ||
+            prev.longitude != next.longitude ||
+            prev.address.trim().isNotEmpty)) {
+      _fillMissingAddress(next);
+    }
   }
 
   void _rememberSelected() {
@@ -89,56 +109,111 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
     super.dispose();
   }
 
-  Future<void> _useCurrentLocation({bool requestPermission = true}) async {
-    if (_locating) {
+  Future<void> _fillMissingAddress(MockLocation? selected) async {
+    if (selected == null ||
+        selected.latitude == null ||
+        selected.longitude == null ||
+        selected.address.trim().isNotEmpty) {
       return;
     }
-    setState(() {
-      _locating = true;
-      _status = 'Getting your current location...';
-    });
-    final LocationResult result = await ref
-        .read(deviceLocationServiceProvider)
-        .currentLocation(requestPermission: requestPermission);
-    if (!mounted) {
-      return;
-    }
-    if (!result.isOk) {
-      setState(() {
-        _locating = false;
-        _status = locationFailureMessage(result.failure!);
-      });
-      return;
-    }
-    final DeviceLocation location = result.location!;
-    final GeoPoint point = location.point;
+    final GeoPoint point = GeoPoint(
+      latitude: selected.latitude!,
+      longitude: selected.longitude!,
+    );
     final ResolvedAddress? resolved =
         await ref.read(deviceLocationServiceProvider).reverse(point);
     if (!mounted) {
       return;
     }
-    _lastGeocoded = point;
     final String address = resolved?.address.trim() ?? '';
+    if (address.isEmpty) {
+      return;
+    }
     widget.onSelected(
-      MockLocation(
-        id: 'loc_current',
-        label: address.isEmpty ? 'Current Location' : _shortLabel(address),
+      selected.copyWith(
+        label: _shortLabel(address),
         address: address,
-        city: resolved?.city ?? '',
-        iconName: 'my_location',
-        latitude: point.latitude,
-        longitude: point.longitude,
+        city: resolved?.city ?? selected.city,
       ),
     );
+  }
+
+  Future<void> _useCurrentLocation({bool requestPermission = true}) async {
+    if (_locateRequestInFlight) {
+      return;
+    }
+    _locateRequestInFlight = true;
     setState(() {
-      _locating = false;
-      _status = address.isEmpty
-          ? 'Current location found. Address could not be read — move the pin or search.'
-          : null;
+      _locating = true;
+      _status = 'Getting your current location...';
     });
+    try {
+      final LocationResult result = await ref
+          .read(deviceLocationServiceProvider)
+          .currentLocation(requestPermission: requestPermission);
+      if (!mounted) {
+        return;
+      }
+      if (!result.isOk) {
+        setState(() {
+          _locating = false;
+          _status = locationFailureMessage(result.failure!);
+        });
+        return;
+      }
+      final DeviceLocation location = result.location!;
+      final GeoPoint point = location.point;
+      _lastGeocoded = point;
+
+      // Apply coordinates immediately so the map/marker can update without
+      // waiting on reverse geocoding.
+      widget.onSelected(
+        MockLocation(
+          id: 'loc_current',
+          label: 'Current Location',
+          address: '',
+          city: '',
+          iconName: 'my_location',
+          latitude: point.latitude,
+          longitude: point.longitude,
+        ),
+      );
+      if (mounted) {
+        setState(() => _status = 'Getting address...');
+      }
+
+      final ResolvedAddress? resolved =
+          await ref.read(deviceLocationServiceProvider).reverse(point);
+      if (!mounted) {
+        return;
+      }
+      final String address = resolved?.address.trim() ?? '';
+      widget.onSelected(
+        MockLocation(
+          id: 'loc_current',
+          label: address.isEmpty ? 'Current Location' : _shortLabel(address),
+          address: address,
+          city: resolved?.city ?? '',
+          iconName: 'my_location',
+          latitude: point.latitude,
+          longitude: point.longitude,
+        ),
+      );
+      setState(() {
+        _locating = false;
+        _status = address.isEmpty
+            ? 'Current location found. Address could not be read — move the pin or search.'
+            : null;
+      });
+    } finally {
+      _locateRequestInFlight = false;
+    }
   }
 
   void _onCameraIdle(GeoPoint point) {
+    if (_locating) {
+      return;
+    }
     final GeoPoint? last = _lastGeocoded;
     if (last != null &&
         (last.latitude - point.latitude).abs() < 0.00012 &&
@@ -160,6 +235,18 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
 
   Future<void> _commitPin(GeoPoint point) async {
     _lastGeocoded = point;
+    // Move selection to the pin immediately; address fills in asynchronously.
+    widget.onSelected(
+      MockLocation(
+        id: 'map_pin',
+        label: 'Pinned location',
+        address: '',
+        city: '',
+        iconName: 'place',
+        latitude: point.latitude,
+        longitude: point.longitude,
+      ),
+    );
     final ResolvedAddress? resolved =
         await ref.read(deviceLocationServiceProvider).reverse(point);
     if (!mounted) {
@@ -195,26 +282,23 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
   @override
   Widget build(BuildContext context) {
     final MockLocation? selected = widget.selected;
-    final GeoPoint? camera = _cameraTarget;
+    final GeoPoint camera = _cameraTarget;
     final String caption = (selected?.address.trim().isNotEmpty ?? false)
         ? selected!.address
         : (_status ?? 'Move the map to set a pin');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (camera == null)
-          _awaitingFix(height: widget.height)
-        else
-          EmbeddedGoogleMap(
-            height: widget.height,
-            initial: camera,
-            follow: true,
-            showCenterPin: true,
-            myLocationEnabled: true,
-            onMyLocation: () => _useCurrentLocation(),
-            onCameraIdle: _onCameraIdle,
-            statusMessage: _status,
-          ),
+        EmbeddedGoogleMap(
+          height: widget.height,
+          initial: camera,
+          follow: true,
+          showCenterPin: true,
+          myLocationEnabled: true,
+          onMyLocation: () => _useCurrentLocation(),
+          onCameraIdle: _onCameraIdle,
+          statusMessage: _status,
+        ),
         if (widget.showCaption) ...[
           const SizedBox(height: AppSpacing.sm),
           Text(widget.statusPrefix, style: AppTextStyles.bodyMedium),
@@ -228,65 +312,6 @@ class _BookingLocationMapState extends ConsumerState<BookingLocationMap> {
           ),
         ],
       ],
-    );
-  }
-
-  Widget _awaitingFix({required double height}) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: AppRadius.xlAll,
-        border: Border.all(color: AppColors.borderGlass),
-        color: AppColors.navy.withValues(alpha: 0.06),
-      ),
-      child: SizedBox(
-        height: height,
-        width: double.infinity,
-        child: Stack(
-          children: [
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_locating) ...[
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: AppSpacing.md),
-                    ],
-                    Text(
-                      _status ??
-                          (_locating
-                              ? 'Getting your current location...'
-                              : 'Search for a place or use your current location.'),
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              right: AppSpacing.sm,
-              bottom: AppSpacing.sm,
-              child: Material(
-                color: AppColors.white,
-                shape: const CircleBorder(),
-                elevation: 2,
-                child: IconButton(
-                  tooltip: 'Use current location',
-                  onPressed: _locating ? null : () => _useCurrentLocation(),
-                  icon: const Icon(
-                    Icons.my_location_rounded,
-                    color: AppColors.orange,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

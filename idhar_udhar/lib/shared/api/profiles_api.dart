@@ -141,8 +141,9 @@ class ProfilesApi {
     bool clearDateOfBirth = false,
     String? preferredLanguage,
   }) async {
+    // Prefer PUT: some production proxies/ALB rules reject PATCH with 404.
     return RiderApiProfile.fromJson(
-      await _client.patch(
+      await _client.put(
         '/v1/rider/profile',
         data: <String, Object?>{
           if (name != null) 'name': name.trim(),

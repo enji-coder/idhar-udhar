@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
+import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
@@ -59,7 +60,14 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         }
         return;
       }
-      final offer = offers.first;
+      RiderOffer? offer;
+      for (final RiderOffer candidate in offers) {
+        if (candidate.status == 'PENDING') {
+          offer = candidate;
+          break;
+        }
+      }
+      offer ??= offers.first;
       RiderOrder mapped = OrderMapper.toRiderOrder(offer: offer);
       try {
         final details = await ref.read(riderApiProvider).getOrder(offer.orderId);
@@ -113,6 +121,13 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       return;
     }
     if (!ref.read(riderSessionProvider).isApproved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Your profile must be approved before you can accept orders.',
+          ),
+        ),
+      );
       return;
     }
     if (riderIsSuspended(ref)) {
@@ -123,17 +138,40 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       );
       return;
     }
+    if (!ref.read(riderOnlineProvider)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Go online to accept delivery requests.'),
+        ),
+      );
+      return;
+    }
     final String? offerId = order.offerId;
-    if (offerId == null) {
+    if (offerId == null || offerId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This order request is no longer available.'),
+        ),
+      );
       return;
     }
     try {
-      await ref.read(riderApiProvider).acceptOffer(offerId);
+      final accepted =
+          await ref.read(riderApiProvider).acceptOffer(offerId);
       if (!mounted) {
         return;
       }
       _timer?.cancel();
-      ref.read(activeOrderProvider.notifier).state = order;
+      ref.read(activeOrderProvider.notifier).state = OrderMapper.toRiderOrder(
+        offer: RiderOffer(
+          offerId: offerId,
+          orderId: order.backendOrderId ?? accepted.orderId,
+          status: 'ACCEPTED',
+          createdAt: DateTime.now(),
+          displayId: order.id,
+        ),
+        order: accepted,
+      );
       ref.read(deliveryStatusProvider.notifier).state =
           DeliveryLifecycleStatus.accepted;
       unawaited(context.push(RiderRoutes.acceptConfirmation));

@@ -15,8 +15,11 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Android SMS User Consent for the customer app.
- * Shows one message for the customer to accept. Does not read the inbox.
+ * Android SMS OTP helpers shared by Customer and Rider flavors.
+ *
+ * - [startRetriever]: silent SMS Retriever (no consent sheet). Requires the
+ *   app hash in the SMS body.
+ * - [startConsent]: SMS User Consent sheet (no inbox read). Works without hash.
  */
 object OtpAutofillInstaller {
     private const val CHANNEL = "com.idharudhar.idhar_udhar/otp_autofill"
@@ -31,10 +34,17 @@ object OtpAutofillInstaller {
         channel = messenger
         messenger.setMethodCallHandler { call, result ->
             when (call.method) {
-                "start" -> {
-                    // Consent is optional. A failure here must not block manual OTP.
+                "start", "startRetriever" -> {
                     try {
-                        start(host)
+                        startRetriever(host)
+                    } catch (_: Exception) {
+                        stop(host)
+                    }
+                    result.success(null)
+                }
+                "startConsent" -> {
+                    try {
+                        startConsent(host)
                     } catch (_: Exception) {
                         stop(host)
                     }
@@ -63,7 +73,33 @@ object OtpAutofillInstaller {
         return true
     }
 
-    private fun start(host: FlutterActivity) {
+    private fun startRetriever(host: FlutterActivity) {
+        stop(host)
+        val filter = IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION)
+        val current = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (SmsRetriever.SMS_RETRIEVED_ACTION != intent.action) {
+                    return
+                }
+                val extras = intent.extras ?: return
+                val status = extras.get(SmsRetriever.EXTRA_STATUS) as? Status ?: return
+                if (status.statusCode != CommonStatusCodes.SUCCESS) {
+                    return
+                }
+                val message = extras.getString(SmsRetriever.EXTRA_SMS_MESSAGE) ?: return
+                channel?.invokeMethod("onSms", message)
+            }
+        }
+        receiver = current
+        registerSmsReceiver(host, current, filter)
+        SmsRetriever.getClient(host)
+            .startSmsRetriever()
+            .addOnFailureListener {
+                // Play Services can reject. Manual OTP entry continues.
+            }
+    }
+
+    private fun startConsent(host: FlutterActivity) {
         stop(host)
         val filter = IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION)
         val current = object : BroadcastReceiver() {
@@ -81,6 +117,19 @@ object OtpAutofillInstaller {
             }
         }
         receiver = current
+        registerSmsReceiver(host, current, filter)
+        SmsRetriever.getClient(host)
+            .startSmsUserConsent(null)
+            .addOnFailureListener {
+                // Play Services can reject consent. Manual entry still works.
+            }
+    }
+
+    private fun registerSmsReceiver(
+        host: FlutterActivity,
+        current: BroadcastReceiver,
+        filter: IntentFilter,
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             host.registerReceiver(
                 current,
@@ -97,11 +146,6 @@ object OtpAutofillInstaller {
                 null,
             )
         }
-        SmsRetriever.getClient(host)
-            .startSmsUserConsent(null)
-            .addOnFailureListener {
-                // Play Services can reject consent. Manual entry still works.
-            }
     }
 
     private fun stop(host: FlutterActivity) {

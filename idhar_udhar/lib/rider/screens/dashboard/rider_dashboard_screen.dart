@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:intl/intl.dart';
 
@@ -175,10 +176,17 @@ class _HomeTab extends ConsumerWidget {
     final earnings =
         ref.watch(riderApiEarningsProvider).value ?? RiderEarnings.empty;
     final activity = ref.watch(riderDeliveryHistoryProvider);
-    final offers = ref.watch(riderSessionProvider).offers;
-    final RiderOrder? order = offers.isEmpty
+    final List<RiderOffer> offers = ref.watch(riderSessionProvider).offers;
+    RiderOffer? pendingOffer;
+    for (final RiderOffer offer in offers) {
+      if (offer.status == 'PENDING') {
+        pendingOffer = offer;
+        break;
+      }
+    }
+    final RiderOrder? order = pendingOffer == null
         ? null
-        : OrderMapper.toRiderOrder(offer: offers.first);
+        : OrderMapper.toRiderOrder(offer: pendingOffer);
     final notices = ref.watch(riderSessionProvider).notices;
     final announcements = <RiderAnnouncement>[
       for (final notice in notices)
@@ -314,8 +322,39 @@ class _HomeTab extends ConsumerWidget {
                   },
                   onAccept: () {
                     unawaited(() async {
-                      if (!ref.read(riderSessionProvider).isApproved) return;
-                      if (riderIsSuspended(ref)) return;
+                      if (!ref.read(riderSessionProvider).isApproved) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Your profile must be approved before you can accept orders.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                      if (riderIsSuspended(ref)) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Account suspended until COD Due is cleared.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+                      if (!ref.read(riderOnlineProvider)) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Go online to accept delivery requests.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
                       final String? offerId = order.offerId;
                       if (offerId == null || offerId.isEmpty) {
                         if (!context.mounted) return;
@@ -329,16 +368,22 @@ class _HomeTab extends ConsumerWidget {
                         return;
                       }
                       try {
-                        await ref.read(riderApiProvider).acceptOffer(offerId);
+                        final accepted = await ref
+                            .read(riderApiProvider)
+                            .acceptOffer(offerId);
                         if (!context.mounted) return;
-                        ref.read(activeOrderProvider.notifier).state = order;
+                        ref.read(activeOrderProvider.notifier).state =
+                            OrderMapper.toRiderOrder(
+                          offer: pendingOffer!,
+                          order: accepted,
+                        );
                         ref.read(deliveryStatusProvider.notifier).state =
                             DeliveryLifecycleStatus.accepted;
                         await ref
                             .read(riderSessionProvider.notifier)
                             .refreshOffers();
                         if (!context.mounted) return;
-                        context.push(RiderRoutes.acceptConfirmation);
+                        unawaited(context.push(RiderRoutes.acceptConfirmation));
                       } on ApiException catch (error) {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(

@@ -46,13 +46,18 @@ class _MapLocationPickerScreenState
   void initState() {
     super.initState();
     final MockLocation? initial = widget.initial;
+    // Accept coordinates immediately so the map can open without waiting for
+    // reverse geocoding. Address may fill in asynchronously.
     if (initial != null &&
         initial.latitude != null &&
-        initial.longitude != null &&
-        initial.address.trim().isNotEmpty) {
+        initial.longitude != null) {
       _picked = initial;
-      _search.text =
-          initial.address.isNotEmpty ? initial.address : initial.label;
+      final String seedText = initial.address.trim().isNotEmpty
+          ? initial.address
+          : initial.label.trim();
+      if (seedText.isNotEmpty) {
+        _search.text = seedText;
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -257,7 +262,8 @@ class _MapLocationPickerScreenState
                 return BookingLocationMap(
                   selected: _picked,
                   height: constraints.maxHeight,
-                  locateOnStart: _picked == null,
+                  locateOnStart: _picked?.latitude == null ||
+                      _picked?.longitude == null,
                   requestPermissionOnStart: true,
                   showCaption: false,
                   onSelected: (MockLocation loc) {

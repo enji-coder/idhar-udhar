@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 
 import '../../../../core/animations/animations.dart';
 import '../../../../core/constants/asset_paths.dart';
@@ -11,6 +12,7 @@ import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/recent_locations_provider.dart';
 import '../../../../core/state/session_provider.dart';
+import '../../../../core/state/startup_device_pickup.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
@@ -43,26 +45,37 @@ class DashboardScreen extends ConsumerWidget {
     return 'Good Evening,';
   }
 
-  /// Selected pickup from the booking draft. The untouched catalog seed is
-  /// not a customer choice, so the header asks them to pick a location.
+  /// Selected pickup when the customer chose one; otherwise the warmed GPS
+  /// cache. The untouched catalog seed is not treated as a real choice.
   String _selectedLocationLabel(BookingDraft draft) {
     final MockLocation? pickup = draft.pickup;
-    if (pickup == null) {
-      return 'Select location';
-    }
     final MockLocation seeded = MockData.locations[4];
-    final bool untouchedSeed = pickup.id == seeded.id &&
+    final bool untouchedSeed = pickup != null &&
+        pickup.id == seeded.id &&
         pickup.address.trim() == seeded.address.trim();
-    if (untouchedSeed) {
-      return 'Select location';
+    if (pickup != null && !untouchedSeed) {
+      final String address = pickup.address.trim();
+      if (address.isNotEmpty) {
+        return address;
+      }
+      final String label = pickup.label.trim();
+      if (label.isNotEmpty) {
+        return label;
+      }
     }
-    final String address = pickup.address.trim();
-    if (address.isNotEmpty) {
-      return address;
-    }
-    final String label = pickup.label.trim();
-    if (label.isNotEmpty) {
-      return label;
+    final MockLocation? device = draft.deviceLocation;
+    if (device != null) {
+      final String address = device.address.trim();
+      if (address.isNotEmpty) {
+        return address;
+      }
+      final String label = device.label.trim();
+      if (label.isNotEmpty) {
+        return label;
+      }
+      if (device.latitude != null && device.longitude != null) {
+        return 'Current location';
+      }
     }
     return 'Select location';
   }
@@ -258,12 +271,12 @@ class DashboardScreen extends ConsumerWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: AppSpacing.lg),
-                      AnimatedPrimaryButton(
-                        label: 'Book a Delivery',
-                        height: compact ? 48 : 52,
-                        onPressed: () => _startBooking(context, ref, null),
-                      ),
+                      // const SizedBox(height: AppSpacing.lg),
+                      // AnimatedPrimaryButton(
+                      //   label: 'Book a Delivery',
+                      //   height: compact ? 48 : 52,
+                      //   onPressed: () => _startBooking(context, ref, null),
+                      // ),
                     ],
                   ),
                 ),
@@ -381,62 +394,63 @@ class DashboardScreen extends ConsumerWidget {
               ),
 
               SizedBox(height: compact ? AppSpacing.lg : AppSpacing.xl),
-              GlassContainer(
-                hero: true,
-                showAmbientGlow: true,
-                ambientColor: AppColors.orange,
-                borderRadius: BorderRadius.circular(24),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text.rich(
-                            TextSpan(
-                              style: AppTextStyles.bodyMedium.copyWith(
-                                color: AppColors.navy,
-                                height: 1.35,
-                              ),
-                              children: const [
-                                TextSpan(text: 'Invite Friends & get up to '),
-                                TextSpan(
-                                  text: '₹200',
-                                  style: TextStyle(
-                                    color: AppColors.orange,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: ' in wallet on their first delivery.',
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.md),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: AnimatedPrimaryButton(
-                              label: 'Invite Now',
-                              width: 150,
-                              height: 44,
-                              showArrow: true,
-                              onPressed: () {},
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    SafeAssetImage(
-                      path: AssetPaths.invite,
-                      width: 88,
-                      height: 88,
-                      fit: BoxFit.contain,
-                    ),
-                  ],
-                ),
-              ),
+              // invite friends card 
+              // GlassContainer(
+              //   hero: true,
+              //   showAmbientGlow: true,
+              //   ambientColor: AppColors.orange,
+              //   borderRadius: BorderRadius.circular(24),
+              //   child: Row(
+              //     children: [
+              //       Expanded(
+              //         child: Column(
+              //           crossAxisAlignment: CrossAxisAlignment.start,
+              //           children: [
+              //             Text.rich(
+              //               TextSpan(
+              //                 style: AppTextStyles.bodyMedium.copyWith(
+              //                   color: AppColors.navy,
+              //                   height: 1.35,
+              //                 ),
+              //                 children: const [
+              //                   TextSpan(text: 'Invite Friends & get up to '),
+              //                   TextSpan(
+              //                     text: '₹200',
+              //                     style: TextStyle(
+              //                       color: AppColors.orange,
+              //                       fontWeight: FontWeight.w800,
+              //                     ),
+              //                   ),
+              //                   TextSpan(
+              //                     text: ' in wallet on their first delivery.',
+              //                   ),
+              //                 ],
+              //               ),
+              //             ),
+              //             const SizedBox(height: AppSpacing.md),
+              //             Align(
+              //               alignment: Alignment.centerLeft,
+              //               child: AnimatedPrimaryButton(
+              //                 label: 'Invite Now',
+              //                 width: 150,
+              //                 height: 44,
+              //                 showArrow: true,
+              //                 onPressed: () {},
+              //               ),
+              //             ),
+              //           ],
+              //         ),
+              //       ),
+              //       const SizedBox(width: AppSpacing.md),
+              //       SafeAssetImage(
+              //         path: AssetPaths.invite,
+              //         width: 88,
+              //         height: 88,
+              //         fit: BoxFit.contain,
+              //       ),
+              //     ],
+              //   ),
+              // ),
             ],
           ),
         ),
@@ -614,6 +628,13 @@ class _FreshHomeActivityState extends ConsumerState<_FreshHomeActivity> {
         return;
       }
       ref.read(recentLocationsProvider.notifier).clear();
+      // Retry warm-up after permission/auth screens without blocking Home UI.
+      warmCachedDeviceLocation(
+        service: ref.read(deviceLocationServiceProvider),
+        draft: ref.read(bookingDraftProvider.notifier),
+        readDeviceLocation: () =>
+            ref.read(bookingDraftProvider).deviceLocation,
+      );
     });
   }
 

@@ -26,6 +26,7 @@ export type NotifyInput = {
   displayId?: string | null;
   amount?: string | null;
   reason?: string | null;
+  documentName?: string | null;
 };
 
 export type NotifyResult = {
@@ -78,6 +79,7 @@ export class NotificationService {
       displayId: input.displayId,
       amount: input.amount,
       reason: input.reason,
+      documentName: input.documentName,
     });
     const inserted = await this.repo.insertNotification(
       {

@@ -765,9 +765,16 @@ class _DropLocationScreenState extends ConsumerState<DropLocationScreen> {
     final BookingDraft draft = ref.read(bookingDraftProvider);
     final MockLocation? current =
         dropIndex == null ? draft.drop : draft.dropAt(dropIndex);
+    final MockLocation? device = draft.deviceLocation;
+    final MockLocation? initial =
+        (current?.latitude != null && current?.longitude != null)
+            ? current
+            : ((device?.latitude != null && device?.longitude != null)
+                ? device
+                : current);
     final MockLocation? picked = await MapLocationPickerScreen.open(
       context,
-      initial: current,
+      initial: initial,
     );
     if (!mounted || picked == null) {
       return;

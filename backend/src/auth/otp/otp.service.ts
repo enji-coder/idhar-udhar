@@ -100,7 +100,11 @@ export class OtpService {
       );
     });
 
-    await this.delivery.send({ phoneNormalized, code });
+    await this.delivery.send({
+      phoneNormalized,
+      code,
+      actorType: input.actorType,
+    });
     this.logger.info('otp_challenge_created', {
       phone_suffix: maskPhone(phoneNormalized),
       actor_type: input.actorType,

@@ -25,6 +25,8 @@ function providerWith(http: Msg91HttpPost): {
         templateId: TEMPLATE_ID,
         senderId: SENDER_ID,
         timeoutMs: 50,
+        androidAppHashCustomer: null,
+        androidAppHashRider: null,
       },
     }),
   };

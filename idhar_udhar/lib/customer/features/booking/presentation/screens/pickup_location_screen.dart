@@ -218,10 +218,16 @@ class _PickupLocationScreenState extends ConsumerState<PickupLocationScreen> {
   }
 
   Future<void> _openMap() async {
-    final MockLocation? current = ref.read(bookingDraftProvider).pickup;
+    final BookingDraft draft = ref.read(bookingDraftProvider);
+    final MockLocation? current = draft.pickup;
+    final MockLocation? device = draft.deviceLocation;
+    final MockLocation? cached = (device?.latitude != null &&
+            device?.longitude != null)
+        ? device
+        : null;
     final MockLocation? picked = await MapLocationPickerScreen.open(
       context,
-      initial: _pickupChosen(current) ? current : null,
+      initial: _pickupChosen(current) ? current : cached,
     );
     if (!mounted || picked == null) {
       return;

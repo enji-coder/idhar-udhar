@@ -52,6 +52,54 @@ void main() {
     expect(draft.pickup?.latitude, isNot(19.076));
   });
 
+  testWidgets('startup caches coordinates before reverse geocode finishes', (
+    tester,
+  ) async {
+    final _Gate reverseGate = _Gate();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        deviceLocationServiceProvider.overrideWithValue(
+          _ScriptedLocation(
+            result: const LocationResult.ok(
+              DeviceLocation(latitude: 19.076, longitude: 72.877),
+            ),
+            address: const ResolvedAddress(
+              latitude: 19.076,
+              longitude: 72.877,
+              address: 'Colaba, Mumbai',
+              city: 'Mumbai',
+            ),
+            reverseGate: reverseGate,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const StartupDevicePickup(child: SizedBox.shrink()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    BookingDraft draft = container.read(bookingDraftProvider);
+    expect(draft.deviceLocation?.latitude, 19.076);
+    expect(draft.deviceLocation?.longitude, 72.877);
+    expect(draft.deviceLocation?.address, isEmpty);
+    expect(draft.pickup?.id, MockData.locations[4].id);
+
+    reverseGate.release();
+    await tester.pump();
+    await tester.pump();
+
+    draft = container.read(bookingDraftProvider);
+    expect(draft.deviceLocation?.address, 'Colaba, Mumbai');
+    expect(draft.pickup?.latitude, isNot(19.076));
+  });
+
   testWidgets('a manual pickup is kept when GPS returns later', (tester) async {
     final _Gate gate = _Gate();
     final ProviderContainer container = ProviderContainer(
@@ -119,11 +167,13 @@ class _ScriptedLocation extends DeviceLocationService {
     required this.result,
     required this.address,
     this.gate,
+    this.reverseGate,
   }) : super(MapsPlatform());
 
   final LocationResult result;
   final ResolvedAddress address;
   final _Gate? gate;
+  final _Gate? reverseGate;
 
   @override
   Future<LocationResult> currentLocation({
@@ -137,5 +187,11 @@ class _ScriptedLocation extends DeviceLocationService {
   }
 
   @override
-  Future<ResolvedAddress?> reverse(GeoPoint point) async => address;
+  Future<ResolvedAddress?> reverse(GeoPoint point) async {
+    final _Gate? pending = reverseGate;
+    if (pending != null) {
+      await pending.ready;
+    }
+    return address;
+  }
 }

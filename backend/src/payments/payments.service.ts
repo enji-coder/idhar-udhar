@@ -101,6 +101,21 @@ export class PaymentsService {
           riderProfileId: auth.profileId,
           purpose: 'WALLET_TOPUP',
         });
+        // Never persist a PENDING top-up / ledger-visible charge unless the
+        // gateway actually returned a checkout session. Wallet credit still
+        // happens only after a verified PAID webhook.
+        if (
+          !onlineRefs.paymentSessionId ||
+          !onlineRefs.gatewayOrderId ||
+          !onlineRefs.providerTxnId ||
+          !onlineRefs.environment
+        ) {
+          throw new ApiError(
+            ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+            'Wallet payment could not be started',
+            503,
+          );
+        }
         const row = await this.payments.insertTransaction(
           {
             orderId: null,
@@ -119,24 +134,17 @@ export class PaymentsService {
           },
           tx,
         );
-        if (
-          onlineRefs.paymentSessionId &&
-          onlineRefs.gatewayOrderId &&
-          onlineRefs.providerTxnId &&
-          onlineRefs.environment
-        ) {
-          await this.gateway.insertAttempt(
-            {
-              paymentTransactionId: row.payment_transaction_id,
-              environment: onlineRefs.environment,
-              gatewayOrderId: onlineRefs.gatewayOrderId,
-              cfOrderId: onlineRefs.providerTxnId,
-              paymentSessionId: onlineRefs.paymentSessionId,
-              amount,
-            },
-            tx,
-          );
-        }
+        await this.gateway.insertAttempt(
+          {
+            paymentTransactionId: row.payment_transaction_id,
+            environment: onlineRefs.environment,
+            gatewayOrderId: onlineRefs.gatewayOrderId,
+            cfOrderId: onlineRefs.providerTxnId,
+            paymentSessionId: onlineRefs.paymentSessionId,
+            amount,
+          },
+          tx,
+        );
         const payload = {
           payment_transaction_id: row.payment_transaction_id,
           amount,

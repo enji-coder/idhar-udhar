@@ -94,16 +94,37 @@ export class Msg91OtpDeliveryProvider implements OtpDeliveryProvider {
     }
 
     const minutes = expiryMinutes(otp.ttlSeconds);
+    const androidHash =
+      input.actorType === 'RIDER'
+        ? otp.msg91.androidAppHashRider
+        : input.actorType === 'CUSTOMER'
+          ? otp.msg91.androidAppHashCustomer
+          : otp.msg91.androidAppHashRider ?? otp.msg91.androidAppHashCustomer;
     this.logger.info('otp_delivery_msg91_request', {
       phone_suffix: maskPhone(input.phoneNormalized),
       template_id: templateId,
       sender_id: senderId,
       otp_expiry_minutes: minutes,
+      android_hash_present: Boolean(androidHash),
     });
 
     let status: number;
     let json: unknown;
     try {
+      const body: Record<string, unknown> = {
+        template_id: templateId,
+        sender: senderId,
+        mobile: `91${input.phoneNormalized}`,
+        otp: input.code,
+        otp_expiry: minutes,
+        var2: String(minutes),
+        realTimeResponse: 1,
+      };
+      // Optional template variable for the Android SMS Retriever app hash.
+      // Configure MSG91 template with ##var3## (or mapped var) ending the SMS.
+      if (androidHash) {
+        body.var3 = androidHash;
+      }
       const result = await this.httpPost(
         MSG91_SEND_OTP_URL,
         {
@@ -111,15 +132,7 @@ export class Msg91OtpDeliveryProvider implements OtpDeliveryProvider {
           accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        {
-          template_id: templateId,
-          sender: senderId,
-          mobile: `91${input.phoneNormalized}`,
-          otp: input.code,
-          otp_expiry: minutes,
-          var2: String(minutes),
-          realTimeResponse: 1,
-        },
+        body,
         otp.msg91.timeoutMs,
       );
       status = result.status;

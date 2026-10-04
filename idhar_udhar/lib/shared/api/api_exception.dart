@@ -69,11 +69,22 @@ abstract final class ApiErrorMapper {
     );
   }
 
+  static const Set<String> _preferBackendMessage = <String>{
+    'RIDER_NOT_ELIGIBLE',
+    'PAYMENT_PROVIDER_UNAVAILABLE',
+  };
+
   static String userMessage(
     String code,
     Object? backendMessage, [
     String? fallback,
   ]) {
+    if (backendMessage is String && _preferBackendMessage.contains(code)) {
+      final String trimmed = backendMessage.trim();
+      if (trimmed.isNotEmpty && !_looksUnsafe(trimmed)) {
+        return trimmed;
+      }
+    }
     final String mapped = _friendly[code] ?? '';
     if (mapped.isNotEmpty) {
       return mapped;
