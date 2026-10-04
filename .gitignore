@@ -62,3 +62,5 @@ records_database/DEVELOPER_NOTE/database_note.txt
 
 # Local account/password dump (not project documentation)
 Project_Documentation/000_info.txt
+
+!backend/rds-global-bundle.pem
