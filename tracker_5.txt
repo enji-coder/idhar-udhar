@@ -1,0 +1,7 @@
+1. OTP:
+Implementation correct direction mein hai. Lekin silent auto-verification actually production mein tabhi chalega jab MSG91 SMS mein Rider Android app hash + OTP_ANDROID_APP_HASH_RIDER configured ho. Code side done hai, provider/config side remaining hai.
+
+3. Backend changes abhi production mein nahi hain.
+Ye sabse important point hai. Cursor clearly bol raha hai:
+
+Backend code changes are local; not deployed.
