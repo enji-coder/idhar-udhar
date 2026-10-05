@@ -660,8 +660,8 @@ export class IdentityRepository {
       `
       UPDATE rider_drivers
       SET
-        name = CASE WHEN $3 THEN $2 ELSE name END,
-        date_of_birth = CASE WHEN $5 THEN $4::date ELSE date_of_birth END
+        name = CASE WHEN $3::boolean THEN $2 ELSE name END,
+        date_of_birth = CASE WHEN $5::boolean THEN $4::date ELSE date_of_birth END
       WHERE rider_profile_id = $1
       RETURNING
         rider_driver_id,
