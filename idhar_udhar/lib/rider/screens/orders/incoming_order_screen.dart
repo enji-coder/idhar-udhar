@@ -180,6 +180,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(error.message)),
         );
+        unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       }
     }
   }
@@ -285,6 +286,12 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
             RiderGlassCard(
               child: Column(
                 children: [
+                  if ((order.crn ?? '').trim().isNotEmpty)
+                    _InfoRow(
+                      icon: Icons.tag_rounded,
+                      label: 'CRN',
+                      value: order.crn!.trim(),
+                    ),
                   _InfoRow(
                     icon: Icons.store_mall_directory_rounded,
                     label: 'Pickup',

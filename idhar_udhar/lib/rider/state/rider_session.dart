@@ -48,6 +48,10 @@ class RiderSessionState {
     this.approvalStatus,
     this.onboardingKycStatus,
     this.onlineStatus,
+    this.profileReady = false,
+    this.profileComplete = false,
+    this.missingFields = const <String>[],
+    this.onboardingResume = false,
   });
 
   final String phone;
@@ -57,6 +61,10 @@ class RiderSessionState {
   final String? approvalStatus;
   final String? onboardingKycStatus;
   final String? onlineStatus;
+  final bool profileReady;
+  final bool profileComplete;
+  final List<String> missingFields;
+  final bool onboardingResume;
 
   bool get isApproved => approvalStatus == 'APPROVED';
 
@@ -68,6 +76,10 @@ class RiderSessionState {
     String? approvalStatus,
     String? onboardingKycStatus,
     String? onlineStatus,
+    bool? profileReady,
+    bool? profileComplete,
+    List<String>? missingFields,
+    bool? onboardingResume,
   }) {
     return RiderSessionState(
       phone: phone ?? this.phone,
@@ -77,6 +89,10 @@ class RiderSessionState {
       approvalStatus: approvalStatus ?? this.approvalStatus,
       onboardingKycStatus: onboardingKycStatus ?? this.onboardingKycStatus,
       onlineStatus: onlineStatus ?? this.onlineStatus,
+      profileReady: profileReady ?? this.profileReady,
+      profileComplete: profileComplete ?? this.profileComplete,
+      missingFields: missingFields ?? this.missingFields,
+      onboardingResume: onboardingResume ?? this.onboardingResume,
     );
   }
 
@@ -85,6 +101,8 @@ class RiderSessionState {
     required String? onboardingKycStatus,
     required String? onlineStatus,
     required String phone,
+    required bool profileComplete,
+    required List<String> missingFields,
   }) {
     return RiderSessionState(
       phone: phone.isNotEmpty ? phone : this.phone,
@@ -94,6 +112,10 @@ class RiderSessionState {
       approvalStatus: approvalStatus,
       onboardingKycStatus: onboardingKycStatus,
       onlineStatus: onlineStatus,
+      profileReady: true,
+      profileComplete: profileComplete,
+      missingFields: missingFields,
+      onboardingResume: onboardingResume,
     );
   }
 }
@@ -181,10 +203,17 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     state = const RiderSessionState();
   }
 
-  Future<void> refreshProfile() async {
+  void setOnboardingResume(bool value) {
+    state = state.copyWith(onboardingResume: value);
+  }
+
+  Future<bool> refreshProfile() async {
     try {
       await _rememberProfile(await _profiles.rider());
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> setOnline(bool online) async {
@@ -200,6 +229,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     DateTime? dateOfBirth,
     String? preferredLanguage,
     String? photoPath,
+    String? drivingLicence,
   }) async {
     if (photoPath != null &&
         photoPath.isNotEmpty &&
@@ -215,6 +245,24 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       email: email,
       dateOfBirth: dateOfBirth,
       preferredLanguage: preferredLanguage,
+      drivingLicence: drivingLicence,
+    );
+    await _rememberProfile(updated);
+  }
+
+  Future<void> saveVehicle({
+    required String vehicleCategoryId,
+    required String registration,
+    required String model,
+    required String color,
+    required int manufacturingYear,
+  }) async {
+    final updated = await _profiles.saveRiderVehicle(
+      vehicleCategoryId: vehicleCategoryId,
+      registration: registration,
+      model: model,
+      color: color,
+      manufacturingYear: manufacturingYear,
     );
     await _rememberProfile(updated);
   }
@@ -300,6 +348,8 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       onboardingKycStatus: profile.onboardingKycStatus,
       onlineStatus: profile.onlineStatus,
       phone: rawPhone,
+      profileComplete: profile.profileComplete,
+      missingFields: profile.missingFields,
     );
     _ref.read(riderOnlineProvider.notifier).state =
         profile.onlineStatus == 'ONLINE';
@@ -311,6 +361,15 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       if (picture != null && picture.downloadUrl.isNotEmpty) {
         photoUrl = picture.downloadUrl;
       }
+    }
+    double rating = _ref.read(riderProfileStateProvider).rating;
+    String? latestReview = _ref.read(riderProfileStateProvider).latestReview;
+    try {
+      final RiderRatingSummary summary = await _rider.ratings();
+      rating = summary.average;
+      latestReview = summary.latestComment;
+    } catch (_) {
+      // Profile still loads if the rating summary is unavailable.
     }
     final RiderProfile current = _ref.read(riderProfileStateProvider);
     _ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
@@ -325,7 +384,31 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       dateOfBirth: profile.dateOfBirth ?? current.dateOfBirth,
       language: languageLabel.isNotEmpty ? languageLabel : current.language,
       photoUrl: photoUrl,
+      rating: rating,
+      latestReview: latestReview,
     );
+    final RiderApiVehicle? vehicle = profile.vehicle;
+    if (vehicle != null && (vehicle.registration ?? '').trim().isNotEmpty) {
+      _ref.read(riderVehicleProvider.notifier).state = VehicleInfo(
+        type: RiderVehicleTypeX.fromLabel(vehicle.vehicleCategoryName),
+        categoryName: vehicle.vehicleCategoryName,
+        number: vehicle.registration!.trim(),
+        model: vehicle.model?.trim() ?? '',
+        color: vehicle.color?.trim() ?? '',
+        manufacturingYear: vehicle.manufacturingYear ?? 0,
+      );
+    }
+    final String licence = profile.drivingLicence?.trim() ?? '';
+    if ((profile.name ?? '').trim().isNotEmpty || licence.isNotEmpty) {
+      final DateTime? dob = profile.dateOfBirth;
+      _ref.read(riderDriverProvider.notifier).state = RiderDriverDetails(
+        fullName: profile.name?.trim() ?? '',
+        mobile: formatted,
+        dateOfBirthLabel:
+            dob == null ? '' : DateFormat('dd MMM yyyy').format(dob.toLocal()),
+        licenseNumber: licence,
+      );
+    }
   }
 
   static String _languageLabel(String? code) {

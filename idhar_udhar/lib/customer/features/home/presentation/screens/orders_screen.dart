@@ -3,7 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
+import 'package:idhar_udhar/shared/api/orders_api.dart';
 
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -13,6 +16,7 @@ import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
+import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/status_chip.dart';
@@ -33,6 +37,68 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(ref.read(sessionProvider.notifier).refreshOrders());
     });
+  }
+
+  Future<void> _bookAgain(MockOrder order) async {
+    final String id = order.apiId;
+    try {
+      final ApiOrder source = await ref.read(ordersApiProvider).getById(id);
+      final notifier = ref.read(bookingDraftProvider.notifier);
+      notifier.beginNewBooking();
+      ref.read(backendQuoteHoldProvider.notifier).state = null;
+      final List<ApiStop> pickups = source.stops
+          .where((ApiStop stop) => stop.stopType == 'PICKUP')
+          .toList(growable: false);
+      final List<ApiStop> drops = source.stops
+          .where((ApiStop stop) => stop.stopType == 'DROP')
+          .toList(growable: false);
+      if (pickups.isNotEmpty) {
+        final ApiStop stop = pickups.first;
+        notifier.setPickup(
+          MockLocation(
+            id: 'again_pickup',
+            label: 'Pickup',
+            address: stop.addressText,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+          ),
+        );
+      }
+      if (drops.isNotEmpty) {
+        final ApiStop stop = drops.first;
+        notifier.setDrop(
+          MockLocation(
+            id: 'again_drop',
+            label: 'Drop',
+            address: stop.addressText,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+          ),
+        );
+        if ((stop.contactName ?? '').trim().isNotEmpty &&
+            (stop.contactPhone ?? '').trim().isNotEmpty) {
+          notifier.setReceiver(
+            name: stop.contactName!.trim(),
+            mobile: stop.contactPhone!.trim(),
+          );
+        }
+      }
+      if (source.vehicleCategoryId != null &&
+          source.vehicleCategoryId!.isNotEmpty) {
+        notifier.setCategory(source.vehicleCategoryId!);
+      }
+      if (source.packageWeightKg != null && source.packageWeightKg! > 0) {
+        notifier.setWeight(source.packageWeightKg!);
+      }
+      if (!mounted) {
+        return;
+      }
+      unawaited(context.push(AppRoutes.bookVehicle));
+    } on ApiException catch (error) {
+      if (mounted) {
+        CustomSnackBar.error(context, error.message);
+      }
+    }
   }
 
   bool _matches(MockOrder order) {
@@ -98,18 +164,18 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                         child: EmptyState(
                           title: 'No orders yet',
                           subtitle: 'Book a delivery to see it here.',
-                          action: AnimatedPrimaryButton(
-                            label: 'Book Now',
-                            onPressed: () {
-                              ref
-                                  .read(bookingDraftProvider.notifier)
-                                  .beginNewBooking();
-                              ref
-                                  .read(backendQuoteHoldProvider.notifier)
-                                  .state = null;
-                              context.push(AppRoutes.bookVehicle);
-                            },
-                          ),
+                          // action: AnimatedPrimaryButton(
+                          //   label: 'Book Now',
+                          //   onPressed: () {
+                          //     ref
+                          //         .read(bookingDraftProvider.notifier)
+                          //         .beginNewBooking();
+                          //     ref
+                          //         .read(backendQuoteHoldProvider.notifier)
+                          //         .state = null;
+                          //     context.push(AppRoutes.bookVehicle);
+                          //   },
+                          // ),
                         ),
                       )
                     : ListView.separated(
@@ -123,54 +189,87 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                             child: InkWell(
                               borderRadius: AppRadius.xlAll,
                               onTap: () => context.push(
-                                AppRoutes.orderDetailsPath(order.id),
+                                AppRoutes.orderDetailsPath(order.apiId),
                               ),
                               child: GlassContainer(
                                 child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    SafeAssetImage(
-                                      path: order.vehicle.imagePath,
-                                      height: 64,
-                                      fit: BoxFit.contain,
-                                    ),
-                                    const SizedBox(width: AppSpacing.md),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          Text(order.displayLabel,
-                                              style: AppTextStyles.bodyMedium),
                                           Text(
-                                            '${order.routeLabel}',
-                                            style: AppTextStyles.caption,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
+                                            '₹${order.fare.toStringAsFixed(0)}',
+                                            style: AppTextStyles.bodyMedium
+                                                .copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
                                           ),
                                           Text(
-                                            order.statusLabel,
+                                            order.displayLabel,
+                                            style: AppTextStyles.caption,
+                                          ),
+                                          if (order.crn != null &&
+                                              order.crn!.isNotEmpty)
+                                            Text(
+                                              'CRN ${order.crn}',
+                                              style: AppTextStyles.caption,
+                                            ),
+                                          const SizedBox(height: AppSpacing.xs),
+                                          Text(
+                                            'Pickup',
+                                            style: AppTextStyles.caption
+                                                .copyWith(
+                                              color: AppColors.textSecondary,
+                                            ),
+                                          ),
+                                          Text(
+                                            order.pickup.address,
+                                            style: AppTextStyles.bodyMedium,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: AppSpacing.xs),
+                                          Text(
+                                            'Drop',
+                                            style: AppTextStyles.caption
+                                                .copyWith(
+                                              color: AppColors.textSecondary,
+                                            ),
+                                          ),
+                                          Text(
+                                            order.drop.address,
+                                            style: AppTextStyles.bodyMedium,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: AppSpacing.xs),
+                                          Text(
+                                            'Status: ${order.statusLabel}',
                                             style: AppTextStyles.caption
                                                 .copyWith(
                                               color: AppColors.orange,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
-                                          if (order.invoiceSent)
-                                            Text(
-                                              'Invoice available',
-                                              style: AppTextStyles.caption
-                                                  .copyWith(
-                                                color: AppColors.textSecondary,
-                                              ),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: TextButton(
+                                              onPressed: () =>
+                                                  unawaited(_bookAgain(order)),
+                                              child: const Text('Book Again'),
                                             ),
+                                          ),
                                         ],
                                       ),
                                     ),
-                                    Text(
-                                      '₹${order.fare.toStringAsFixed(0)}',
-                                      style: AppTextStyles.bodyMedium.copyWith(
-                                        fontWeight: FontWeight.w700,
-                                      ),
+                                    const SizedBox(width: AppSpacing.md),
+                                    SafeAssetImage(
+                                      path: order.vehicle.imagePath,
+                                      height: 72,
+                                      fit: BoxFit.contain,
                                     ),
                                   ],
                                 ),

@@ -1,9 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../routing/rider_routes.dart';
+import '../../state/rider_onboarding.dart';
+import '../../state/rider_session.dart';
 import 'rider_prefs.dart';
 
 /// Required Rider runtime permissions. Isolated from Customer.
@@ -50,11 +53,22 @@ abstract final class RiderPermissions {
   }
 }
 
-/// Authenticated riders go to the dashboard or the permission gate.
-/// Pending verification and empty profile fields do not restart registration.
-Future<void> riderEnterAfterAuth(BuildContext context) async {
+/// Authenticated riders go to Home only when required onboarding data is stored.
+Future<void> riderEnterAfterAuth(BuildContext context, WidgetRef ref) async {
   await RiderPrefs.setLoggedIn();
   if (!context.mounted) return;
+  final session = ref.read(riderSessionProvider);
+  final blocked = riderHomeBlockRoute(
+    profileReady: session.profileReady,
+    profileComplete: session.profileComplete,
+    missingFields: session.missingFields,
+  );
+  if (blocked != null) {
+    ref.read(riderSessionProvider.notifier).setOnboardingResume(true);
+    context.go(blocked);
+    return;
+  }
+  ref.read(riderSessionProvider.notifier).setOnboardingResume(false);
   await riderGoHomeOrPermissionGate(context);
 }
 

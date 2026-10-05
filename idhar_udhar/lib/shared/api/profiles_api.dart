@@ -40,6 +40,39 @@ class CustomerProfile {
   }
 }
 
+class RiderApiVehicle {
+  const RiderApiVehicle({
+    required this.vehicleId,
+    required this.vehicleCategoryId,
+    required this.vehicleCategoryName,
+    this.registration,
+    this.model,
+    this.color,
+    this.manufacturingYear,
+  });
+
+  final String vehicleId;
+  final String vehicleCategoryId;
+  final String vehicleCategoryName;
+  final String? registration;
+  final String? model;
+  final String? color;
+  final int? manufacturingYear;
+
+  factory RiderApiVehicle.fromJson(Map<String, Object?> json) {
+    final year = json['manufacturing_year'];
+    return RiderApiVehicle(
+      vehicleId: jsonString(json['vehicle_id']) ?? '',
+      vehicleCategoryId: jsonString(json['vehicle_category_id']) ?? '',
+      vehicleCategoryName: jsonString(json['vehicle_category_name']) ?? '',
+      registration: jsonString(json['registration']),
+      model: jsonString(json['model']),
+      color: jsonString(json['color']),
+      manufacturingYear: year is num ? year.toInt() : int.tryParse('$year'),
+    );
+  }
+}
+
 class RiderApiProfile {
   const RiderApiProfile({
     required this.identityId,
@@ -54,6 +87,10 @@ class RiderApiProfile {
     this.dateOfBirth,
     this.preferredLanguage,
     this.hasProfilePicture = false,
+    this.drivingLicence,
+    this.vehicle,
+    this.profileComplete = false,
+    this.missingFields = const <String>[],
   });
 
   final String identityId;
@@ -68,8 +105,14 @@ class RiderApiProfile {
   final DateTime? dateOfBirth;
   final String? preferredLanguage;
   final bool hasProfilePicture;
+  final String? drivingLicence;
+  final RiderApiVehicle? vehicle;
+  final bool profileComplete;
+  final List<String> missingFields;
 
   factory RiderApiProfile.fromJson(Map<String, Object?> json) {
+    final vehicleRaw = json['vehicle'];
+    final missingRaw = json['missing_fields'];
     return RiderApiProfile(
       identityId: jsonString(json['identity_id']) ?? '',
       riderProfileId: jsonString(json['rider_profile_id']) ?? '',
@@ -83,6 +126,14 @@ class RiderApiProfile {
       dateOfBirth: jsonDate(json['date_of_birth']),
       preferredLanguage: jsonString(json['preferred_language']),
       hasProfilePicture: json['has_profile_picture'] == true,
+      drivingLicence: jsonString(json['driving_licence']),
+      vehicle: vehicleRaw is Map
+          ? RiderApiVehicle.fromJson(Map<String, Object?>.from(vehicleRaw))
+          : null,
+      profileComplete: json['profile_complete'] == true,
+      missingFields: missingRaw is List
+          ? missingRaw.map((item) => '$item').toList(growable: false)
+          : const <String>[],
     );
   }
 }
@@ -140,6 +191,7 @@ class ProfilesApi {
     DateTime? dateOfBirth,
     bool clearDateOfBirth = false,
     String? preferredLanguage,
+    String? drivingLicence,
   }) async {
     // Prefer PUT: some production proxies/ALB rules reject PATCH with 404.
     return RiderApiProfile.fromJson(
@@ -154,6 +206,28 @@ class ProfilesApi {
                 '${dateOfBirth.year.toString().padLeft(4, '0')}-${dateOfBirth.month.toString().padLeft(2, '0')}-${dateOfBirth.day.toString().padLeft(2, '0')}',
           if (preferredLanguage != null)
             'preferred_language': preferredLanguage,
+          if (drivingLicence != null) 'driving_licence': drivingLicence.trim(),
+        },
+      ),
+    );
+  }
+
+  Future<RiderApiProfile> saveRiderVehicle({
+    required String vehicleCategoryId,
+    required String registration,
+    required String model,
+    required String color,
+    required int manufacturingYear,
+  }) async {
+    return RiderApiProfile.fromJson(
+      await _client.put(
+        '/v1/rider/vehicle',
+        data: <String, Object?>{
+          'vehicle_category_id': vehicleCategoryId,
+          'registration': registration.trim(),
+          'model': model.trim(),
+          'color': color.trim(),
+          'manufacturing_year': manufacturingYear,
         },
       ),
     );

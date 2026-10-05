@@ -21,6 +21,7 @@ import { FareService } from '../fare/fare.service';
 import { formatInr } from '../fare/money';
 import { RoutingService } from '../routing/routing.service';
 import { riderMayAccessRides } from '../files/rider-verification';
+import { riderProfileGaps } from '../profiles/rider-profile-completion';
 import { CatalogRepository } from './catalog.repository';
 import { CreateOrderDto, CreateOrderStopDto } from './dto/create-order.dto';
 import { PreviewVehicleFaresDto } from './dto/preview-vehicle-fares.dto';
@@ -169,7 +170,15 @@ export class OrdersService {
   async listForCustomer(auth: OrderActor) {
     this.assertCustomer(auth);
     const rows = await this.orders.listForCustomer(auth.profileId);
-    return { orders: rows.map((row) => this.serializeOrder(row)) };
+    return {
+      orders: rows.map((row) => ({
+        ...this.serializeOrder(row),
+        pickup_address: row.pickup_address,
+        drop_address: row.drop_address,
+        trip_fare: row.list_trip_fare,
+        net_payable: row.list_net_payable,
+      })),
+    };
   }
 
   async listForAdmin(auth: OrderActor) {
@@ -179,17 +188,22 @@ export class OrdersService {
       rows.map((row) => row.order_id),
     );
     const extraById = new Map(extras.map((row) => [row.order_id, row]));
+    const ratings = await this.orders.listCustomerRatings(
+      rows.map((row) => row.order_id),
+    );
+    const ratingById = new Map(ratings.map((row) => [row.order_id, row]));
     return {
-      orders: rows.map((row) =>
-        this.serializeAdminOrder(row, extraById.get(row.order_id)),
-      ),
+      orders: rows.map((row) => ({
+        ...this.serializeAdminOrder(row, extraById.get(row.order_id)),
+        customer_rating: this.serializeRating(ratingById.get(row.order_id)),
+      })),
     };
   }
 
   async getById(auth: OrderActor, orderId: string) {
     const order = await this.requireOrder(orderId);
     await this.assertCanReadOrder(auth, order);
-    const [stops, snapshot, waiting, assignedRider] = await Promise.all([
+    const [stops, snapshot, waiting, assignedRider, rating] = await Promise.all([
       this.orders.listStops(order.order_id),
       this.fares.findSnapshotByOrder(order.order_id),
       auth.role === 'RIDER'
@@ -198,9 +212,11 @@ export class OrdersService {
       order.rider_profile_id
         ? this.catalog.findAssignedRiderDisplay(order.rider_profile_id)
         : Promise.resolve(null),
+      this.orders.findCustomerRating(order.order_id),
     ]);
     return {
       ...this.serializeOrder(order, stops),
+      customer_rating: this.serializeRating(rating),
       fare_snapshot: snapshot ? serializeSnapshot(snapshot) : null,
       assigned_rider: assignedRider
         ? {
@@ -743,6 +759,7 @@ export class OrdersService {
         .map((row) => ({
           ...this.serializeOffer(row),
           display_id: row.display_id,
+          crn: row.crn,
           order_status: row.canonical_status,
           rider_amount: row.rider_amount,
         })),
@@ -850,6 +867,7 @@ export class OrdersService {
         }
         this.assertOfferAcceptable(offer, order);
         await this.assertRiderEligible(auth.profileId, tx);
+        await this.assertRiderOnboardingComplete(auth.profileId, tx);
         if (await this.orders.riderHasLiveOrder(auth.profileId, tx)) {
           throw new ApiError(
             ErrorCodes.RIDER_HAS_ACTIVE_ORDER,
@@ -1146,6 +1164,31 @@ export class OrdersService {
     await this.walletCod.assertNotSuspended(riderProfileId, db);
   }
 
+  private async assertRiderOnboardingComplete(
+    riderProfileId: string,
+    db: Queryable,
+  ): Promise<void> {
+    const facts = await this.catalog.findRiderOnboardingFacts(riderProfileId, db);
+    const missing = riderProfileGaps({
+      name: facts?.name,
+      email: facts?.email,
+      dateOfBirth: facts?.date_of_birth,
+      vehicleCategoryName: facts?.vehicle_category_name,
+      vehicleRegistration: facts?.vehicle_registration,
+      vehicleModel: facts?.vehicle_model,
+      vehicleColor: facts?.vehicle_color,
+      manufacturingYear: facts?.manufacturing_year,
+      drivingLicence: facts?.driving_licence,
+    });
+    if (!facts || missing.length > 0) {
+      throw new ApiError(
+        ErrorCodes.RIDER_NOT_ELIGIBLE,
+        'Complete your rider profile before accepting orders',
+        409,
+      );
+    }
+  }
+
   private async validateStops(
     stops: CreateOrderStopDto[],
     cityId: string,
@@ -1348,6 +1391,7 @@ export class OrdersService {
     return {
       order_id: order.order_id,
       display_id: order.display_id,
+      crn: order.crn ?? null,
       customer_profile_id: order.customer_profile_id,
       rider_profile_id: order.rider_profile_id,
       city_id: order.city_id,
@@ -1421,6 +1465,111 @@ export class OrdersService {
       contact_name: stop.contact_name,
       contact_phone: stop.contact_phone,
       proof_file_id: stop.proof_file_id,
+    };
+  }
+
+  async getByCrn(auth: OrderActor, crn: string) {
+    if (!/^IU-CRN-[A-Z]{2,5}-[0-9]{10}$/.test(crn)) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
+    }
+    const order = await this.orders.findByCrn(crn);
+    if (!order) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
+    }
+    return this.getById(auth, order.order_id);
+  }
+
+  async rateDriver(auth: OrderActor, orderId: string, stars: number, comment?: string) {
+    this.assertCustomer(auth);
+    const trimmed = comment?.trim() ?? '';
+    return this.postgres.transaction(async (tx) => {
+      const order = await this.orders.lockById(orderId, tx);
+      if (!order || order.customer_profile_id !== auth.profileId) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Order was not found', 404);
+      }
+      if (order.canonical_status !== 'DELIVERED') {
+        throw new ApiError(
+          ErrorCodes.ORDER_NOT_MODIFIABLE,
+          'Only a completed order can be rated',
+          409,
+        );
+      }
+      if (!order.rider_profile_id) {
+        throw new ApiError(
+          ErrorCodes.ORDER_NOT_MODIFIABLE,
+          'This order has no assigned rider to rate',
+          409,
+        );
+      }
+      const existing = await this.orders.findCustomerRating(order.order_id, tx);
+      if (existing) {
+        throw new ApiError(
+          ErrorCodes.ORDER_NOT_MODIFIABLE,
+          'This order has already been rated',
+          409,
+        );
+      }
+      try {
+        const row = await this.orders.insertCustomerRating(
+          {
+            orderId: order.order_id,
+            customerProfileId: auth.profileId,
+            riderProfileId: order.rider_profile_id,
+            stars,
+            comment: trimmed.length > 0 ? trimmed : null,
+          },
+          tx,
+        );
+        return {
+          order_id: order.order_id,
+          crn: order.crn ?? null,
+          stars,
+          comment: trimmed.length > 0 ? trimmed : null,
+          created_at: row.created_at.toISOString(),
+        };
+      } catch (err) {
+        if (isUniqueViolation(err, 'order_ratings_direction_unique')) {
+          throw new ApiError(
+            ErrorCodes.ORDER_NOT_MODIFIABLE,
+            'This order has already been rated',
+            409,
+          );
+        }
+        throw err;
+      }
+    });
+  }
+
+  async riderRatings(auth: OrderActor) {
+    this.assertRider(auth);
+    const summary = await this.orders.riderRatingSummary(auth.profileId);
+    return {
+      rating_count: summary.rating_count,
+      rating_average: summary.rating_average,
+      ratings: summary.ratings.map((row) => ({
+        order_id: row.order_id,
+        display_id: row.display_id,
+        crn: row.crn,
+        stars: row.stars,
+        comment: row.comment,
+        created_at: row.created_at.toISOString(),
+      })),
+    };
+  }
+
+  private serializeRating(
+    rating:
+      | { stars: number; comment: string | null; created_at: Date }
+      | undefined
+      | null,
+  ) {
+    if (!rating) {
+      return null;
+    }
+    return {
+      stars: rating.stars,
+      comment: rating.comment,
+      created_at: rating.created_at.toISOString(),
     };
   }
 

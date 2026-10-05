@@ -20,7 +20,7 @@ class RegistrationCompleteScreen extends ConsumerWidget {
     return RiderScaffold(
       bottom: RiderPrimaryButton(
         label: 'Go to Dashboard',
-        onPressed: () => riderEnterAfterAuth(context),
+        onPressed: () => riderEnterAfterAuth(context, ref),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {

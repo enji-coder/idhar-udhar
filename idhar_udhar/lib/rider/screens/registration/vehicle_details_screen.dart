@@ -1,11 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
+import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../data/local/rider_permissions.dart';
 import '../../data/models/vehicle_info.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 import '../../widgets/rider_glass_card.dart';
@@ -41,6 +48,7 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
   String? _modelError;
   String? _colorError;
   String? _yearError;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -102,22 +110,60 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
         yearError == null;
   }
 
-  void _continue() {
-    if (!_validate()) return;
+  Future<void> _continue() async {
+    if (_saving || !_validate()) return;
     final year = int.parse(_year.text.trim());
-    ref.read(riderVehicleProvider.notifier).state = VehicleInfo(
-      type: _type,
-      categoryName: _categoryName,
-      number: _number.text.trim(),
-      model: _model.text.trim(),
-      color: _color.text.trim(),
-      manufacturingYear: year,
-    );
-    if (widget.editMode) {
-      context.pop();
+    final rows =
+        ref.read(vehicleCategoryCatalogProvider).value ??
+            const <VehicleCategory>[];
+    VehicleCategory? match;
+    for (final row in rows) {
+      if (row.name == _categoryName || row.name == _type.label) {
+        match = row;
+        break;
+      }
+    }
+    if (match == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose the vehicle category again before saving.'),
+        ),
+      );
       return;
     }
-    context.push(RiderRoutes.driverDetails);
+    setState(() => _saving = true);
+    try {
+      await ref.read(riderSessionProvider.notifier).saveVehicle(
+            vehicleCategoryId: match.id,
+            registration: _number.text.trim(),
+            model: _model.text.trim(),
+            color: _color.text.trim(),
+            manufacturingYear: year,
+          );
+      if (!mounted) return;
+      if (widget.editMode) {
+        context.pop();
+        return;
+      }
+      final session = ref.read(riderSessionProvider);
+      if (session.onboardingResume) {
+        await riderEnterAfterAuth(context, ref);
+        return;
+      }
+      unawaited(context.push(RiderRoutes.driverDetails));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vehicle details could not be saved.')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -131,8 +177,10 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
         ),
       ),
       bottom: RiderPrimaryButton(
-        label: widget.editMode ? 'Save' : 'Continue',
-        onPressed: _continue,
+        label: _saving
+            ? 'Saving'
+            : (widget.editMode ? 'Save' : 'Continue'),
+        onPressed: _saving ? null : _continue,
       ),
       body: SingleChildScrollView(
         child: Column(

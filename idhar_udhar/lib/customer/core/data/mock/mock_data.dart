@@ -197,6 +197,36 @@ abstract final class MockData {
     return false;
   }
 
+  static String artworkForCategoryName(String? name) {
+    final String lower = (name ?? '').toLowerCase();
+    if (lower.contains('scoot')) {
+      return artworkFor(VehicleType.scooty);
+    }
+    if (lower.contains('bike') ||
+        lower.contains('2 wheeler') ||
+        lower.contains('two wheeler') ||
+        lower.contains('two-wheeler')) {
+      return artworkFor(VehicleType.bike);
+    }
+    if (lower.contains('auto') ||
+        lower.contains('rik') ||
+        lower.contains('3 wheeler') ||
+        lower.contains('three wheeler') ||
+        lower.contains('three-wheeler')) {
+      return artworkFor(VehicleType.auto);
+    }
+    if (lower.contains('pickup')) {
+      return artworkFor(VehicleType.pickup);
+    }
+    if (lower.contains('car')) {
+      return artworkFor(VehicleType.car);
+    }
+    if (lower.contains('truck') || lower.contains('tempo')) {
+      return artworkFor(VehicleType.truck);
+    }
+    return artworkFor(VehicleType.bike);
+  }
+
   static String artworkFor(VehicleType type) {
     switch (type) {
       case VehicleType.bike:

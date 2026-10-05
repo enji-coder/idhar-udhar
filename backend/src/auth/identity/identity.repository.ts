@@ -334,10 +334,17 @@ export class IdentityRepository {
       phone_normalized: string;
       city_code: string | null;
       zone_name: string | null;
-      name: string | null;
-      email: string | null;
-      date_of_birth: string | null;
-    })[]
+        name: string | null;
+        email: string | null;
+        date_of_birth: string | null;
+        driving_licence: string | null;
+        vehicle_category_id: string | null;
+        vehicle_category_name: string | null;
+        vehicle_registration: string | null;
+        vehicle_model: string | null;
+        vehicle_color: string | null;
+        manufacturing_year: number | null;
+      })[]
   > {
     const result = await db.query<
       RiderProfileRow & {
@@ -347,6 +354,13 @@ export class IdentityRepository {
         name: string | null;
         email: string | null;
         date_of_birth: string | null;
+        driving_licence: string | null;
+        vehicle_category_id: string | null;
+        vehicle_category_name: string | null;
+        vehicle_registration: string | null;
+        vehicle_model: string | null;
+        vehicle_color: string | null;
+        manufacturing_year: number | null;
       }
     >(
       `
@@ -366,11 +380,33 @@ export class IdentityRepository {
         i.email,
         d.name,
         d.date_of_birth::text AS date_of_birth,
+        d.licence_encrypted_or_token AS driving_licence,
+        veh.vehicle_category_id,
+        veh.vehicle_category_name,
+        veh.vehicle_registration,
+        veh.vehicle_model,
+        veh.vehicle_color,
+        veh.manufacturing_year,
         c.city_code,
         z.name AS zone_name
       FROM rider_profiles r
       JOIN identities i ON i.identity_id = r.identity_id
       LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
+      LEFT JOIN LATERAL (
+        SELECT
+          v.vehicle_category_id,
+          vc.name AS vehicle_category_name,
+          v.registration AS vehicle_registration,
+          v.model AS vehicle_model,
+          v.color AS vehicle_color,
+          v.manufacturing_year
+        FROM vehicles v
+        JOIN vehicle_categories vc ON vc.vehicle_category_id = v.vehicle_category_id
+        WHERE v.rider_profile_id = r.rider_profile_id
+          AND v.active = TRUE
+        ORDER BY v.updated_at DESC
+        LIMIT 1
+      ) veh ON TRUE
       LEFT JOIN cities c ON c.city_id = r.home_city_id
       LEFT JOIN zones z ON z.zone_id = r.home_zone_id
       ORDER BY r.created_at DESC
@@ -391,6 +427,13 @@ export class IdentityRepository {
         name: string | null;
         email: string | null;
         date_of_birth: string | null;
+        driving_licence: string | null;
+        vehicle_category_id: string | null;
+        vehicle_category_name: string | null;
+        vehicle_registration: string | null;
+        vehicle_model: string | null;
+        vehicle_color: string | null;
+        manufacturing_year: number | null;
       })
     | null
   > {
@@ -402,6 +445,13 @@ export class IdentityRepository {
         name: string | null;
         email: string | null;
         date_of_birth: string | null;
+        driving_licence: string | null;
+        vehicle_category_id: string | null;
+        vehicle_category_name: string | null;
+        vehicle_registration: string | null;
+        vehicle_model: string | null;
+        vehicle_color: string | null;
+        manufacturing_year: number | null;
       }
     >(
       `
@@ -421,11 +471,33 @@ export class IdentityRepository {
         i.email,
         d.name,
         d.date_of_birth::text AS date_of_birth,
+        d.licence_encrypted_or_token AS driving_licence,
+        veh.vehicle_category_id,
+        veh.vehicle_category_name,
+        veh.vehicle_registration,
+        veh.vehicle_model,
+        veh.vehicle_color,
+        veh.manufacturing_year,
         c.city_code,
         z.name AS zone_name
       FROM rider_profiles r
       JOIN identities i ON i.identity_id = r.identity_id
       LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
+      LEFT JOIN LATERAL (
+        SELECT
+          v.vehicle_category_id,
+          vc.name AS vehicle_category_name,
+          v.registration AS vehicle_registration,
+          v.model AS vehicle_model,
+          v.color AS vehicle_color,
+          v.manufacturing_year
+        FROM vehicles v
+        JOIN vehicle_categories vc ON vc.vehicle_category_id = v.vehicle_category_id
+        WHERE v.rider_profile_id = r.rider_profile_id
+          AND v.active = TRUE
+        ORDER BY v.updated_at DESC
+        LIMIT 1
+      ) veh ON TRUE
       LEFT JOIN cities c ON c.city_id = r.home_city_id
       LEFT JOIN zones z ON z.zone_id = r.home_zone_id
       WHERE r.rider_profile_id = $1
@@ -596,17 +668,20 @@ export class IdentityRepository {
     rider_driver_id: string;
     name: string | null;
     date_of_birth: string | null;
+    driving_licence: string | null;
   } | null> {
     const result = await db.query<{
       rider_driver_id: string;
       name: string | null;
       date_of_birth: string | null;
+      driving_licence: string | null;
     }>(
       `
       SELECT
         rider_driver_id,
         name,
-        date_of_birth::text AS date_of_birth
+        date_of_birth::text AS date_of_birth,
+        licence_encrypted_or_token AS driving_licence
       FROM rider_drivers
       WHERE rider_profile_id = $1
       `,
@@ -620,34 +695,43 @@ export class IdentityRepository {
       riderProfileId: string;
       name?: string;
       dateOfBirth?: string | null;
+      drivingLicence?: string | null;
       updateName: boolean;
       updateDob: boolean;
+      updateLicence?: boolean;
     },
     db: Queryable = this.postgres,
   ): Promise<{
     rider_driver_id: string;
     name: string | null;
     date_of_birth: string | null;
+    driving_licence: string | null;
   }> {
+    const updateLicence = input.updateLicence === true;
     const existing = await this.findRiderDriver(input.riderProfileId, db);
     if (!existing) {
       const inserted = await db.query<{
         rider_driver_id: string;
         name: string | null;
         date_of_birth: string | null;
+        driving_licence: string | null;
       }>(
         `
-        INSERT INTO rider_drivers (rider_profile_id, name, date_of_birth)
-        VALUES ($1, $2, $3::date)
+        INSERT INTO rider_drivers (
+          rider_profile_id, name, date_of_birth, licence_encrypted_or_token
+        )
+        VALUES ($1, $2, $3::date, $4)
         RETURNING
           rider_driver_id,
           name,
-          date_of_birth::text AS date_of_birth
+          date_of_birth::text AS date_of_birth,
+          licence_encrypted_or_token AS driving_licence
         `,
         [
           input.riderProfileId,
           input.updateName ? input.name ?? null : null,
           input.updateDob ? input.dateOfBirth ?? null : null,
+          updateLicence ? input.drivingLicence ?? null : null,
         ],
       );
       return inserted.rows[0];
@@ -656,17 +740,20 @@ export class IdentityRepository {
       rider_driver_id: string;
       name: string | null;
       date_of_birth: string | null;
+      driving_licence: string | null;
     }>(
       `
       UPDATE rider_drivers
       SET
         name = CASE WHEN $3::boolean THEN $2 ELSE name END,
-        date_of_birth = CASE WHEN $5::boolean THEN $4::date ELSE date_of_birth END
+        date_of_birth = CASE WHEN $5::boolean THEN $4::date ELSE date_of_birth END,
+        licence_encrypted_or_token = CASE WHEN $7::boolean THEN $6 ELSE licence_encrypted_or_token END
       WHERE rider_profile_id = $1
       RETURNING
         rider_driver_id,
         name,
-        date_of_birth::text AS date_of_birth
+        date_of_birth::text AS date_of_birth,
+        licence_encrypted_or_token AS driving_licence
       `,
       [
         input.riderProfileId,
@@ -674,8 +761,157 @@ export class IdentityRepository {
         input.updateName,
         input.dateOfBirth ?? null,
         input.updateDob,
+        input.drivingLicence ?? null,
+        updateLicence,
       ],
     );
     return result.rows[0];
   }
+
+  async findActiveRiderVehicle(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    vehicle_id: string;
+    vehicle_category_id: string;
+    vehicle_category_name: string;
+    registration: string | null;
+    model: string | null;
+    color: string | null;
+    manufacturing_year: number | null;
+  } | null> {
+    const result = await db.query<{
+      vehicle_id: string;
+      vehicle_category_id: string;
+      vehicle_category_name: string;
+      registration: string | null;
+      model: string | null;
+      color: string | null;
+      manufacturing_year: number | null;
+    }>(
+      `
+      SELECT
+        v.vehicle_id,
+        v.vehicle_category_id,
+        vc.name AS vehicle_category_name,
+        v.registration,
+        v.model,
+        v.color,
+        v.manufacturing_year
+      FROM vehicles v
+      JOIN vehicle_categories vc ON vc.vehicle_category_id = v.vehicle_category_id
+      WHERE v.rider_profile_id = $1
+        AND v.active = TRUE
+      ORDER BY v.updated_at DESC
+      LIMIT 1
+      `,
+      [riderProfileId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      ...row,
+      manufacturing_year:
+        row.manufacturing_year == null ? null : Number(row.manufacturing_year),
+    };
+  }
+
+  async upsertRiderVehicle(
+    input: {
+      riderProfileId: string;
+      vehicleCategoryId: string;
+      registration: string;
+      model: string;
+      color: string;
+      manufacturingYear: number;
+    },
+    db: Queryable = this.postgres,
+  ): Promise<void> {
+    const category = await db.query<{ name: string }>(
+      `
+      SELECT name
+      FROM vehicle_categories
+      WHERE vehicle_category_id = $1
+        AND active = TRUE
+      `,
+      [input.vehicleCategoryId],
+    );
+    if (!category.rows[0]) {
+      throw new Error('VEHICLE_CATEGORY_NOT_FOUND');
+    }
+    const subtype = twoWheelerSubtype(category.rows[0].name);
+    const current = await this.findActiveRiderVehicle(input.riderProfileId, db);
+    let vehicleId: string;
+    if (!current) {
+      const inserted = await db.query<{ vehicle_id: string }>(
+        `
+        INSERT INTO vehicles (
+          vehicle_category_id,
+          rider_profile_id,
+          registration,
+          two_wheeler_subtype,
+          active,
+          model,
+          color,
+          manufacturing_year
+        )
+        VALUES ($1, $2, $3, $4, TRUE, $5, $6, $7)
+        RETURNING vehicle_id
+        `,
+        [
+          input.vehicleCategoryId,
+          input.riderProfileId,
+          input.registration,
+          subtype,
+          input.model,
+          input.color,
+          input.manufacturingYear,
+        ],
+      );
+      vehicleId = inserted.rows[0].vehicle_id;
+    } else {
+      vehicleId = current.vehicle_id;
+      await db.query(
+        `
+        UPDATE vehicles
+        SET vehicle_category_id = $2,
+            registration = $3,
+            two_wheeler_subtype = $4,
+            model = $5,
+            color = $6,
+            manufacturing_year = $7,
+            active = TRUE
+        WHERE vehicle_id = $1
+        `,
+        [
+          vehicleId,
+          input.vehicleCategoryId,
+          input.registration,
+          subtype,
+          input.model,
+          input.color,
+          input.manufacturingYear,
+        ],
+      );
+    }
+    await db.query(
+      `
+      UPDATE vehicles
+      SET active = FALSE
+      WHERE rider_profile_id = $1
+        AND vehicle_id <> $2
+        AND active = TRUE
+      `,
+      [input.riderProfileId, vehicleId],
+    );
+  }
+}
+
+function twoWheelerSubtype(categoryName: string): 'BIKE' | 'SCOOTER' | null {
+  const name = categoryName.trim().toLowerCase();
+  if (name.includes('scoot')) return 'SCOOTER';
+  if (name === 'bike' || name.includes('bike') || name.includes('motorcycle')) {
+    return 'BIKE';
+  }
+  return null;
 }

@@ -385,6 +385,7 @@ export default function RiderDetail() {
             <div className="flex justify-between"><dt className="text-ink-muted">Email</dt><dd>{rider.email || '—'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Date of birth</dt><dd>{rider.dateOfBirth || '—'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Language</dt><dd>{rider.language || '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Onboarding</dt><dd>{rider.profileComplete ? 'Complete' : 'Incomplete'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Online</dt><dd>{rider.online || 'OFFLINE'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Vehicle</dt><dd>{rider.vehicle}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Rating</dt><dd>{rider.rating || 'N/A'}</dd></div>
@@ -459,7 +460,8 @@ export default function RiderDetail() {
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Rider KYC & Banking</h3>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Driving License (DL) No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? (rider.kyc || 'N/A') : profile.drivingLicenseNumber}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Driving License (DL) No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? (rider.drivingLicence || '—') : profile.drivingLicenseNumber}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">KYC status</dt><dd className="text-right font-medium">{rider.kyc || '—'}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-ink-muted">RC No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : profile.rcNumber}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-ink-muted">Aadhaar</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : maskAadhaar(profile.aadhaarNumber)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-ink-muted">PAN No.</dt><dd className="text-right font-medium">{rider.source === 'api' ? 'N/A' : profile.panNumber}</dd></div>
@@ -472,7 +474,9 @@ export default function RiderDetail() {
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between gap-3"><dt className="text-ink-muted">Rider Vehicle Registration Number</dt><dd className="text-right font-medium">{vehicleRecord?.rcNumber || rider.vehicleNumber || 'N/A'}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-ink-muted">Vehicle Category</dt><dd className="text-right font-medium">{rider.vehicle || vehicleRecord?.category || 'N/A'}</dd></div>
-            {vehicleRecord?.brand ? <div className="flex justify-between gap-3"><dt className="text-ink-muted">Brand / Model</dt><dd className="text-right font-medium">{vehicleRecord.brand} {vehicleRecord.model}</dd></div> : null}
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Model</dt><dd className="text-right font-medium">{rider.vehicleModel || vehicleRecord?.model || '—'}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Color</dt><dd className="text-right font-medium">{rider.vehicleColor || vehicleRecord?.color || '—'}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-ink-muted">Year</dt><dd className="text-right font-medium">{rider.vehicleYear || vehicleRecord?.year || '—'}</dd></div>
           </dl>
         </GlassCard>
       </section>

@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../data/local/rider_permissions.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
@@ -41,6 +44,7 @@ class _RiderProfileSetupScreenState
   String? _nameError;
   String? _emailError;
   String? _dobError;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -149,18 +153,37 @@ class _RiderProfileSetupScreenState
     setState(() => _photoPath = photo.path);
   }
 
-  void _continue() {
-    if (!_validate()) return;
-    final current = ref.read(riderProfileStateProvider);
-    ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
-      name: _name.text.trim(),
-      mobile: _mobile.text.trim(),
-      email: _email.text.trim(),
-      dateOfBirth: _dobDate,
-      language: _language ?? '',
-      photoUrl: _photoPath,
-    );
-    context.push(RiderRoutes.vehicleType);
+  Future<void> _continue() async {
+    if (_saving || !_validate()) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(riderSessionProvider.notifier).updateProfile(
+            name: _name.text.trim(),
+            email: _email.text.trim(),
+            dateOfBirth: _dobDate,
+            preferredLanguage: RiderSessionNotifier.languageCode(_language),
+            photoPath: _photoPath,
+          );
+      if (!mounted) return;
+      final session = ref.read(riderSessionProvider);
+      if (session.onboardingResume) {
+        await riderEnterAfterAuth(context, ref);
+        return;
+      }
+      unawaited(context.push(RiderRoutes.vehicleType));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile could not be saved.')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -174,12 +197,19 @@ class _RiderProfileSetupScreenState
         ),
       ),
       bottom: RiderPrimaryButton(
-        label: 'Continue',
-        onPressed: _continue,
+        label: _saving ? 'Saving' : 'Continue',
+        onPressed: _saving ? null : _continue,
       ),
       body: SingleChildScrollView(
         child: Column(
           children: [
+            if (ref.watch(riderSessionProvider).missingFields.isNotEmpty) ...[
+              Text(
+                'Still needed: ${ref.watch(riderSessionProvider).missingFields.join(', ')}',
+                style: RiderTextStyles.caption,
+              ),
+              const SizedBox(height: RiderSpacing.md),
+            ],
             GestureDetector(
               onTap: _pickPhoto,
               child: Column(

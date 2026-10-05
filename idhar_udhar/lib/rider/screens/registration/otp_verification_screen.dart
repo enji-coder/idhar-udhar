@@ -115,7 +115,7 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen> {
       }
       setState(() => _verifying = false);
       if (widget.flow == RiderAuthFlow.login) {
-        await riderEnterAfterAuth(context);
+        await riderEnterAfterAuth(context, ref);
       } else {
         unawaited(context.push(RiderRoutes.profileSetup));
       }

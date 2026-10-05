@@ -129,6 +129,10 @@ export default function OrderDetailDrawer({
 
           <DetailSection title="Order">
             <DetailRow label="Order ID" value={order.id} />
+            <DetailRow label="CRN" value={order.crn || '—'} />
+            <DetailRow label="Customer rating" value={order.customerRating ? `${order.customerRating.stars} ★` : '—'} />
+            {order.customerRating?.comment ? <DetailRow label="Review" value={order.customerRating.comment} /> : null}
+            {order.customerRating?.createdAt ? <DetailRow label="Rated at" value={order.customerRating.createdAt} /> : null}
             <DetailRow label="Canonical status" value={order.canonicalStatus || order.status} />
             <DetailRow label="Created" value={`${order.date} ${order.time || ''}`.trim()} />
             <DetailRow label="Delivery date" value={order.deliveredAt || (order.status === 'Delivered' ? order.date : 'In progress')} />

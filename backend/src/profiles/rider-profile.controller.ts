@@ -14,6 +14,7 @@ import { AuthContext } from '../auth/types/auth-context';
 import { SetRiderAvailabilityDto } from './dto/set-rider-availability.dto';
 import { UpdateRiderLanguageDto } from './dto/update-rider-language.dto';
 import { UpdateRiderProfileDto } from './dto/update-rider-profile.dto';
+import { UpsertRiderVehicleDto } from './dto/upsert-rider-vehicle.dto';
 import { ProfilesService } from './profiles.service';
 
 @Controller('rider')
@@ -33,12 +34,7 @@ export class RiderProfileController {
     @CurrentAuth() auth: AuthContext,
     @Body() body: UpdateRiderProfileDto,
   ) {
-    return this.profiles.updateRider(auth, {
-      name: body.name,
-      email: body.email,
-      dateOfBirth: body.date_of_birth,
-      preferredLanguage: body.preferred_language,
-    });
+    return this.profiles.updateRider(auth, this.profileInput(body));
   }
 
   /**
@@ -52,12 +48,33 @@ export class RiderProfileController {
     @CurrentAuth() auth: AuthContext,
     @Body() body: UpdateRiderProfileDto,
   ) {
-    return this.profiles.updateRider(auth, {
+    return this.profiles.updateRider(auth, this.profileInput(body));
+  }
+
+  @Roles('RIDER')
+  @Put('vehicle')
+  @HttpCode(HttpStatus.OK)
+  upsertVehicle(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: UpsertRiderVehicleDto,
+  ) {
+    return this.profiles.upsertRiderVehicle(auth, {
+      vehicleCategoryId: body.vehicle_category_id,
+      registration: body.registration,
+      model: body.model,
+      color: body.color,
+      manufacturingYear: body.manufacturing_year,
+    });
+  }
+
+  private profileInput(body: UpdateRiderProfileDto) {
+    return {
       name: body.name,
       email: body.email,
       dateOfBirth: body.date_of_birth,
       preferredLanguage: body.preferred_language,
-    });
+      drivingLicence: body.driving_licence,
+    };
   }
 
   @Roles('RIDER')

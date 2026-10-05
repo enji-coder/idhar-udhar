@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
+import 'package:idhar_udhar/customer/core/state/trip_online_payment.dart';
+import 'package:idhar_udhar/customer/features/booking/presentation/waiting_charge_checkout.dart';
 import 'package:idhar_udhar/shared/api/api_config.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
@@ -47,6 +49,10 @@ class BackendQuoteHold {
 
 final backendQuoteHoldProvider =
     StateProvider<BackendQuoteHold?>((ref) => null);
+
+/// Shown once on the searching screen. Null for cash-only and failed plans.
+final tripOnlinePaymentNoticeProvider =
+    StateProvider<TripOnlinePaymentNotice?>((ref) => null);
 
 final orderServerViewProvider =
     FutureProvider.autoDispose.family<ApiOrder, String>((ref, String orderId) {
@@ -256,8 +262,13 @@ Future<MockOrder> confirmCustomerBooking(WidgetRef ref) async {
     fareQuoteId: hold.quote.fareQuoteId,
   );
   // Persist payment responsibility/plan after fare snapshot exists.
-  // Does not require ONLINE prepaid before SEARCHING (existing architecture).
-  await _persistPaymentPlan(api, confirmed.orderId, draft);
+  // Confirm has already moved the order to SEARCHING.
+  final bool planSaved = await _persistPaymentPlan(api, confirmed.orderId, draft);
+  final TripOnlinePaymentOutcome? online = planSaved
+      ? await _startTripOnlineCheckout(api, confirmed.orderId, draft)
+      : null;
+  ref.read(tripOnlinePaymentNoticeProvider.notifier).state =
+      tripOnlinePaymentNotice(online);
   final MockOrder mapped = OrderMapper.toMockOrder(
     ApiOrder(
       orderId: confirmed.orderId,
@@ -283,7 +294,7 @@ Future<MockOrder> confirmCustomerBooking(WidgetRef ref) async {
 
 String _inr(double value) => value.toStringAsFixed(2);
 
-Future<void> _persistPaymentPlan(
+Future<bool> _persistPaymentPlan(
   OrdersApi api,
   String orderId,
   BookingDraft draft,
@@ -308,6 +319,7 @@ Future<void> _persistPaymentPlan(
       receiverPlannedOnline: _inr(allocation.receiverOnline),
       receiverPlannedCash: _inr(allocation.receiverCash),
     );
+    return true;
   } on ApiException catch (error) {
     // Confirm already succeeded and SEARCHING/dispatch may be live.
     // Do not roll back the booking UX; ops can repair the payment plan.
@@ -317,5 +329,112 @@ Future<void> _persistPaymentPlan(
         'code=${error.code} message=${error.message}',
       );
     }
+    return false;
+  }
+}
+
+/// Opens Cashfree only for a saved ONLINE plan amount.
+/// Checkout ending does not mark the trip paid.
+Future<TripOnlinePaymentOutcome?> _startTripOnlineCheckout(
+  OrdersApi api,
+  String orderId,
+  BookingDraft draft,
+) async {
+  final PaymentAllocation allocation = draft.paymentAllocation;
+  final List<TripOnlineLeg> legs = tripOnlineLegs(
+    customerOnline: allocation.customerOnline,
+    customerResponsibility: draft.customerResponsibility,
+    receiverOnline: allocation.receiverOnline,
+    receiverResponsibility: draft.receiverResponsibility,
+  );
+  if (legs.isEmpty) {
+    return null;
+  }
+  var sessionMissing = false;
+  var checkoutCancelled = false;
+  var checkoutEnded = false;
+  var anyPaid = false;
+  var anyUnpaid = false;
+  for (final TripOnlineLeg leg in legs) {
+    final OnlineTripTransaction session;
+    try {
+      session = await api.createOnlineTripTransaction(
+        orderId: orderId,
+        payerType: leg.payerType,
+        amount: leg.amount,
+        idempotencyKey: tripOnlineIdempotencyKey(
+          payerType: leg.payerType,
+          amount: leg.amount,
+        ),
+      );
+    } on ApiException catch (error) {
+      sessionMissing = true;
+      if (ApiConfig.enableRequestLogging) {
+        debugPrint(
+          'TRIP ONLINE charge failed for $orderId '
+          'payer=${leg.payerType} code=${error.code} message=${error.message}',
+        );
+      }
+      break;
+    }
+    if (!session.canOpenCheckout) {
+      sessionMissing = true;
+      break;
+    }
+    try {
+      await openTripFareCheckout(
+        paymentSessionId: session.paymentSessionId,
+        cashfreeOrderId: session.cashfreeOrderId,
+        environment: session.environment,
+      );
+      checkoutEnded = true;
+    } on ApiException catch (error) {
+      if (error.code == 'PAYMENT_PROVIDER_UNAVAILABLE') {
+        sessionMissing = true;
+        break;
+      }
+      checkoutCancelled = true;
+    }
+    final String? status = await _readTripTransactionStatus(
+      api,
+      orderId,
+      session.paymentTransactionId,
+    );
+    if (status == 'PAID') {
+      anyPaid = true;
+    } else {
+      anyUnpaid = true;
+    }
+    if (checkoutCancelled || sessionMissing) {
+      break;
+    }
+  }
+  return TripOnlinePaymentOutcome(
+    serverPaid: anyPaid && !anyUnpaid && !sessionMissing,
+    sessionMissing: sessionMissing,
+    checkoutCancelled: checkoutCancelled,
+    checkoutEnded: checkoutEnded,
+  );
+}
+
+Future<String?> _readTripTransactionStatus(
+  OrdersApi api,
+  String orderId,
+  String paymentTransactionId,
+) async {
+  try {
+    final OnlineTripPaymentStatus refreshed = await api.verifyOnlineTripTransaction(
+      orderId: orderId,
+      paymentTransactionId: paymentTransactionId,
+    );
+    return refreshed.transactionStatus;
+  } on ApiException catch (error) {
+    if (ApiConfig.enableRequestLogging) {
+      debugPrint(
+        'TRIP ONLINE status refresh failed for $orderId '
+        'code=${error.code} message=${error.message}',
+      );
+    }
+    return null;
   }
 }

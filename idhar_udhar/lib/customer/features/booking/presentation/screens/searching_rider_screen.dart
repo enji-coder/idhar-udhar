@@ -7,19 +7,21 @@ import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 
-import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/animations/animations.dart';
 import '../../../../core/constants/asset_paths.dart';
+import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
 import '../../../../core/state/session_provider.dart';
-import '../cancel_trip_flow.dart';
+import '../../../../core/state/trip_online_payment.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
+import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
+import '../cancel_trip_flow.dart';
 
 class SearchingRiderScreen extends ConsumerStatefulWidget {
   const SearchingRiderScreen({super.key});
@@ -38,6 +40,9 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showTripPaymentNotice();
+    });
     final order = ref.read(bookingDraftProvider).activeOrder;
     if (order?.backendOrderId != null) {
       _timer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -51,6 +56,24 @@ class _SearchingRiderScreenState extends ConsumerState<SearchingRiderScreen> {
         }
       });
     }
+  }
+
+  void _showTripPaymentNotice() {
+    if (!mounted) {
+      return;
+    }
+    final TripOnlinePaymentNotice? notice =
+        ref.read(tripOnlinePaymentNoticeProvider);
+    if (notice == null) {
+      return;
+    }
+    ref.read(tripOnlinePaymentNoticeProvider.notifier).state = null;
+    final CustomSnackBarTone tone = switch (notice.tone) {
+      TripOnlinePaymentTone.success => CustomSnackBarTone.success,
+      TripOnlinePaymentTone.error => CustomSnackBarTone.error,
+      TripOnlinePaymentTone.info => CustomSnackBarTone.info,
+    };
+    CustomSnackBar.show(context, message: notice.message, tone: tone);
   }
 
   Future<void> _poll() async {

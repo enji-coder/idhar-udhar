@@ -8,6 +8,7 @@ import { OrderStatus } from './order-status';
 export type OrderRow = {
   order_id: string;
   display_id: string;
+  crn?: string | null;
   customer_profile_id: string;
   rider_profile_id: string | null;
   city_id: string;
@@ -62,6 +63,7 @@ export type InsertStopInput = {
 const ORDER_SELECT = `
   o.order_id,
   o.display_id,
+  o.crn,
   o.customer_profile_id,
   o.rider_profile_id,
   o.city_id,
@@ -105,6 +107,7 @@ export class OrdersRepository {
       `
       INSERT INTO orders (
         display_id,
+        crn,
         customer_profile_id,
         city_id,
         vehicle_category_id,
@@ -112,10 +115,11 @@ export class OrdersRepository {
         canonical_status,
         package_weight_kg
       )
-      VALUES ($1, $2, $3, $4, $5, 'CREATED', $7)
+      VALUES ($1, crn_from_display_id($1), $2, $3, $4, $5, 'CREATED', $7)
       RETURNING
         order_id,
         display_id,
+        crn,
         customer_profile_id,
         rider_profile_id,
         city_id,
@@ -255,12 +259,45 @@ export class OrdersRepository {
   async listForCustomer(
     customerProfileId: string,
     db: Queryable = this.postgres,
-  ): Promise<OrderRow[]> {
-    const result = await db.query<OrderRow>(
+  ): Promise<
+    Array<
+      OrderRow & {
+        pickup_address: string | null;
+        drop_address: string | null;
+        list_trip_fare: string | null;
+        list_net_payable: string | null;
+      }
+    >
+  > {
+    const result = await db.query<
+      OrderRow & {
+        pickup_address: string | null;
+        drop_address: string | null;
+        list_trip_fare: string | null;
+        list_net_payable: string | null;
+      }
+    >(
       `
-      SELECT ${ORDER_SELECT}
+      SELECT ${ORDER_SELECT},
+        (
+          SELECT s.address_text
+          FROM order_stops s
+          WHERE s.order_id = o.order_id AND s.stop_type = 'PICKUP'
+          ORDER BY s.sequence
+          LIMIT 1
+        ) AS pickup_address,
+        (
+          SELECT s.address_text
+          FROM order_stops s
+          WHERE s.order_id = o.order_id AND s.stop_type = 'DROP'
+          ORDER BY s.sequence
+          LIMIT 1
+        ) AS drop_address,
+        fare.trip_fare::text AS list_trip_fare,
+        fare.net_payable::text AS list_net_payable
       FROM orders o
       JOIN cities c ON c.city_id = o.city_id
+      LEFT JOIN order_fare_snapshots fare ON fare.order_id = o.order_id
       WHERE o.customer_profile_id = $1
       ORDER BY o.created_at DESC
       LIMIT 50
@@ -515,6 +552,7 @@ export class OrdersRepository {
       RETURNING
         o.order_id,
         o.display_id,
+        o.crn,
         o.customer_profile_id,
         o.rider_profile_id,
         o.city_id,
@@ -607,6 +645,7 @@ export class OrdersRepository {
     Array<
       OrderOfferRow & {
         display_id: string;
+        crn: string | null;
         canonical_status: OrderStatus;
         rider_amount: string | null;
       }
@@ -615,6 +654,7 @@ export class OrdersRepository {
     const result = await db.query<
       OrderOfferRow & {
         display_id: string;
+        crn: string | null;
         canonical_status: OrderStatus;
         rider_amount: string | null;
       }
@@ -628,6 +668,7 @@ export class OrdersRepository {
         off.created_at,
         off.responded_at,
         o.display_id,
+        o.crn,
         o.canonical_status,
         ROUND(snap.trip_fare * snap.rider_percentage / 100, 2)::text AS rider_amount
       FROM order_offers off
@@ -762,5 +803,170 @@ export class OrdersRepository {
       [riderProfileId],
     );
     return result.rows[0]?.present === true;
+  }
+
+  async findByCrn(
+    crn: string,
+    db: Queryable = this.postgres,
+  ): Promise<OrderRow | null> {
+    const result = await db.query<OrderRow>(
+      `
+      SELECT ${ORDER_SELECT}
+      FROM orders o
+      JOIN cities c ON c.city_id = o.city_id
+      WHERE o.crn = $1
+      `,
+      [crn],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findCustomerRating(
+    orderId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    stars: number;
+    comment: string | null;
+    created_at: Date;
+  } | null> {
+    const result = await db.query<{
+      stars: number;
+      comment: string | null;
+      created_at: Date;
+    }>(
+      `
+      SELECT stars, comment, created_at
+      FROM order_ratings
+      WHERE order_id = $1 AND direction = 'CUSTOMER_TO_RIDER'
+      `,
+      [orderId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async listCustomerRatings(
+    orderIds: string[],
+    db: Queryable = this.postgres,
+  ): Promise<
+    Array<{
+      order_id: string;
+      stars: number;
+      comment: string | null;
+      created_at: Date;
+    }>
+  > {
+    if (orderIds.length === 0) {
+      return [];
+    }
+    const result = await db.query<{
+      order_id: string;
+      stars: number;
+      comment: string | null;
+      created_at: Date;
+    }>(
+      `
+      SELECT order_id, stars, comment, created_at
+      FROM order_ratings
+      WHERE direction = 'CUSTOMER_TO_RIDER'
+        AND order_id = ANY($1::uuid[])
+      `,
+      [orderIds],
+    );
+    return result.rows;
+  }
+
+  async insertCustomerRating(
+    input: {
+      orderId: string;
+      customerProfileId: string;
+      riderProfileId: string;
+      stars: number;
+      comment: string | null;
+    },
+    db: Queryable,
+  ): Promise<{ order_rating_id: string; created_at: Date }> {
+    const result = await db.query<{ order_rating_id: string; created_at: Date }>(
+      `
+      INSERT INTO order_ratings (
+        order_id,
+        direction,
+        from_customer_profile_id,
+        to_rider_profile_id,
+        stars,
+        comment
+      )
+      VALUES ($1, 'CUSTOMER_TO_RIDER', $2, $3, $4, $5)
+      RETURNING order_rating_id, created_at
+      `,
+      [
+        input.orderId,
+        input.customerProfileId,
+        input.riderProfileId,
+        input.stars,
+        input.comment,
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async riderRatingSummary(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    rating_count: number;
+    rating_average: string | null;
+    ratings: Array<{
+      order_id: string;
+      display_id: string;
+      crn: string;
+      stars: number;
+      comment: string | null;
+      created_at: Date;
+    }>;
+  }> {
+    const summary = await db.query<{
+      rating_count: string;
+      rating_average: string | null;
+    }>(
+      `
+      SELECT
+        COUNT(*)::text AS rating_count,
+        ROUND(AVG(stars)::numeric, 2)::text AS rating_average
+      FROM order_ratings
+      WHERE direction = 'CUSTOMER_TO_RIDER'
+        AND to_rider_profile_id = $1
+      `,
+      [riderProfileId],
+    );
+    const ratings = await db.query<{
+      order_id: string;
+      display_id: string;
+      crn: string;
+      stars: number;
+      comment: string | null;
+      created_at: Date;
+    }>(
+      `
+      SELECT
+        r.order_id,
+        o.display_id,
+        o.crn,
+        r.stars,
+        r.comment,
+        r.created_at
+      FROM order_ratings r
+      JOIN orders o ON o.order_id = r.order_id
+      WHERE r.direction = 'CUSTOMER_TO_RIDER'
+        AND r.to_rider_profile_id = $1
+      ORDER BY r.created_at DESC
+      LIMIT 20
+      `,
+      [riderProfileId],
+    );
+    return {
+      rating_count: Number.parseInt(summary.rows[0]?.rating_count ?? '0', 10),
+      rating_average: summary.rows[0]?.rating_average ?? null,
+      ratings: ratings.rows,
+    };
   }
 }

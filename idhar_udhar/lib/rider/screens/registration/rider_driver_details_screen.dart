@@ -1,11 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
-import '../../data/models/rider_bank_details.dart';
+import '../../data/local/rider_permissions.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_spacing.dart';
@@ -32,6 +35,7 @@ class _RiderDriverDetailsScreenState
   String? _nameError;
   String? _mobileError;
   String? _licenseError;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -96,15 +100,43 @@ class _RiderDriverDetailsScreenState
     });
   }
 
-  void _continue() {
-    if (!_validate()) return;
-    ref.read(riderDriverProvider.notifier).state = RiderDriverDetails(
-      fullName: _name.text.trim(),
-      mobile: '+91 ${_mobile.text.replaceAll(RegExp(r'\D'), '')}',
-      dateOfBirthLabel: _dob.text.trim(),
-      licenseNumber: _license.text.trim(),
-    );
-    context.push(RiderRoutes.documents);
+  Future<void> _continue() async {
+    if (_saving || !_validate()) return;
+    DateTime? dob;
+    if (_dob.text.trim().isNotEmpty) {
+      try {
+        dob = DateFormat('dd MMM yyyy').parse(_dob.text.trim());
+      } catch (_) {
+        dob = null;
+      }
+    }
+    setState(() => _saving = true);
+    try {
+      await ref.read(riderSessionProvider.notifier).updateProfile(
+            name: _name.text.trim(),
+            dateOfBirth: dob,
+            drivingLicence: _license.text.trim(),
+          );
+      if (!mounted) return;
+      final session = ref.read(riderSessionProvider);
+      if (session.onboardingResume) {
+        await riderEnterAfterAuth(context, ref);
+        return;
+      }
+      unawaited(context.push(RiderRoutes.documents));
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Driver details could not be saved.')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -118,8 +150,8 @@ class _RiderDriverDetailsScreenState
         ),
       ),
       bottom: RiderPrimaryButton(
-        label: 'Continue',
-        onPressed: _continue,
+        label: _saving ? 'Saving' : 'Continue',
+        onPressed: _saving ? null : _continue,
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -150,6 +182,8 @@ class _RiderDriverDetailsScreenState
                     hint: '10-digit mobile number',
                     prefixIcon: Icons.phone_rounded,
                     keyboardType: TextInputType.phone,
+                    enabled: false,
+                    readOnly: true,
                     maxLength: 10,
                     errorText: _mobileError,
                     inputFormatters: [

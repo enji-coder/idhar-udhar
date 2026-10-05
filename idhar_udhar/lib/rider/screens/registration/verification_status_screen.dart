@@ -49,7 +49,7 @@ class _VerificationStatusScreenState
       ),
       bottom: RiderPrimaryButton(
         label: 'Continue',
-        onPressed: () => riderEnterAfterAuth(context),
+        onPressed: () => riderEnterAfterAuth(context, ref),
       ),
       body: SingleChildScrollView(
         child: Column(

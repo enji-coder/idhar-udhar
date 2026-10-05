@@ -13,8 +13,8 @@
 | Customer Order Tracking                | ✅ Done         |
 | Customer Rider Location Tracking       | ✅ Done         |
 | Customer Cancellation                  | ✅ Done         |
-| Customer Notifications Plumbing        | 🟡 Partial     |
-| Customer FCM Push Delivery             | 🔴 Not Done    |
+| Customer Notifications Plumbing        | 🟡 Partial      |
+| Customer FCM Push Delivery             | 🔴 Not Done     |
 | Rider Registration / Login             | ✅ Done         |
 | Rider Profile                          | ✅ Done         |
 | Rider Online / Offline                 | ✅ Done         |

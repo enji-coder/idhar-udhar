@@ -6,6 +6,64 @@ import 'api_config.dart';
 import 'api_exception.dart';
 import 'json_codec.dart';
 
+class ApiFareSnapshot {
+  const ApiFareSnapshot({
+    this.baseFare = 0,
+    this.distanceCharge = 0,
+    this.waiting = 0,
+    this.surge = 0,
+    this.toll = 0,
+    this.parking = 0,
+    this.discount = 0,
+    this.tripFare = 0,
+    this.netPayable = 0,
+  });
+
+  final double baseFare;
+  final double distanceCharge;
+  final double waiting;
+  final double surge;
+  final double toll;
+  final double parking;
+  final double discount;
+  final double tripFare;
+  final double netPayable;
+
+  factory ApiFareSnapshot.fromJson(Map<String, Object?> json) {
+    return ApiFareSnapshot(
+      baseFare: jsonDouble(json['base_fare']),
+      distanceCharge: jsonDouble(json['distance_charge']),
+      waiting: jsonDouble(json['waiting']),
+      surge: jsonDouble(json['surge']),
+      toll: jsonDouble(json['toll']),
+      parking: jsonDouble(json['parking']),
+      discount: jsonDouble(json['discount']),
+      tripFare: jsonDouble(json['trip_fare']),
+      netPayable: jsonDouble(json['net_payable']),
+    );
+  }
+}
+
+class ApiCustomerRating {
+  const ApiCustomerRating({
+    required this.stars,
+    this.comment,
+    this.createdAt,
+  });
+
+  final int stars;
+  final String? comment;
+  final DateTime? createdAt;
+
+  factory ApiCustomerRating.fromJson(Map<String, Object?> json) {
+    return ApiCustomerRating(
+      stars: json['stars'] is num ? (json['stars'] as num).toInt() : 0,
+      comment: jsonString(json['comment']),
+      createdAt: jsonDate(json['created_at']),
+    );
+  }
+}
+
 class ApiStop {
   const ApiStop({
     required this.sequence,
@@ -93,6 +151,13 @@ class ApiOrder {
     this.riderAmount,
     this.distanceKm,
     this.fareQuoteId,
+    this.crn,
+    this.pickupAddress,
+    this.dropAddress,
+    this.netPayable,
+    this.packageWeightKg,
+    this.fareSnapshot,
+    this.customerRating,
     this.waitingAmount,
     this.receivableOutstanding,
   });
@@ -111,6 +176,13 @@ class ApiOrder {
   final double? riderAmount;
   final double? distanceKm;
   final String? fareQuoteId;
+  final String? crn;
+  final String? pickupAddress;
+  final String? dropAddress;
+  final double? netPayable;
+  final double? packageWeightKg;
+  final ApiFareSnapshot? fareSnapshot;
+  final ApiCustomerRating? customerRating;
 
   /// Server pickup-waiting assessment. Null until the backend has assessed it.
   final double? waitingAmount;
@@ -155,6 +227,22 @@ class ApiOrder {
               : null),
       fareQuoteId: jsonString(json['fare_quote_id']) ??
           jsonString(quote['fare_quote_id']),
+      crn: jsonString(json['crn']),
+      pickupAddress: jsonString(json['pickup_address']),
+      dropAddress: jsonString(json['drop_address']),
+      netPayable: json['net_payable'] != null
+          ? jsonDouble(json['net_payable'])
+          : (snapshot['net_payable'] != null
+              ? jsonDouble(snapshot['net_payable'])
+              : null),
+      packageWeightKg: json['package_weight_kg'] == null
+          ? null
+          : jsonDouble(json['package_weight_kg']),
+      fareSnapshot:
+          snapshot.isEmpty ? null : ApiFareSnapshot.fromJson(snapshot),
+      customerRating: json['customer_rating'] is Map
+          ? ApiCustomerRating.fromJson(jsonObject(json['customer_rating']))
+          : null,
       waitingAmount:
           waiting['amount'] == null ? null : jsonDouble(waiting['amount']),
       receivableOutstanding: waiting['outstanding_amount'] == null
@@ -237,6 +325,66 @@ class ReceivableClearance {
       (environment == 'sandbox' || environment == 'production');
 }
 
+class OnlineTripTransaction {
+  const OnlineTripTransaction({
+    required this.paymentTransactionId,
+    required this.amount,
+    required this.transactionStatus,
+    required this.paymentSessionId,
+    required this.cashfreeOrderId,
+    required this.environment,
+  });
+
+  final String paymentTransactionId;
+  final String amount;
+  final String transactionStatus;
+  final String paymentSessionId;
+  final String cashfreeOrderId;
+  final String environment;
+
+  factory OnlineTripTransaction.fromJson(Map<String, Object?> json) {
+    return OnlineTripTransaction(
+      paymentTransactionId: jsonString(json['payment_transaction_id']) ?? '',
+      amount: jsonString(json['amount']) ?? '',
+      transactionStatus: jsonString(json['transaction_status']) ?? '',
+      paymentSessionId: jsonString(json['payment_session_id']) ?? '',
+      cashfreeOrderId: jsonString(json['cashfree_order_id']) ?? '',
+      environment: jsonString(json['cashfree_environment']) ?? '',
+    );
+  }
+
+  /// Checkout needs a transaction id for the later status read, plus a session.
+  bool get canOpenCheckout =>
+      paymentTransactionId.isNotEmpty &&
+      paymentSessionId.isNotEmpty &&
+      cashfreeOrderId.isNotEmpty &&
+      (environment == 'sandbox' || environment == 'production');
+}
+
+class OnlineTripPaymentStatus {
+  const OnlineTripPaymentStatus({
+    required this.paymentTransactionId,
+    required this.transactionStatus,
+    required this.authoritative,
+  });
+
+  final String paymentTransactionId;
+
+  /// Database status. PAID only after the Cashfree webhook settles the row.
+  final String transactionStatus;
+
+  /// The verify endpoint is a refresh. It does not settle the charge.
+  final bool authoritative;
+
+  factory OnlineTripPaymentStatus.fromJson(Map<String, Object?> json) {
+    return OnlineTripPaymentStatus(
+      paymentTransactionId: jsonString(json['payment_transaction_id']) ?? '',
+      transactionStatus: jsonString(json['transaction_status']) ?? '',
+      authoritative: json['authoritative'] == true,
+    );
+  }
+}
+
 class OrdersApi {
   OrdersApi(this._client);
 
@@ -276,6 +424,28 @@ class OrdersApi {
 
   Future<ApiOrder> getById(String orderId) async {
     return ApiOrder.fromJson(await _client.get('/v1/orders/$orderId'));
+  }
+
+  /// Resolves one shipment. CRN is unique, so this returns that order only.
+  Future<ApiOrder> getByCrn(String crn) async {
+    return ApiOrder.fromJson(
+      await _client.get('/v1/orders/crn/${Uri.encodeComponent(crn)}'),
+    );
+  }
+
+  Future<ApiCustomerRating> rateOrder({
+    required String orderId,
+    required int stars,
+    String? comment,
+  }) async {
+    final Map<String, Object?> body = await _client.post(
+      '/v1/orders/$orderId/rating',
+      data: <String, Object?>{
+        'stars': stars,
+        if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim(),
+      },
+    );
+    return ApiCustomerRating.fromJson(body);
   }
 
   /// Starts a Cashfree charge for the server-calculated waiting receivable.
@@ -400,6 +570,39 @@ class OrdersApi {
         'receiver_responsibility': receiverResponsibility,
       },
     );
+  }
+
+  /// Creates one ONLINE trip-fare charge. The server keeps it PENDING.
+  /// A stable [idempotencyKey] replays the same session on confirm retry.
+  Future<OnlineTripTransaction> createOnlineTripTransaction({
+    required String orderId,
+    required String payerType,
+    required String amount,
+    required String idempotencyKey,
+  }) async {
+    final Map<String, Object?> body = await _client.post(
+      '/v1/orders/$orderId/payment/transactions',
+      data: <String, Object?>{
+        'payer_type': payerType,
+        'method': 'ONLINE',
+        'amount': amount,
+        'direction': 'CHARGE',
+      },
+      headers: <String, String>{'Idempotency-Key': idempotencyKey},
+    );
+    return OnlineTripTransaction.fromJson(body);
+  }
+
+  /// Reads the stored trip transaction. Does not mark it paid.
+  Future<OnlineTripPaymentStatus> verifyOnlineTripTransaction({
+    required String orderId,
+    required String paymentTransactionId,
+  }) async {
+    final Map<String, Object?> body = await _client.post(
+      '/v1/orders/$orderId/payment/transactions/$paymentTransactionId/verify',
+      data: <String, Object?>{},
+    );
+    return OnlineTripPaymentStatus.fromJson(body);
   }
 
   /// Records online/cash plan after responsibility. Does not charge Cashfree.

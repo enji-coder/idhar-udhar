@@ -340,6 +340,7 @@ class MockOrder {
     required this.fare,
     required this.createdAt,
     this.displayId,
+    this.crn,
     this.backendOrderId,
     this.customerId,
     this.riderId,
@@ -372,11 +373,20 @@ class MockOrder {
     this.paymentTransactions = const [],
     this.cancellationFee = 0,
     this.resendCaseLabel,
+    this.ratingStars,
+    this.ratingComment,
+    this.fareBase = 0,
+    this.fareDistance = 0,
+    this.fareWaiting = 0,
+    this.fareSurge = 0,
+    this.fareToll = 0,
+    this.fareParking = 0,
   });
 
   final String id;
   /// Backend display_id when the order came from Nest. Falls back to [id].
   final String? displayId;
+  final String? crn;
   /// Nest order UUID. Use for `/v1/orders/:id` when present.
   final String? backendOrderId;
   final OrderStatus status;
@@ -425,6 +435,14 @@ class MockOrder {
   final List<PaymentTxn> paymentTransactions;
   final double cancellationFee;
   final String? resendCaseLabel;
+  final int? ratingStars;
+  final String? ratingComment;
+  final double fareBase;
+  final double fareDistance;
+  final double fareWaiting;
+  final double fareSurge;
+  final double fareToll;
+  final double fareParking;
 
   double get confirmedTripFare => tripFare ?? fare;
 
@@ -605,6 +623,7 @@ class MockOrder {
     return MockOrder(
       id: id,
       displayId: displayId,
+      crn: crn,
       backendOrderId: backendOrderId,
       status: status ?? this.status,
       pickup: pickup,
@@ -646,6 +665,14 @@ class MockOrder {
       paymentTransactions: paymentTransactions ?? this.paymentTransactions,
       cancellationFee: cancellationFee ?? this.cancellationFee,
       resendCaseLabel: resendCaseLabel ?? this.resendCaseLabel,
+      ratingStars: ratingStars,
+      ratingComment: ratingComment,
+      fareBase: fareBase,
+      fareDistance: fareDistance,
+      fareWaiting: fareWaiting,
+      fareSurge: fareSurge,
+      fareToll: fareToll,
+      fareParking: fareParking,
     );
   }
 }

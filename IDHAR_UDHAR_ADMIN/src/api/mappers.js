@@ -102,8 +102,14 @@ export function mapRider(row) {
     dateOfBirth: row.date_of_birth || '',
     language: languageMap[row.preferred_language] || row.preferred_language || '',
     hasProfilePicture: Boolean(row.has_profile_picture),
-    vehicle: '',
-    vehicleNumber: '',
+    vehicle: row.vehicle_category_name || '',
+    vehicleNumber: row.vehicle_registration || '',
+    vehicleModel: row.vehicle_model || '',
+    vehicleColor: row.vehicle_color || '',
+    vehicleYear: row.manufacturing_year || '',
+    drivingLicence: row.driving_licence || '',
+    profileComplete: row.profile_complete === true,
+    missingFields: Array.isArray(row.missing_fields) ? row.missing_fields : [],
     zone: row.zone_name || row.city_code || '—',
     status,
     rating: '—',
@@ -152,6 +158,7 @@ export function mapOrder(row) {
     : null;
   return {
     id: row.display_id,
+    crn: row.crn || '',
     backendOrderId: row.order_id,
     customerId: row.customer_profile_id,
     customer: row.customer_display_name || row.customer_phone || 'Customer',
@@ -181,6 +188,13 @@ export function mapOrder(row) {
     fareCompanyPercentage: row.fare_company_commission_percentage == null ? null : money(row.fare_company_commission_percentage),
     payment: '',
     paymentStatus: financeSnapshot ? 'Paid' : 'Pending',
+    customerRating: row.customer_rating
+      ? {
+          stars: row.customer_rating.stars,
+          comment: row.customer_rating.comment || '',
+          createdAt: row.customer_rating.created_at || '',
+        }
+      : null,
     date: formatWhen(row.created_at),
     time: '',
     lastUpdated: formatWhen(row.updated_at),

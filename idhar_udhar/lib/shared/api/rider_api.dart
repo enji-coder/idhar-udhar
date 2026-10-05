@@ -2,6 +2,37 @@ import 'api_client.dart';
 import 'json_codec.dart';
 import 'orders_api.dart';
 
+class RiderRatingSummary {
+  const RiderRatingSummary({
+    required this.count,
+    required this.average,
+    this.latestComment,
+  });
+
+  final int count;
+  final double average;
+  final String? latestComment;
+
+  factory RiderRatingSummary.fromJson(Map<String, Object?> json) {
+    final List<Map<String, Object?>> rows = jsonList(json['ratings'])
+        .map(jsonObject)
+        .toList(growable: false);
+    String? comment;
+    for (final Map<String, Object?> row in rows) {
+      final String? text = jsonString(row['comment']);
+      if (text != null && text.trim().isNotEmpty) {
+        comment = text.trim();
+        break;
+      }
+    }
+    return RiderRatingSummary(
+      count: json['rating_count'] is num ? (json['rating_count'] as num).toInt() : 0,
+      average: json['rating_average'] == null ? 0 : jsonDouble(json['rating_average']),
+      latestComment: comment,
+    );
+  }
+}
+
 class RiderOffer {
   const RiderOffer({
     required this.offerId,
@@ -9,6 +40,7 @@ class RiderOffer {
     required this.status,
     required this.createdAt,
     this.displayId,
+    this.crn,
     this.orderStatus,
     this.riderAmount,
   });
@@ -18,6 +50,7 @@ class RiderOffer {
   final String status;
   final DateTime createdAt;
   final String? displayId;
+  final String? crn;
   final String? orderStatus;
   final double? riderAmount;
 
@@ -28,6 +61,7 @@ class RiderOffer {
       status: jsonString(json['status']) ?? 'PENDING',
       createdAt: jsonDate(json['created_at']) ?? DateTime.now(),
       displayId: jsonString(json['display_id']),
+      crn: jsonString(json['crn']),
       orderStatus: jsonString(json['order_status']),
       riderAmount: json['rider_amount'] == null
           ? null
@@ -40,6 +74,10 @@ class RiderApi {
   RiderApi(this._client);
 
   final ApiClient _client;
+
+  Future<RiderRatingSummary> ratings() async {
+    return RiderRatingSummary.fromJson(await _client.get('/v1/rider/ratings'));
+  }
 
   Future<List<RiderOffer>> listOffers() async {
     final Map<String, Object?> body = await _client.get('/v1/rider/offers');

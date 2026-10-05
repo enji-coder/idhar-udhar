@@ -5,6 +5,7 @@ import { isUniqueViolation } from '../common/pg-error';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository, PROVISIONAL_CUSTOMER_DISPLAY_NAME } from '../auth/identity/identity.repository';
 import { riderMayGoOnline } from '../files/rider-verification';
+import { riderProfileGaps } from './rider-profile-completion';
 
 /** Admin must not show ONLINE forever after app kill / network loss. */
 const RIDER_ONLINE_STALE_MS = 2 * 60 * 1000;
@@ -68,22 +69,18 @@ export class ProfilesService {
     }
     const identity = await this.identities.findById(auth.identityId);
     const driver = await this.identities.findRiderDriver(profile.rider_profile_id);
-    return {
-      identity_id: profile.identity_id,
-      rider_profile_id: profile.rider_profile_id,
-      onboarding_kyc_status: profile.onboarding_kyc_status,
-      approval_status: profile.approval_status,
-      online_status: profile.online_status,
-      home_city_id: profile.home_city_id,
-      home_zone_id: profile.home_zone_id,
-      cod_operational_status: profile.cod_operational_status,
-      phone_normalized: identity?.phone_normalized ?? null,
+    const vehicle = await this.identities.findActiveRiderVehicle(
+      profile.rider_profile_id,
+    );
+    return this.serializeOwnRider({
+      profile,
+      phone: identity?.phone_normalized ?? null,
       email: identity?.email ?? null,
       name: driver?.name ?? null,
-      date_of_birth: driver?.date_of_birth ?? null,
-      preferred_language: profile.preferred_language ?? null,
-      has_profile_picture: Boolean(profile.profile_picture_file_id),
-    };
+      dateOfBirth: driver?.date_of_birth ?? null,
+      drivingLicence: driver?.driving_licence ?? null,
+      vehicle,
+    });
   }
 
   async updateRider(
@@ -93,6 +90,7 @@ export class ProfilesService {
       email?: string | null;
       dateOfBirth?: string | null;
       preferredLanguage?: string;
+      drivingLicence?: string;
     },
   ) {
     if (auth.role !== 'RIDER') {
@@ -122,7 +120,11 @@ export class ProfilesService {
       }
     }
 
-    if (input.name !== undefined || input.dateOfBirth !== undefined) {
+    if (
+      input.name !== undefined ||
+      input.dateOfBirth !== undefined ||
+      input.drivingLicence !== undefined
+    ) {
       const name =
         input.name === undefined ? undefined : input.name.trim();
       if (name !== undefined && name.length < 2) {
@@ -132,12 +134,25 @@ export class ProfilesService {
           400,
         );
       }
+      const licence =
+        input.drivingLicence === undefined
+          ? undefined
+          : input.drivingLicence.trim().toUpperCase();
+      if (licence !== undefined && licence.length < 8) {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Enter a valid driving licence number',
+          400,
+        );
+      }
       await this.identities.upsertRiderDriverDetails({
         riderProfileId: auth.profileId,
         name,
         dateOfBirth: input.dateOfBirth,
+        drivingLicence: licence,
         updateName: input.name !== undefined,
         updateDob: input.dateOfBirth !== undefined,
+        updateLicence: input.drivingLicence !== undefined,
       });
     }
 
@@ -148,6 +163,45 @@ export class ProfilesService {
       );
     }
 
+    return this.rider(auth);
+  }
+
+  async upsertRiderVehicle(
+    auth: AuthContext,
+    input: {
+      vehicleCategoryId: string;
+      registration: string;
+      model: string;
+      color: string;
+      manufacturingYear: number;
+    },
+  ) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
+    }
+    const profile = await this.identities.findRiderProfile(auth.identityId);
+    if (!profile || profile.rider_profile_id !== auth.profileId) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    try {
+      await this.identities.upsertRiderVehicle({
+        riderProfileId: auth.profileId,
+        vehicleCategoryId: input.vehicleCategoryId,
+        registration: input.registration.trim().toUpperCase(),
+        model: input.model.trim(),
+        color: input.color.trim(),
+        manufacturingYear: input.manufacturingYear,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message === 'VEHICLE_CATEGORY_NOT_FOUND') {
+        throw new ApiError(
+          ErrorCodes.VALIDATION_ERROR,
+          'Vehicle category was not found',
+          400,
+        );
+      }
+      throw err;
+    }
     return this.rider(auth);
   }
 
@@ -352,6 +406,119 @@ export class ProfilesService {
                 .profile_picture_file_id,
             )
           : false,
+      ...this.vehicleAndCompletion(row),
+    };
+  }
+
+  private serializeOwnRider(input: {
+    profile: {
+      identity_id: string;
+      rider_profile_id: string;
+      onboarding_kyc_status: string;
+      approval_status: string;
+      online_status: string;
+      home_city_id: string | null;
+      home_zone_id: string | null;
+      cod_operational_status: string;
+      preferred_language: string | null;
+      profile_picture_file_id: string | null;
+    };
+    phone: string | null;
+    email: string | null;
+    name: string | null;
+    dateOfBirth: string | null;
+    drivingLicence: string | null;
+    vehicle: {
+      vehicle_id: string;
+      vehicle_category_id: string;
+      vehicle_category_name: string;
+      registration: string | null;
+      model: string | null;
+      color: string | null;
+      manufacturing_year: number | null;
+    } | null;
+  }) {
+    const year = input.vehicle?.manufacturing_year ?? null;
+    const gaps = riderProfileGaps({
+      name: input.name,
+      email: input.email,
+      dateOfBirth: input.dateOfBirth,
+      vehicleCategoryName: input.vehicle?.vehicle_category_name,
+      vehicleRegistration: input.vehicle?.registration,
+      vehicleModel: input.vehicle?.model,
+      vehicleColor: input.vehicle?.color,
+      manufacturingYear: year,
+      drivingLicence: input.drivingLicence,
+    });
+    return {
+      identity_id: input.profile.identity_id,
+      rider_profile_id: input.profile.rider_profile_id,
+      onboarding_kyc_status: input.profile.onboarding_kyc_status,
+      approval_status: input.profile.approval_status,
+      online_status: input.profile.online_status,
+      home_city_id: input.profile.home_city_id,
+      home_zone_id: input.profile.home_zone_id,
+      cod_operational_status: input.profile.cod_operational_status,
+      phone_normalized: input.phone,
+      email: input.email,
+      name: input.name,
+      date_of_birth: input.dateOfBirth,
+      preferred_language: input.profile.preferred_language ?? null,
+      has_profile_picture: Boolean(input.profile.profile_picture_file_id),
+      driving_licence: input.drivingLicence,
+      vehicle: input.vehicle
+        ? {
+            vehicle_id: input.vehicle.vehicle_id,
+            vehicle_category_id: input.vehicle.vehicle_category_id,
+            vehicle_category_name: input.vehicle.vehicle_category_name,
+            registration: input.vehicle.registration,
+            model: input.vehicle.model,
+            color: input.vehicle.color,
+            manufacturing_year: year,
+          }
+        : null,
+      profile_complete: gaps.length === 0,
+      missing_fields: gaps,
+    };
+  }
+
+  private vehicleAndCompletion(row: {
+    name?: string | null;
+    email?: string | null;
+    date_of_birth?: string | null;
+    driving_licence?: string | null;
+    vehicle_category_id?: string | null;
+    vehicle_category_name?: string | null;
+    vehicle_registration?: string | null;
+    vehicle_model?: string | null;
+    vehicle_color?: string | null;
+    manufacturing_year?: number | string | null;
+  }) {
+    const year =
+      row.manufacturing_year == null || row.manufacturing_year === ''
+        ? null
+        : Number(row.manufacturing_year);
+    const gaps = riderProfileGaps({
+      name: row.name,
+      email: row.email,
+      dateOfBirth: row.date_of_birth,
+      vehicleCategoryName: row.vehicle_category_name,
+      vehicleRegistration: row.vehicle_registration,
+      vehicleModel: row.vehicle_model,
+      vehicleColor: row.vehicle_color,
+      manufacturingYear: Number.isFinite(year) ? year : null,
+      drivingLicence: row.driving_licence,
+    });
+    return {
+      driving_licence: row.driving_licence ?? null,
+      vehicle_category_id: row.vehicle_category_id ?? null,
+      vehicle_category_name: row.vehicle_category_name ?? null,
+      vehicle_registration: row.vehicle_registration ?? null,
+      vehicle_model: row.vehicle_model ?? null,
+      vehicle_color: row.vehicle_color ?? null,
+      manufacturing_year: Number.isFinite(year) ? year : null,
+      profile_complete: gaps.length === 0,
+      missing_fields: gaps,
     };
   }
 

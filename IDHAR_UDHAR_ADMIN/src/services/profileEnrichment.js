@@ -126,15 +126,19 @@ export function enrichCustomerProfile(customer = {}) {
 }
 
 export function enrichVehicleRecord(vehicle = {}, rider) {
-  if (rider?.source === 'api' && !vehicle.number && !vehicle.rcNumber && !rider.vehicleNumber) {
+  if (rider?.source === 'api') {
+    const category = rider.vehicle || vehicle.category || NA;
+    const number = rider.vehicleNumber || vehicle.number || vehicle.rcNumber || '';
     return {
       ...vehicle,
-      number: '',
-      rcNumber: NA,
-      category: rider.vehicle || NA,
-      type: rider.vehicle || NA,
+      number,
+      rcNumber: number || NA,
+      category,
+      type: category,
       brand: '',
-      model: NA,
+      model: rider.vehicleModel || vehicle.model || NA,
+      color: rider.vehicleColor || vehicle.color || NA,
+      year: rider.vehicleYear || vehicle.year || '',
     };
   }
   const type = vehicle.category || vehicle.type || rider?.vehicle || 'Bike';

@@ -122,21 +122,24 @@ abstract final class OrderMapper {
     final MockLocation pickup = pickups.isEmpty
         ? MockLocation(
             id: 'pickup',
-            label: order.cityCode ?? 'Pickup',
-            address: order.cityCode ?? 'Pickup',
+            label: order.pickupAddress ?? order.cityCode ?? 'Pickup',
+            address: order.pickupAddress ?? order.cityCode ?? 'Pickup',
           )
         : _stopToLocation(pickups.first);
     final MockLocation drop = drops.isEmpty
         ? MockLocation(
             id: 'drop',
-            label: order.vehicleCategoryName ?? 'Drop',
-            address: order.vehicleCategoryName ?? 'Drop',
+            label: order.dropAddress ?? 'Drop',
+            address: order.dropAddress ?? 'Drop',
           )
         : _stopToLocation(drops.first);
     final List<MockLocation> extra = drops.length > 1
         ? drops.skip(1).map(_stopToLocation).toList(growable: false)
         : const <MockLocation>[];
-    final double fare = order.tripFare ?? 0;
+    final bool cancelled = order.canonicalStatus == 'CANCELLED';
+    final double storedPayable = order.netPayable ?? order.tripFare ?? 0;
+    final double fare = cancelled ? 0 : storedPayable;
+    final ApiFareSnapshot? snapshot = order.fareSnapshot;
     final ApiAssignedRider? assigned = order.assignedRider;
     final String? riderName = assigned?.name?.trim();
     final String vehicleLabel = <String?>[
@@ -165,9 +168,30 @@ abstract final class OrderMapper {
       pickup: pickup,
       drop: drop,
       extraDrops: extra,
-      vehicle: vehicle ?? MockData.vehicles.first,
+      vehicle: vehicle ??
+          MockVehicle(
+            id: order.vehicleCategoryId ?? 'vehicle',
+            type: VehicleType.bike,
+            name: order.vehicleCategoryName ?? 'Vehicle',
+            description: '',
+            capacity: '',
+            etaMinutes: 0,
+            baseFare: snapshot?.baseFare ?? 0,
+            imagePath: MockData.artworkForCategoryName(order.vehicleCategoryName),
+          ),
       fare: fare,
       tripFare: order.tripFare,
+      weightKg: order.packageWeightKg ?? 0,
+      crn: order.crn,
+      ratingStars: order.customerRating?.stars,
+      ratingComment: order.customerRating?.comment,
+      discount: snapshot?.discount ?? 0,
+      fareBase: snapshot?.baseFare ?? 0,
+      fareDistance: snapshot?.distanceCharge ?? 0,
+      fareWaiting: snapshot?.waiting ?? 0,
+      fareSurge: snapshot?.surge ?? 0,
+      fareToll: snapshot?.toll ?? 0,
+      fareParking: snapshot?.parking ?? 0,
       createdAt: order.createdAt,
       riderId: order.riderProfileId,
       rider: rider,
@@ -194,6 +218,7 @@ abstract final class OrderMapper {
       id: offer.displayId ?? mapped?.displayLabel ?? offer.orderId,
       offerId: offer.offerId,
       backendOrderId: offer.orderId,
+      crn: order?.crn ?? offer.crn,
       pickup: mapped?.pickup.address ?? 'Pickup',
       drop: mapped?.drop.address ?? 'Drop',
       distanceKm: order?.distanceKm ?? 0,

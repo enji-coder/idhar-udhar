@@ -103,7 +103,11 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen> {
 
     return RiderScaffold(
       appBar: AppBar(
-        title: Text('Order #${order.id}'),
+        title: Text(
+          order.crn == null || order.crn!.isEmpty
+              ? 'Order #${order.id}'
+              : 'Order #${order.id}\nCRN ${order.crn}',
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => context.go(RiderRoutes.dashboard),

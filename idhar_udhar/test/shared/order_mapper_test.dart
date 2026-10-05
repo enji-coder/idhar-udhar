@@ -61,5 +61,26 @@ void main() {
     expect(order.rider!.vehicleLabel, contains('Bike'));
     expect(order.rider!.vehicleLabel, contains('GJ-01-AB-1234'));
     expect(order.rider!.rating, 0);
+    expect(order.vehicle.name, 'Bike');
+    expect(order.vehicle.imagePath, isNotEmpty);
+  });
+
+  test('cancelled history amount is zero and CRN is copied, not recomputed', () {
+    final MockOrder order = OrderMapper.toMockOrder(
+      ApiOrder(
+        orderId: '11111111-1111-1111-1111-111111111111',
+        displayId: 'IU-AMD-0000000003',
+        crn: 'IU-CRN-AMD-0000000003',
+        canonicalStatus: 'CANCELLED',
+        createdAt: DateTime.utc(2026, 1, 1),
+        tripFare: 250,
+        netPayable: 250,
+        vehicleCategoryName: 'Truck',
+      ),
+    );
+    expect(order.fare, 0);
+    expect(order.tripFare, 250);
+    expect(order.crn, 'IU-CRN-AMD-0000000003');
+    expect(order.vehicle.imagePath, contains('truck'));
   });
 }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 
@@ -13,6 +15,7 @@ import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/custom_dialog.dart';
+import '../../../../shared/widgets/custom_snack_bar.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
@@ -149,7 +152,16 @@ class OrderDetailsScreen extends ConsumerWidget {
           GlassContainer(
             child: Column(
               children: [
-                _row('Date', _fmt(order.createdAt)),
+                _row('Date', '${order.createdAt.day}/${order.createdAt.month}/${order.createdAt.year}'),
+                _row('Time', _time(order.createdAt)),
+                _row(
+                  'Order ID',
+                  (order.displayId != null && order.displayId!.isNotEmpty)
+                      ? order.displayId!
+                      : order.id,
+                ),
+                _row('CRN', serverOrder?.crn ?? order.crn ?? '—'),
+                _row('Status', order.statusLabel),
                 _row('Pickup', order.pickup.address),
                 _row('Drop', order.drop.address),
                 for (int i = 0; i < order.extraDrops.length; i++)
@@ -158,6 +170,18 @@ class OrderDetailsScreen extends ConsumerWidget {
                 _row('Package', order.packageLabel),
                 _row('Weight', '${order.weightKg.toStringAsFixed(0)} kg'),
                 _row('Rider', order.rider?.name ?? '—'),
+                _row(
+                  'Vehicle number',
+                  order.rider?.vehicleLabel ?? '—',
+                ),
+                _row('Trip amount', '₹${order.fare.toStringAsFixed(0)}'),
+                _row('Base fare', '₹${(serverOrder?.fareSnapshot?.baseFare ?? order.fareBase).toStringAsFixed(0)}'),
+                _row('Distance charge', '₹${(serverOrder?.fareSnapshot?.distanceCharge ?? order.fareDistance).toStringAsFixed(0)}'),
+                _row('Waiting', '₹${(serverOrder?.fareSnapshot?.waiting ?? order.fareWaiting).toStringAsFixed(0)}'),
+                _row('Surge', '₹${(serverOrder?.fareSnapshot?.surge ?? order.fareSurge).toStringAsFixed(0)}'),
+                _row('Toll', '₹${(serverOrder?.fareSnapshot?.toll ?? order.fareToll).toStringAsFixed(0)}'),
+                _row('Parking', '₹${(serverOrder?.fareSnapshot?.parking ?? order.fareParking).toStringAsFixed(0)}'),
+                _row('Discount', '₹${(serverOrder?.fareSnapshot?.discount ?? order.discount).toStringAsFixed(0)}'),
                 _row('Trip Fare', '₹${order.confirmedTripFare.toStringAsFixed(0)}'),
                 if (serverOrder?.waitingAmount != null)
                   _row(
@@ -213,6 +237,11 @@ class OrderDetailsScreen extends ConsumerWidget {
                     'Cancellation fee',
                     '₹${order.cancellationFee.toStringAsFixed(0)}',
                   ),
+                if (current.status == OrderStatus.delivered && serverId != null)
+                  _RateDriver(
+                    orderId: serverId,
+                    existing: serverOrder?.customerRating,
+                  ),
                 if (order.invoiceSent)
                   _row(
                     'Invoice',
@@ -228,8 +257,8 @@ class OrderDetailsScreen extends ConsumerWidget {
     );
   }
 
-  String _fmt(DateTime d) =>
-      '${d.day}/${d.month}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  String _time(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   Widget _row(String k, String v) {
     return Padding(
@@ -247,6 +276,109 @@ class OrderDetailsScreen extends ConsumerWidget {
             ),
           ),
           Expanded(child: Text(v, style: AppTextStyles.bodyMedium)),
+        ],
+      ),
+    );
+  }
+}
+
+class _RateDriver extends ConsumerStatefulWidget {
+  const _RateDriver({required this.orderId, this.existing});
+
+  final String orderId;
+  final ApiCustomerRating? existing;
+
+  @override
+  ConsumerState<_RateDriver> createState() => _RateDriverState();
+}
+
+class _RateDriverState extends ConsumerState<_RateDriver> {
+  int _stars = 0;
+  bool _busy = false;
+  ApiCustomerRating? _saved;
+  final TextEditingController _comment = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _saved = widget.existing;
+  }
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy || _stars < 1 || _saved != null) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final ApiCustomerRating saved = await ref.read(ordersApiProvider).rateOrder(
+            orderId: widget.orderId,
+            stars: _stars,
+            comment: _comment.text,
+          );
+      ref.invalidate(orderServerViewProvider(widget.orderId));
+      if (!mounted) {
+        return;
+      }
+      setState(() => _saved = saved);
+      CustomSnackBar.success(context, 'Rating submitted.');
+    } on ApiException catch (error) {
+      if (mounted) {
+        CustomSnackBar.error(context, error.message);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ApiCustomerRating? saved = _saved ?? widget.existing;
+    if (saved != null && saved.stars > 0) {
+      return Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.sm),
+        child: Text(
+          saved.comment == null || saved.comment!.isEmpty
+              ? 'Your rating: ${saved.stars} ★'
+              : 'Your rating: ${saved.stars} ★  ${saved.comment}',
+          style: AppTextStyles.bodyMedium,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Rate your driver', style: AppTextStyles.bodyMedium),
+          TextField(
+            controller: _comment,
+            maxLength: 500,
+            decoration: const InputDecoration(hintText: 'Optional comment'),
+          ),
+          Row(
+            children: List<Widget>.generate(5, (int index) {
+              final int value = index + 1;
+              return IconButton(
+                onPressed: _busy ? null : () => setState(() => _stars = value),
+                icon: Icon(
+                  value <= _stars ? Icons.star : Icons.star_border,
+                  color: AppColors.orange,
+                ),
+              );
+            }),
+          ),
+          TextButton(
+            onPressed: _stars < 1 || _busy ? null : _submit,
+            child: Text(_busy ? 'Submitting' : 'Submit rating'),
+          ),
         ],
       ),
     );

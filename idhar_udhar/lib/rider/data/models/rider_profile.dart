@@ -9,6 +9,7 @@ class RiderProfile {
     this.dateOfBirth,
     this.photoUrl,
     this.rating = 0,
+    this.latestReview,
   });
 
   final String id;
@@ -28,6 +29,7 @@ class RiderProfile {
   );
   final String? photoUrl;
   final double rating;
+  final String? latestReview;
 
   String get firstName {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -43,6 +45,7 @@ class RiderProfile {
     String? language,
     String? photoUrl,
     double? rating,
+    String? latestReview,
   }) {
     return RiderProfile(
       id: id ?? this.id,
@@ -53,6 +56,7 @@ class RiderProfile {
       language: language ?? this.language,
       photoUrl: photoUrl ?? this.photoUrl,
       rating: rating ?? this.rating,
+      latestReview: latestReview ?? this.latestReview,
     );
   }
 }

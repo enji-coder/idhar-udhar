@@ -158,7 +158,7 @@ class _RiderSplashScreenState extends ConsumerState<RiderSplashScreen>
       final restored = await ref.read(riderSessionProvider.notifier).restore();
       if (!mounted) return;
       if (restored) {
-        await riderGoHomeOrPermissionGate(context);
+        await riderEnterAfterAuth(context, ref);
         return;
       }
       await RiderPrefs.clearLoggedIn();

@@ -34,6 +34,7 @@ export function buildInvoice(order, extras = {}) {
     status: order.invoiceStatus || extras.status || (order.status === 'Cancelled' ? 'Cancelled' : 'Issued'),
     dueDate: order.dueDate || extras.dueDate || invoiceDate,
     orderId: order.id,
+    crn: order.crn || '',
     billTo: {
       name: order.customer,
       phone: extras.phone || order.customerPhone || '',

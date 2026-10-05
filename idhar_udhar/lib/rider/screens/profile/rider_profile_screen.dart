@@ -69,6 +69,15 @@ class RiderProfileScreen extends ConsumerWidget {
                     tone: RiderChipTone.success,
                     icon: Icons.star_rounded,
                   ),
+                  if (profile.latestReview != null &&
+                      profile.latestReview!.isNotEmpty) ...[
+                    const SizedBox(height: RiderSpacing.xs),
+                    Text(
+                      profile.latestReview!,
+                      style: RiderTextStyles.caption,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ],
                 const SizedBox(height: RiderSpacing.md),
                 TextButton(

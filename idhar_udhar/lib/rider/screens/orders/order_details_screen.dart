@@ -60,6 +60,8 @@ class AcceptConfirmationScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Order #${order.id}', style: RiderTextStyles.title),
+                  if (order.crn != null && order.crn!.isNotEmpty)
+                    Text('CRN ${order.crn}', style: RiderTextStyles.caption),
                   const SizedBox(height: RiderSpacing.md),
                   Text('Pickup', style: RiderTextStyles.caption),
                   Text(order.pickup, style: RiderTextStyles.bodyMedium),

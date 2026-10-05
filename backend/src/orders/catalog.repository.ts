@@ -123,9 +123,21 @@ export class CatalogRepository {
         ON v.rider_profile_id = r.rider_profile_id
        AND v.active = TRUE
        AND v.vehicle_category_id = $1
+      INNER JOIN identities i ON i.identity_id = r.identity_id
+      INNER JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
       WHERE r.online_status = 'ONLINE'
         AND r.approval_status = 'APPROVED'
         AND r.deactivated_at IS NULL
+        AND length(trim(d.name)) >= 2
+        AND d.date_of_birth IS NOT NULL
+        AND i.email IS NOT NULL
+        AND position('@' IN i.email) > 1
+        AND position('.' IN i.email) > position('@' IN i.email)
+        AND length(trim(coalesce(v.registration, ''))) >= 6
+        AND length(trim(coalesce(v.model, ''))) > 0
+        AND length(trim(coalesce(v.color, ''))) > 0
+        AND v.manufacturing_year IS NOT NULL
+        AND length(trim(coalesce(d.licence_encrypted_or_token, ''))) >= 8
       ORDER BY r.rider_profile_id
       LIMIT $2
       `,
@@ -169,5 +181,70 @@ export class CatalogRepository {
       [riderProfileId],
     );
     return result.rows[0] ?? null;
+  }
+
+  /**
+   * Same required fields as riderProfileGaps. Used to refuse accept
+   * when registration data was never stored.
+   */
+  async findRiderOnboardingFacts(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    name: string | null;
+    email: string | null;
+    date_of_birth: string | null;
+    vehicle_category_name: string | null;
+    vehicle_registration: string | null;
+    vehicle_model: string | null;
+    vehicle_color: string | null;
+    manufacturing_year: number | null;
+    driving_licence: string | null;
+  } | null> {
+    const result = await db.query<{
+      name: string | null;
+      email: string | null;
+      date_of_birth: string | null;
+      vehicle_category_name: string | null;
+      vehicle_registration: string | null;
+      vehicle_model: string | null;
+      vehicle_color: string | null;
+      manufacturing_year: number | null;
+      driving_licence: string | null;
+    }>(
+      `
+      SELECT
+        d.name,
+        i.email,
+        d.date_of_birth::text AS date_of_birth,
+        vc.name AS vehicle_category_name,
+        v.registration AS vehicle_registration,
+        v.model AS vehicle_model,
+        v.color AS vehicle_color,
+        v.manufacturing_year,
+        d.licence_encrypted_or_token AS driving_licence
+      FROM rider_profiles r
+      JOIN identities i ON i.identity_id = r.identity_id
+      LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
+      LEFT JOIN LATERAL (
+        SELECT registration, model, color, manufacturing_year, vehicle_category_id
+        FROM vehicles
+        WHERE rider_profile_id = r.rider_profile_id
+          AND active = TRUE
+        ORDER BY updated_at DESC
+        LIMIT 1
+      ) v ON TRUE
+      LEFT JOIN vehicle_categories vc ON vc.vehicle_category_id = v.vehicle_category_id
+      WHERE r.rider_profile_id = $1
+      `,
+      [riderProfileId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      ...row,
+      manufacturing_year:
+        row.manufacturing_year == null ? null : Number(row.manufacturing_year),
+    };
   }
 }

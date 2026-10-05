@@ -29,7 +29,8 @@ const InvoicePreview = forwardRef(function InvoicePreview({ invoice }, ref) {
         <p className="sm:text-right">
           Invoice Date: {invoice.invoiceDate}<br />
           Due Date: {invoice.dueDate}<br />
-          Order ID: {invoice.orderId}
+          Order ID: {invoice.orderId}<br />
+          CRN: {invoice.crn || '—'}
         </p>
       </div>
 

@@ -13,19 +13,59 @@ import 'package:idhar_udhar/shared/api/orders_api.dart';
 /// The SDK callback only means the customer left checkout. The receivable stays
 /// outstanding until the Cashfree webhook credits it.
 Future<void> openReceivableCheckout(ReceivableClearance session) {
-  if (!session.canOpenCheckout) {
-    throw const ApiException(
+  return openCashfreeWebCheckout(
+    paymentSessionId: session.paymentSessionId,
+    cashfreeOrderId: session.cashfreeOrderId,
+    environment: session.environment,
+    canOpen: session.canOpenCheckout,
+    unavailableMessage: 'Waiting payment could not be started. Please try again.',
+    rejectedFallback: 'Waiting payment was not completed.',
+  );
+}
+
+/// Same Cashfree web checkout used for waiting charges.
+///
+/// Returning from the SDK does not mean the trip fare is paid. The webhook
+/// remains the only writer of PAID.
+Future<void> openTripFareCheckout({
+  required String paymentSessionId,
+  required String cashfreeOrderId,
+  required String environment,
+}) {
+  final bool canOpen = paymentSessionId.isNotEmpty &&
+      cashfreeOrderId.isNotEmpty &&
+      (environment == 'sandbox' || environment == 'production');
+  return openCashfreeWebCheckout(
+    paymentSessionId: paymentSessionId,
+    cashfreeOrderId: cashfreeOrderId,
+    environment: environment,
+    canOpen: canOpen,
+    unavailableMessage: 'Online trip payment could not be started. Please try again.',
+    rejectedFallback: 'Online trip payment was not completed.',
+  );
+}
+
+Future<void> openCashfreeWebCheckout({
+  required String paymentSessionId,
+  required String cashfreeOrderId,
+  required String environment,
+  required bool canOpen,
+  required String unavailableMessage,
+  required String rejectedFallback,
+}) {
+  if (!canOpen) {
+    throw ApiException(
       code: 'PAYMENT_PROVIDER_UNAVAILABLE',
-      message: 'Waiting payment could not be started. Please try again.',
+      message: unavailableMessage,
     );
   }
-  final CFEnvironment environment = session.environment == 'production'
+  final CFEnvironment cfEnvironment = environment == 'production'
       ? CFEnvironment.PRODUCTION
       : CFEnvironment.SANDBOX;
   final CFSession cfSession = CFSessionBuilder()
-      .setEnvironment(environment)
-      .setOrderId(session.cashfreeOrderId)
-      .setPaymentSessionId(session.paymentSessionId)
+      .setEnvironment(cfEnvironment)
+      .setOrderId(cashfreeOrderId)
+      .setPaymentSessionId(paymentSessionId)
       .build();
   final CFWebCheckoutPayment payment =
       CFWebCheckoutPaymentBuilder().setSession(cfSession).build();
@@ -42,7 +82,7 @@ Future<void> openReceivableCheckout(ReceivableClearance session) {
         done.completeError(
           ApiException(
             code: 'PAYMENT_GATEWAY_REJECTED',
-            message: error.getMessage() ?? 'Waiting payment was not completed.',
+            message: error.getMessage() ?? rejectedFallback,
           ),
         );
       }

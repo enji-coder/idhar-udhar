@@ -64,6 +64,30 @@ describe('admin mappers', () => {
     });
     assert.equal(rider.name, 'Rider 3210');
     assert.equal(rider.source, 'api');
+    assert.equal(rider.vehicle, '');
+  });
+
+  it('maps the stored vehicle category instead of a generic label', () => {
+    const rider = mapRider({
+      rider_profile_id: 'r1',
+      phone_normalized: '9876543210',
+      name: 'Asha Patel',
+      email: 'asha@example.com',
+      online_status: 'OFFLINE',
+      approval_status: 'APPROVED',
+      vehicle_category_name: 'Scooty',
+      vehicle_registration: 'GJ01AB1234',
+      vehicle_model: 'Activa',
+      vehicle_color: 'White',
+      manufacturing_year: 2022,
+      driving_licence: 'GJ0120230001234',
+      profile_complete: true,
+    });
+    assert.equal(rider.vehicle, 'Scooty');
+    assert.equal(rider.vehicleNumber, 'GJ01AB1234');
+    assert.equal(rider.vehicleModel, 'Activa');
+    assert.equal(rider.profileComplete, true);
+    assert.equal(rider.drivingLicence, 'GJ0120230001234');
   });
 
   it('ignores Array.map index when mapping customers', () => {

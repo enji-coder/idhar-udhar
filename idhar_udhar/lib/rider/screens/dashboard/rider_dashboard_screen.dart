@@ -3,26 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
+import '../../data/local/rider_permissions.dart';
 import '../../data/models/recent_activity.dart';
 import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
 import '../../routing/rider_routes.dart';
-import '../../state/rider_session.dart';
 import '../../screens/earnings/rider_income_screen.dart';
 import '../../screens/orders/rider_history_screen.dart';
 import '../../screens/profile/rider_profile_screen.dart';
 import '../../screens/wallet/rider_wallet_screen.dart';
+import '../../state/rider_onboarding.dart';
+import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -61,7 +63,19 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(ref.read(riderSessionProvider.notifier).refreshProfile());
+      unawaited(() async {
+        await ref.read(riderSessionProvider.notifier).refreshProfile();
+        if (!mounted) return;
+        final session = ref.read(riderSessionProvider);
+        final blocked = riderHomeBlockRoute(
+          profileReady: session.profileReady,
+          profileComplete: session.profileComplete,
+          missingFields: session.missingFields,
+        );
+        if (blocked != null) {
+          await riderEnterAfterAuth(context, ref);
+        }
+      }());
       unawaited(ref.read(riderSessionProvider.notifier).refreshWallet());
       unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       unawaited(ref.read(riderSessionProvider.notifier).refreshNotices());
@@ -764,6 +778,10 @@ class _IncomingOrderCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: RiderSpacing.md),
+              if ((order.crn ?? '').trim().isNotEmpty) ...[
+                _miniRow('CRN', order.crn!.trim(), Icons.tag_rounded),
+                const SizedBox(height: RiderSpacing.sm),
+              ],
               _miniRow('Pickup', order.pickup, Icons.store_mall_directory_rounded),
               const SizedBox(height: RiderSpacing.sm),
               _miniRow('Drop', order.drop, Icons.location_on_rounded),

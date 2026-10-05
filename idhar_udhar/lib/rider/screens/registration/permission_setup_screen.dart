@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -13,7 +14,7 @@ import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_section_header.dart';
 
-class PermissionSetupScreen extends StatefulWidget {
+class PermissionSetupScreen extends ConsumerStatefulWidget {
   const PermissionSetupScreen({
     super.key,
     this.continueToDashboard = true,
@@ -23,10 +24,11 @@ class PermissionSetupScreen extends StatefulWidget {
   final bool continueToDashboard;
 
   @override
-  State<PermissionSetupScreen> createState() => _PermissionSetupScreenState();
+  ConsumerState<PermissionSetupScreen> createState() =>
+      _PermissionSetupScreenState();
 }
 
-class _PermissionSetupScreenState extends State<PermissionSetupScreen>
+class _PermissionSetupScreenState extends ConsumerState<PermissionSetupScreen>
     with WidgetsBindingObserver {
   bool _locationGranted = false;
   bool _cameraGranted = false;
@@ -232,7 +234,7 @@ class _PermissionSetupScreenState extends State<PermissionSetupScreen>
     await RiderPrefs.setInitialSetupComplete();
     if (!mounted) return;
     if (widget.continueToDashboard) {
-      context.go(RiderRoutes.dashboard);
+      await riderEnterAfterAuth(context, ref);
     } else {
       await context.push(RiderRoutes.registrationComplete);
     }

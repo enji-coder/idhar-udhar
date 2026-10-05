@@ -19,6 +19,12 @@ export class RiderOrdersController {
   constructor(private readonly orders: OrdersService) {}
 
   @Roles('RIDER')
+  @Get('ratings')
+  ratings(@CurrentAuth() auth: AuthContext) {
+    return this.orders.riderRatings(auth);
+  }
+
+  @Roles('RIDER')
   @Get('offers')
   listOffers(@CurrentAuth() auth: AuthContext) {
     return this.orders.listRiderOffers(auth);

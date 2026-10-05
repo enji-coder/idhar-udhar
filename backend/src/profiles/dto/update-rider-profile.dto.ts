@@ -31,4 +31,14 @@ export class UpdateRiderProfileDto {
   @IsOptional()
   @IsIn(RIDER_LANGUAGES)
   preferred_language?: (typeof RIDER_LANGUAGES)[number];
+
+  /**
+   * Driving licence collected on the driver-details step.
+   * Phone is intentionally absent: forbidNonWhitelisted rejects it.
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  @MaxLength(40)
+  driving_licence?: string;
 }

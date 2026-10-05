@@ -13,6 +13,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { UuidParamPipe } from '../common/uuid-param.pipe';
 import { AuthContext } from '../auth/types/auth-context';
 import { ConfirmOrderDto } from './dto/confirm-order.dto';
+import { RateOrderDto } from './dto/rate-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { PreviewVehicleFaresDto } from './dto/preview-vehicle-fares.dto';
 import { QuoteOrderDto } from './dto/quote-order.dto';
@@ -49,6 +50,12 @@ export class OrdersController {
   @Get()
   list(@CurrentAuth() auth: AuthContext) {
     return this.orders.listForCustomer(auth);
+  }
+
+  @Roles('CUSTOMER', 'RIDER', 'ADMIN')
+  @Get('crn/:crn')
+  getByCrn(@CurrentAuth() auth: AuthContext, @Param('crn') crn: string) {
+    return this.orders.getByCrn(auth, crn);
   }
 
   @Roles('CUSTOMER')
@@ -98,6 +105,17 @@ export class OrdersController {
     @Body() body: ConfirmOrderDto,
   ) {
     return this.orders.confirm(auth, id, body.fare_quote_id);
+  }
+
+  @Roles('CUSTOMER')
+  @Post(':id/rating')
+  @HttpCode(HttpStatus.CREATED)
+  rate(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+    @Body() body: RateOrderDto,
+  ) {
+    return this.orders.rateDriver(auth, id, body.stars, body.comment);
   }
 
   @Roles('CUSTOMER')
