@@ -108,12 +108,13 @@ export class CatalogRepository {
 
   /**
    * Online, approved riders with an active vehicle in this category.
-   * Used by SYSTEM dispatch after fare confirm (same offer seam as admin).
+   * Distance ranking happens in dispatch using the location store; this query
+   * only applies eligibility. The limit is a safety cap, not "first rider".
    */
   async listEligibleOnlineRidersForCategory(
     vehicleCategoryId: string,
     db: Queryable = this.postgres,
-    limit = 20,
+    limit = 200,
   ): Promise<string[]> {
     const result = await db.query<{ rider_profile_id: string }>(
       `
@@ -146,7 +147,7 @@ export class CatalogRepository {
     return result.rows.map((row) => row.rider_profile_id);
   }
 
-  /** Customer-safe assigned rider fields only. No phone/email/licence. */
+  /** Customer trip card: name, vehicle, and the rider phone already stored on the identity. */
   async findAssignedRiderDisplay(
     riderProfileId: string,
     db: Queryable = this.postgres,
@@ -154,18 +155,22 @@ export class CatalogRepository {
     name: string | null;
     vehicle_registration: string | null;
     vehicle_category_name: string | null;
+    phone: string | null;
   } | null> {
     const result = await db.query<{
       name: string | null;
       vehicle_registration: string | null;
       vehicle_category_name: string | null;
+      phone: string | null;
     }>(
       `
       SELECT
         d.name,
         v.registration AS vehicle_registration,
-        vc.name AS vehicle_category_name
+        vc.name AS vehicle_category_name,
+        i.phone_normalized AS phone
       FROM rider_profiles r
+      LEFT JOIN identities i ON i.identity_id = r.identity_id
       LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
       LEFT JOIN LATERAL (
         SELECT registration, vehicle_category_id

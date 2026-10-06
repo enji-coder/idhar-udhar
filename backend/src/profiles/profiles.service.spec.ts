@@ -16,6 +16,10 @@ function riderAuth(): AuthContext {
 
 describe('ProfilesService rider availability', () => {
   const identities = {
+    findRiderProfile: jest.fn(async () => ({
+      rider_profile_id: riderId,
+      identity_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    })),
     findRiderGate: jest.fn(),
     updateRiderOnlineStatus: jest.fn(),
     updateRiderLanguage: jest.fn(),

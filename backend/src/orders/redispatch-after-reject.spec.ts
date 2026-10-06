@@ -49,6 +49,10 @@ describe('redispatch after last reject', () => {
       compareAndSetStatus: jest.fn(async () => searchingOrder),
       insertStatusEvent: jest.fn(async () => undefined),
       riderHasLiveOrder: jest.fn(async () => false),
+      listStops: jest.fn(async () => [
+        { stop_type: 'PICKUP', latitude: '23.030000', longitude: '72.570000' },
+      ]),
+      listRiderIdsWithOffers: jest.fn(async () => [RIDER]),
       insertOffer: jest.fn(async () => ({
         order_offer_id: '88888888-8888-4888-8888-888888888888',
         order_id: ORDER,
@@ -94,7 +98,12 @@ describe('redispatch after last reject', () => {
       notifications as never,
       {} as never,
       { captureOnDelivered: jest.fn(async () => undefined) } as never,
-      { getRiderLocationForConsumer: jest.fn() } as never,
+      {
+        getRiderLocationForConsumer: jest.fn(async () => ({
+          stale: false,
+          location: { latitude: 23.04, longitude: 72.58 },
+        })),
+      } as never,
     );
 
     const result = await service.rejectOffer(

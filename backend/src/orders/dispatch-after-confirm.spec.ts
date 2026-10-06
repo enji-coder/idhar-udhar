@@ -39,6 +39,10 @@ describe('dispatch after confirm', () => {
       findSnapshotByOrder: undefined,
       insertOffer: jest.fn(async () => offer),
       riderHasLiveOrder: jest.fn(async () => false),
+      listStops: jest.fn(async () => [
+        { stop_type: 'PICKUP', latitude: '23.030000', longitude: '72.570000' },
+      ]),
+      listRiderIdsWithOffers: jest.fn(async () => []),
       compareAndSetStatus: jest.fn(async () => ({
         ...searchingOrder,
         canonical_status: 'OFFERED',
@@ -85,7 +89,12 @@ describe('dispatch after confirm', () => {
       notifications as never,
       {} as never,
       { captureOnDelivered: jest.fn(async () => undefined) } as never,
-      { getRiderLocationForConsumer: jest.fn() } as never,
+      {
+        getRiderLocationForConsumer: jest.fn(async () => ({
+          stale: false,
+          location: { latitude: 23.0225, longitude: 72.5714 },
+        })),
+      } as never,
     );
 
     const result = await service.dispatchOffersForSearchingOrder(ORDER);

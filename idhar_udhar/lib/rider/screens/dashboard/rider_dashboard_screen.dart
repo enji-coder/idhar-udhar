@@ -8,9 +8,11 @@ import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../data/location/rider_location_publisher.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../data/local/rider_permissions.dart';
 import '../../data/models/recent_activity.dart';
@@ -58,6 +60,7 @@ class RiderDashboardScreen extends ConsumerStatefulWidget {
 class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
   int _tab = 0;
   Timer? _offerPoll;
+  RiderLocationPublisher? _locationPublisher;
 
   @override
   void initState() {
@@ -84,22 +87,46 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
         if (!session.isAuthenticated || !session.isApproved) {
           return;
         }
+        _syncLocationPublishing();
         if (session.onlineStatus != 'ONLINE') {
           return;
         }
         unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       });
+      _syncLocationPublishing();
     });
+  }
+
+  /// Nearest-rider dispatch reads the location store. GPS is published while
+  /// the rider is online, not only during an active delivery.
+  void _syncLocationPublishing() {
+    final bool online =
+        ref.read(riderSessionProvider).onlineStatus == 'ONLINE';
+    if (!online) {
+      _locationPublisher?.stop();
+      _locationPublisher = null;
+      return;
+    }
+    _locationPublisher ??= RiderLocationPublisher(
+      location: ref.read(deviceLocationServiceProvider),
+      api: ref.read(riderApiProvider),
+    )..start();
   }
 
   @override
   void dispose() {
     _offerPoll?.cancel();
+    _locationPublisher?.stop();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<RiderSessionState>(riderSessionProvider, (previous, next) {
+      if (previous?.onlineStatus != next.onlineStatus) {
+        _syncLocationPublishing();
+      }
+    });
     return Scaffold(
       backgroundColor: RiderColors.background,
       drawer: const RiderDrawer(),

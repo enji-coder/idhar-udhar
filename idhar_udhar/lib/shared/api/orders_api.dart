@@ -120,17 +120,20 @@ class ApiAssignedRider {
     this.name,
     this.vehicleRegistration,
     this.vehicleCategoryName,
+    this.phone,
   });
 
   final String? name;
   final String? vehicleRegistration;
   final String? vehicleCategoryName;
+  final String? phone;
 
   factory ApiAssignedRider.fromJson(Map<String, Object?> json) {
     return ApiAssignedRider(
       name: jsonString(json['name']),
       vehicleRegistration: jsonString(json['vehicle_registration']),
       vehicleCategoryName: jsonString(json['vehicle_category_name']),
+      phone: jsonString(json['phone']),
     );
   }
 }

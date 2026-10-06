@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/local/rider_permissions.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_onboarding.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -60,9 +61,7 @@ class _RiderProfileSetupScreenState
     _email = TextEditingController(text: profile.email);
     _dobDate = profile.dateOfBirth;
     _dob = TextEditingController(
-      text: _dobDate == null
-          ? ''
-          : DateFormat('dd MMM yyyy').format(_dobDate!),
+      text: _dobDate == null ? '' : DateFormat('dd MMM yyyy').format(_dobDate!),
     );
     _language = profile.language.trim().isEmpty ? null : profile.language;
     _photoPath = profile.photoUrl;
@@ -155,8 +154,10 @@ class _RiderProfileSetupScreenState
 
   Future<void> _continue() async {
     if (_saving || !_validate()) return;
+    debugPrint('CONTINUE_START');
     setState(() => _saving = true);
     try {
+      debugPrint('BEFORE_UPDATE_PROFILE photoPath=$_photoPath');
       await ref.read(riderSessionProvider.notifier).updateProfile(
             name: _name.text.trim(),
             email: _email.text.trim(),
@@ -164,13 +165,35 @@ class _RiderProfileSetupScreenState
             preferredLanguage: RiderSessionNotifier.languageCode(_language),
             photoPath: _photoPath,
           );
+      debugPrint('AFTER_UPDATE_PROFILE mounted=$mounted');
       if (!mounted) return;
       final session = ref.read(riderSessionProvider);
-      if (session.onboardingResume) {
+      debugPrint(
+        'BEFORE_NAVIGATION resume=${session.onboardingResume} '
+        'complete=${session.profileComplete} '
+        'missing=${session.missingFields}',
+      );
+      if (session.onboardingResume || session.profileComplete) {
         await riderEnterAfterAuth(context, ref);
+        debugPrint('AFTER_NAVIGATION enterAfterAuth');
         return;
       }
-      unawaited(context.push(RiderRoutes.vehicleType));
+      final blocked = riderHomeBlockRoute(
+        profileReady: session.profileReady,
+        profileComplete: session.profileComplete,
+        missingFields: session.missingFields,
+      );
+      if (blocked == null) {
+        await riderEnterAfterAuth(context, ref);
+        debugPrint('AFTER_NAVIGATION enterAfterAuth unblocked');
+        return;
+      }
+      if (blocked == RiderRoutes.profileSetup) {
+        debugPrint('AFTER_NAVIGATION stay profileSetup');
+        return;
+      }
+      unawaited(context.push(blocked));
+      debugPrint('AFTER_NAVIGATION push $blocked');
     } on ApiException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -182,6 +205,7 @@ class _RiderProfileSetupScreenState
         const SnackBar(content: Text('Profile could not be saved.')),
       );
     } finally {
+      debugPrint('CONTINUE_FINALLY mounted=$mounted');
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -310,13 +334,11 @@ class _RiderProfileSetupScreenState
                       ),
                       border: OutlineInputBorder(
                         borderRadius: RiderRadius.lgAll,
-                        borderSide:
-                            const BorderSide(color: RiderColors.border),
+                        borderSide: const BorderSide(color: RiderColors.border),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: RiderRadius.lgAll,
-                        borderSide:
-                            const BorderSide(color: RiderColors.border),
+                        borderSide: const BorderSide(color: RiderColors.border),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: RiderRadius.lgAll,

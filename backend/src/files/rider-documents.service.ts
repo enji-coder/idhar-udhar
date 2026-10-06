@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
+import { IdentityRepository } from '../auth/identity/identity.repository';
 import { AuthContext } from '../auth/types/auth-context';
 import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
@@ -38,6 +39,7 @@ export class RiderDocumentsService {
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
     private readonly notifications: NotificationService,
     private readonly audit: AuditService,
+    private readonly identities: IdentityRepository,
   ) {}
 
   async listOwn(auth: AuthContext) {
@@ -342,12 +344,24 @@ export class RiderDocumentsService {
     };
   }
 
+  private async ownRiderProfileId(auth: AuthContext): Promise<string> {
+    const profile = await this.identities.findRiderProfile(auth.identityId);
+    if (profile) {
+      return profile.rider_profile_id;
+    }
+    if (auth.profileId) {
+      return auth.profileId;
+    }
+    throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+  }
+
   async uploadProfilePicture(auth: AuthContext, file: UploadedBinary | undefined) {
     this.assertRider(auth);
     const validated = validateProfileImage(file);
     const fileId = randomUUID();
+    const riderProfileId = await this.ownRiderProfileId(auth);
     const storageKey = riderProfilePictureObjectKey({
-      riderProfileId: auth.profileId,
+      riderProfileId,
       fileId,
       fileName: validated.safeFileName,
     });
@@ -359,7 +373,7 @@ export class RiderDocumentsService {
     });
     try {
       const replaced = await this.postgres.transaction(async (tx) => {
-        const locked = await this.files.lockRiderProfile(auth.profileId, tx);
+        const locked = await this.files.lockRiderProfile(riderProfileId, tx);
         if (!locked) {
           throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider was not found', 404);
         }
@@ -375,8 +389,8 @@ export class RiderDocumentsService {
           },
           tx,
         );
-        const previous = await this.files.findProfilePicture(auth.profileId, tx);
-        await this.files.setProfilePicture(auth.profileId, fileId, tx);
+        const previous = await this.files.findProfilePicture(riderProfileId, tx);
+        await this.files.setProfilePicture(riderProfileId, fileId, tx);
         if (previous) {
           await this.files.deleteStoredFile(previous.file_id, tx);
         }

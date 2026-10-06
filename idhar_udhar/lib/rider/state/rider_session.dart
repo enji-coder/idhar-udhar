@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
@@ -231,15 +234,19 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     String? photoPath,
     String? drivingLicence,
   }) async {
+    debugPrint('UPDATE_PROFILE_START photoPath=$photoPath');
     if (photoPath != null &&
         photoPath.isNotEmpty &&
         !photoPath.startsWith('http')) {
+      debugPrint('BEFORE_PHOTO_UPLOAD');
       final picture = await _profiles.uploadRiderProfilePicture(photoPath);
+      debugPrint('AFTER_PHOTO_UPLOAD');
       final RiderProfile current = _ref.read(riderProfileStateProvider);
       _ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
         photoUrl: picture.downloadUrl,
       );
     }
+    debugPrint('BEFORE_PROFILE_PUT');
     final updated = await _profiles.updateRider(
       name: name,
       email: email,
@@ -247,7 +254,14 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       preferredLanguage: preferredLanguage,
       drivingLicence: drivingLicence,
     );
+    debugPrint(
+      'AFTER_PROFILE_PUT complete=${updated.profileComplete} '
+      'missing=${updated.missingFields}',
+    );
+    debugPrint('BEFORE_REMEMBER_PROFILE');
     await _rememberProfile(updated);
+    debugPrint('AFTER_REMEMBER_PROFILE');
+    debugPrint('UPDATE_PROFILE_END');
   }
 
   Future<void> saveVehicle({
@@ -355,23 +369,10 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
         profile.onlineStatus == 'ONLINE';
     final String formatted = formatRiderPhone(state.phone);
     final String languageLabel = _languageLabel(profile.preferredLanguage);
-    String? photoUrl = _ref.read(riderProfileStateProvider).photoUrl;
-    if (profile.hasProfilePicture) {
-      final picture = await _profiles.riderProfilePicture();
-      if (picture != null && picture.downloadUrl.isNotEmpty) {
-        photoUrl = picture.downloadUrl;
-      }
-    }
-    double rating = _ref.read(riderProfileStateProvider).rating;
-    String? latestReview = _ref.read(riderProfileStateProvider).latestReview;
-    try {
-      final RiderRatingSummary summary = await _rider.ratings();
-      rating = summary.average;
-      latestReview = summary.latestComment;
-    } catch (_) {
-      // Profile still loads if the rating summary is unavailable.
-    }
     final RiderProfile current = _ref.read(riderProfileStateProvider);
+    final String? photoUrl = current.photoUrl;
+    final double rating = current.rating;
+    final String? latestReview = current.latestReview;
     _ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
       id: profile.riderProfileId.isNotEmpty
           ? profile.riderProfileId
@@ -409,6 +410,36 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
         licenseNumber: licence,
       );
     }
+    unawaited(_enrichProfilePresentation(profile));
+  }
+
+  Future<void> _enrichProfilePresentation(RiderApiProfile profile) async {
+    String? photoUrl = _ref.read(riderProfileStateProvider).photoUrl;
+    if (profile.hasProfilePicture) {
+      try {
+        final picture = await _profiles.riderProfilePicture();
+        if (picture != null && picture.downloadUrl.isNotEmpty) {
+          photoUrl = picture.downloadUrl;
+        }
+      } catch (_) {
+        // Keep existing photo URL if the picture fetch fails or hangs.
+      }
+    }
+    double rating = _ref.read(riderProfileStateProvider).rating;
+    String? latestReview = _ref.read(riderProfileStateProvider).latestReview;
+    try {
+      final RiderRatingSummary summary = await _rider.ratings();
+      rating = summary.average;
+      latestReview = summary.latestComment;
+    } catch (_) {
+      // Profile still loads if the rating summary is unavailable.
+    }
+    final RiderProfile current = _ref.read(riderProfileStateProvider);
+    _ref.read(riderProfileStateProvider.notifier).state = current.copyWith(
+      photoUrl: photoUrl,
+      rating: rating,
+      latestReview: latestReview,
+    );
   }
 
   static String _languageLabel(String? code) {

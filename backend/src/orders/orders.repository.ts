@@ -577,6 +577,38 @@ export class OrdersRepository {
     return result.rows[0] ?? null;
   }
 
+  async listRiderIdsWithOffers(
+    orderId: string,
+    db: Queryable = this.postgres,
+  ): Promise<string[]> {
+    const result = await db.query<{ rider_profile_id: string }>(
+      `
+      SELECT rider_profile_id
+      FROM order_offers
+      WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    return result.rows.map((row) => row.rider_profile_id);
+  }
+
+  async expirePendingOffersOlderThan(
+    cutoff: Date,
+    db: Queryable = this.postgres,
+  ): Promise<Array<{ order_id: string; order_offer_id: string }>> {
+    const result = await db.query<{ order_id: string; order_offer_id: string }>(
+      `
+      UPDATE order_offers
+      SET status = 'EXPIRED', responded_at = now()
+      WHERE status = 'PENDING'
+        AND created_at < $1
+      RETURNING order_id, order_offer_id
+      `,
+      [cutoff],
+    );
+    return result.rows;
+  }
+
   async insertOffer(
     input: { orderId: string; riderProfileId: string },
     db: Queryable,

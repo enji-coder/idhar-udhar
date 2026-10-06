@@ -157,7 +157,7 @@ abstract final class OrderMapper {
                 : 'Your rider',
             vehicleLabel: vehicleLabel,
             rating: 0,
-            phone: '',
+            phone: assigned?.phone?.trim() ?? '',
             trips: 0,
           );
     return MockOrder(

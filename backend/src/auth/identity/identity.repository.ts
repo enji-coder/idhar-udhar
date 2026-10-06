@@ -245,7 +245,7 @@ export class IdentityRepository {
 
   async ensureRiderProfile(
     identityId: string,
-    db: Queryable,
+    db: Queryable = this.postgres,
   ): Promise<RiderProfileRow> {
     const existing = await this.findRiderProfile(identityId, db);
     if (existing) {

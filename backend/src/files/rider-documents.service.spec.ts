@@ -101,6 +101,7 @@ describe('RiderDocumentsService', () => {
     storage,
     notifications as unknown as NotificationService,
     audit as unknown as AuditService,
+    { findRiderProfile: jest.fn(async () => null) } as never,
   );
 
   beforeEach(() => {

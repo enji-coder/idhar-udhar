@@ -59,14 +59,23 @@ export class ProfilesService {
     return this.serializeCustomerProfile(updated, identity?.phone_normalized);
   }
 
+  /**
+   * The signed-in identity owns at most one rider profile. Session profile id
+   * can lag that row; self-service reads and writes follow the identity.
+   */
+  private async ownRiderProfile(auth: AuthContext) {
+    const existing = await this.identities.findRiderProfile(auth.identityId);
+    if (existing) {
+      return existing;
+    }
+    return this.identities.ensureRiderProfile(auth.identityId);
+  }
+
   async rider(auth: AuthContext) {
     if (auth.role !== 'RIDER') {
       throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
     }
-    const profile = await this.identities.findRiderProfile(auth.identityId);
-    if (!profile || profile.rider_profile_id !== auth.profileId) {
-      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
-    }
+    const profile = await this.ownRiderProfile(auth);
     const identity = await this.identities.findById(auth.identityId);
     const driver = await this.identities.findRiderDriver(profile.rider_profile_id);
     const vehicle = await this.identities.findActiveRiderVehicle(
@@ -96,10 +105,7 @@ export class ProfilesService {
     if (auth.role !== 'RIDER') {
       throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
     }
-    const profile = await this.identities.findRiderProfile(auth.identityId);
-    if (!profile || profile.rider_profile_id !== auth.profileId) {
-      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
-    }
+    const profile = await this.ownRiderProfile(auth);
 
     if (input.email !== undefined) {
       const email =
@@ -146,7 +152,7 @@ export class ProfilesService {
         );
       }
       await this.identities.upsertRiderDriverDetails({
-        riderProfileId: auth.profileId,
+        riderProfileId: profile.rider_profile_id,
         name,
         dateOfBirth: input.dateOfBirth,
         drivingLicence: licence,
@@ -158,7 +164,7 @@ export class ProfilesService {
 
     if (input.preferredLanguage !== undefined) {
       await this.identities.updateRiderLanguage(
-        auth.profileId,
+        profile.rider_profile_id,
         input.preferredLanguage,
       );
     }
@@ -179,13 +185,10 @@ export class ProfilesService {
     if (auth.role !== 'RIDER') {
       throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
     }
-    const profile = await this.identities.findRiderProfile(auth.identityId);
-    if (!profile || profile.rider_profile_id !== auth.profileId) {
-      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
-    }
+    const profile = await this.ownRiderProfile(auth);
     try {
       await this.identities.upsertRiderVehicle({
-        riderProfileId: auth.profileId,
+        riderProfileId: profile.rider_profile_id,
         vehicleCategoryId: input.vehicleCategoryId,
         registration: input.registration.trim().toUpperCase(),
         model: input.model.trim(),
@@ -227,8 +230,9 @@ export class ProfilesService {
     if (auth.role !== 'RIDER') {
       throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
     }
-    const gate = await this.identities.findRiderGate(auth.profileId);
-    if (!gate || gate.rider_profile_id !== auth.profileId) {
+    const own = await this.ownRiderProfile(auth);
+    const gate = await this.identities.findRiderGate(own.rider_profile_id);
+    if (!gate) {
       throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
     }
     if (gate.deactivated_at) {
@@ -242,7 +246,7 @@ export class ProfilesService {
       );
     }
     const updated = await this.identities.updateRiderOnlineStatus(
-      auth.profileId,
+      own.rider_profile_id,
       online ? 'ONLINE' : 'OFFLINE',
     );
     if (!updated) {

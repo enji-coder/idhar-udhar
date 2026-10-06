@@ -19,6 +19,7 @@ import {
 } from '../fare/fare.repository';
 import { FareService } from '../fare/fare.service';
 import { formatInr } from '../fare/money';
+import { haversineMeters } from '../routing/coordinates';
 import { RoutingService } from '../routing/routing.service';
 import { riderMayAccessRides } from '../files/rider-verification';
 import { riderProfileGaps } from '../profiles/rider-profile-completion';
@@ -223,6 +224,7 @@ export class OrdersService {
             name: assignedRider.name,
             vehicle_registration: assignedRider.vehicle_registration,
             vehicle_category_name: assignedRider.vehicle_category_name,
+            phone: assignedRider.phone,
           }
         : null,
       ...(auth.role === 'RIDER'
@@ -578,9 +580,9 @@ export class OrdersService {
   }
 
   /**
-   * SYSTEM broadcast after fare confirm. Creates pending offers for eligible
-   * ONLINE riders with a matching active vehicle. No GPS radius (architecture
-   * seam: PostgreSQL offers; Redis/geo matching is a later decision).
+   * Offers the nearest eligible online rider who has a fresh GPS fix.
+   * One offer at a time so a reject or expiry can try the next nearest rider.
+   * Riders without a recent location are skipped, not replaced by a random id.
    */
   async dispatchOffersForSearchingOrder(orderId: string) {
     return this.postgres.transaction(async (tx) => {
@@ -592,29 +594,62 @@ export class OrdersService {
       if (!snapshot) {
         return { offered: 0 };
       }
+      const stops = await this.orders.listStops(order.order_id, tx);
+      const pickup = stops.find((stop) => stop.stop_type === 'PICKUP');
+      const pickupLat = pickup ? Number(pickup.latitude) : Number.NaN;
+      const pickupLng = pickup ? Number(pickup.longitude) : Number.NaN;
+      if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+        return { offered: 0 };
+      }
+      const alreadyOffered = new Set(
+        await this.orders.listRiderIdsWithOffers(order.order_id, tx),
+      );
       const candidates = await this.catalog.listEligibleOnlineRidersForCategory(
         order.vehicle_category_id,
         tx,
       );
-      let offered = 0;
+      const ranked: Array<{ riderProfileId: string; meters: number }> = [];
       for (const riderProfileId of candidates) {
+        if (alreadyOffered.has(riderProfileId)) {
+          continue;
+        }
         if (await this.orders.riderHasLiveOrder(riderProfileId, tx)) {
           continue;
         }
+        const fix = await this.locations.getRiderLocationForConsumer(riderProfileId);
+        const latitude = fix.location?.latitude;
+        const longitude = fix.location?.longitude;
+        if (
+          fix.stale ||
+          typeof latitude !== 'number' ||
+          typeof longitude !== 'number'
+        ) {
+          continue;
+        }
+        ranked.push({
+          riderProfileId,
+          meters: haversineMeters(
+            { latitude: pickupLat, longitude: pickupLng },
+            { latitude, longitude },
+          ),
+        });
+      }
+      ranked.sort((a, b) => a.meters - b.meters);
+      for (const candidate of ranked) {
         try {
           await this.createOfferInTx({
             orderId: order.order_id,
-            riderProfileId,
+            riderProfileId: candidate.riderProfileId,
             actor: 'SYSTEM',
             actorProfileId: null,
             tx,
           });
-          offered += 1;
+          return { offered: 1 };
         } catch {
-          // Skip ineligible / duplicate / racing riders; keep dispatching others.
+          // Duplicate or ineligible; try the next nearest rider.
         }
       }
-      return { offered };
+      return { offered: 0 };
     });
   }
 
@@ -742,6 +777,7 @@ export class OrdersService {
         409,
       );
     }
+    await this.releaseExpiredOffers();
     const ttlMs = this.offerTtlMs();
     const rows = await this.orders.listOffersForRider(auth.profileId);
     const now = Date.now();
@@ -1092,6 +1128,45 @@ export class OrdersService {
       await this.settlement.onCancelled(updated.order_id, tx);
     }
     return updated;
+  }
+
+  /** Expires pending offers past TTL and offers the next nearest rider. */
+  private async releaseExpiredOffers(): Promise<void> {
+    const cutoff = new Date(Date.now() - this.offerTtlMs());
+    const expired = await this.orders.expirePendingOffersOlderThan(cutoff);
+    const orderIds = [...new Set(expired.map((row) => row.order_id))];
+    for (const orderId of orderIds) {
+      let searching = false;
+      try {
+        searching = await this.postgres.transaction(async (tx) => {
+          const order = await this.orders.lockById(orderId, tx);
+          if (!order || order.canonical_status !== 'OFFERED') {
+            return order?.canonical_status === 'SEARCHING';
+          }
+          const remaining = await this.orders.countPendingOffers(order.order_id, tx);
+          if (remaining > 0) {
+            return false;
+          }
+          await this.applyTransition(
+            {
+              order,
+              to: 'SEARCHING',
+              actor: 'SYSTEM',
+              actorProfileId: null,
+              reason: 'offer_expired',
+              eventKey: `OFFERED->SEARCHING:expired:${order.order_id}`,
+            },
+            tx,
+          );
+          return true;
+        });
+      } catch {
+        searching = false;
+      }
+      if (searching) {
+        await this.redispatchSearchingQuietly(orderId);
+      }
+    }
   }
 
   /** Best-effort SYSTEM redispatch; never fails the caller path. */

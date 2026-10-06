@@ -17,6 +17,7 @@ import '../../../../core/theme/theme.dart';
 import '../../../../core/utils/responsive.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/custom_snack_bar.dart';
+import '../../../../shared/widgets/customer_order_ui.dart';
 import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/status_chip.dart';
@@ -183,98 +184,13 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                         separatorBuilder: (_, __) =>
                             const SizedBox(height: AppSpacing.md),
                         itemBuilder: (context, index) {
-                          final order = orders[index];
-                          return Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: AppRadius.xlAll,
-                              onTap: () => context.push(
-                                AppRoutes.orderDetailsPath(order.apiId),
-                              ),
-                              child: GlassContainer(
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            '₹${order.fare.toStringAsFixed(0)}',
-                                            style: AppTextStyles.bodyMedium
-                                                .copyWith(
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          Text(
-                                            order.displayLabel,
-                                            style: AppTextStyles.caption,
-                                          ),
-                                          if (order.crn != null &&
-                                              order.crn!.isNotEmpty)
-                                            Text(
-                                              'CRN ${order.crn}',
-                                              style: AppTextStyles.caption,
-                                            ),
-                                          const SizedBox(height: AppSpacing.xs),
-                                          Text(
-                                            'Pickup',
-                                            style: AppTextStyles.caption
-                                                .copyWith(
-                                              color: AppColors.textSecondary,
-                                            ),
-                                          ),
-                                          Text(
-                                            order.pickup.address,
-                                            style: AppTextStyles.bodyMedium,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: AppSpacing.xs),
-                                          Text(
-                                            'Drop',
-                                            style: AppTextStyles.caption
-                                                .copyWith(
-                                              color: AppColors.textSecondary,
-                                            ),
-                                          ),
-                                          Text(
-                                            order.drop.address,
-                                            style: AppTextStyles.bodyMedium,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: AppSpacing.xs),
-                                          Text(
-                                            'Status: ${order.statusLabel}',
-                                            style: AppTextStyles.caption
-                                                .copyWith(
-                                              color: AppColors.orange,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          Align(
-                                            alignment: Alignment.centerLeft,
-                                            child: TextButton(
-                                              onPressed: () =>
-                                                  unawaited(_bookAgain(order)),
-                                              child: const Text('Book Again'),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: AppSpacing.md),
-                                    SafeAssetImage(
-                                      path: order.vehicle.imagePath,
-                                      height: 72,
-                                      fit: BoxFit.contain,
-                                    ),
-                                  ],
-                                ),
-                              ),
+                          final MockOrder order = orders[index];
+                          return OrderHistoryCard(
+                            order: order,
+                            onTap: () => context.push(
+                              AppRoutes.orderDetailsPath(order.apiId),
                             ),
+                            onBookAgain: () => unawaited(_bookAgain(order)),
                           );
                         },
                       ),

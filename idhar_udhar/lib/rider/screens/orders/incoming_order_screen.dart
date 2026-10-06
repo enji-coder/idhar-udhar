@@ -85,10 +85,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         if (!mounted) return;
         if (_secondsLeft <= 1) {
           _timer?.cancel();
-          setState(() {
-            _secondsLeft = 0;
-            _expired = true;
-          });
+          unawaited(_reject());
         } else {
           setState(() => _secondsLeft -= 1);
         }
