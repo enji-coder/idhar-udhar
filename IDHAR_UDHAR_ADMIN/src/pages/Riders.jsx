@@ -78,10 +78,17 @@ export default function Riders() {
     setWorkingId(row.id);
     try {
       const listed = await fetchAdminRiderDocuments(row.id);
-      const pending = (listed?.documents || []).filter(
-        (doc) => doc?.is_current !== false && doc.rider_document_id && doc.status !== 'APPROVED',
+      const current = (listed?.documents || []).filter(
+        (doc) => doc?.is_current !== false && doc.rider_document_id,
       );
       let approvalStatus = listed?.approval_status || row.approval || 'PENDING';
+      const seen = new Set();
+      const pending = current.filter((doc) => {
+        if (approvalStatus === 'APPROVED' && doc.status === 'APPROVED') return false;
+        if (seen.has(doc.rider_document_id)) return false;
+        seen.add(doc.rider_document_id);
+        return true;
+      });
       if (pending.length === 0) {
         try {
           await refreshRiders();
