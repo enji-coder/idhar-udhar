@@ -670,6 +670,29 @@ export class OrdersRepository {
     return result.rows[0] ?? null;
   }
 
+  async listSearchingOrderIdsForRider(
+    riderProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<string[]> {
+    const result = await db.query<{ order_id: string }>(
+      `
+      SELECT o.order_id
+      FROM orders o
+      WHERE o.canonical_status = 'SEARCHING'
+        AND o.vehicle_category_id IN (
+          SELECT v.vehicle_category_id
+          FROM vehicles v
+          WHERE v.rider_profile_id = $1
+            AND v.active = TRUE
+        )
+      ORDER BY o.created_at ASC
+      LIMIT 10
+      `,
+      [riderProfileId],
+    );
+    return result.rows.map((row) => row.order_id);
+  }
+
   async listOffersForRider(
     riderProfileId: string,
     db: Queryable = this.postgres,

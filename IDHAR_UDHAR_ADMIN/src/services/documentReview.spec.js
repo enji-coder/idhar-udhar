@@ -97,6 +97,17 @@ describe('admin document review', () => {
     assert.equal(page.includes("can('riders', 'reject')"), true);
   });
 
+  it('calls the existing document approval API from the riders list and deletes through the admin rider route', () => {
+    const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../pages/Riders.jsx'), 'utf8');
+    assert.equal(page.includes('Rider approval is not available on the server yet.'), false);
+    assert.equal(page.includes('Deleting riders from Admin is not available on the server yet.'), false);
+    assert.equal(page.includes('approveAdminDocument'), true);
+    assert.equal(page.includes('fetchAdminRiderDocuments'), true);
+    assert.equal(page.includes('deleteAdminRider'), true);
+    assert.equal(page.includes('Assign Vehicle'), false);
+    assert.equal(page.includes('>Edit<'), false);
+  });
+
   it('does not synthesize document rows for API riders', () => {
     const enrichment = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'profileEnrichment.js'), 'utf8');
     const start = enrichment.indexOf('export function riderDocumentsFor');

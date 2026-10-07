@@ -23,6 +23,8 @@ describe('ProfilesService rider availability', () => {
     findRiderGate: jest.fn(),
     updateRiderOnlineStatus: jest.fn(),
     updateRiderLanguage: jest.fn(),
+    findAdminProfile: jest.fn(),
+    deactivateRider: jest.fn(),
   };
   const service = new ProfilesService(identities as unknown as IdentityRepository);
 
@@ -111,6 +113,66 @@ describe('ProfilesService rider availability', () => {
       approval_status: 'APPROVED',
       online_status: 'ONLINE',
     });
+  });
+
+  it('soft-deletes an active rider and keeps the stored deactivation', async () => {
+    const adminId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    identities.findAdminProfile.mockResolvedValue({
+      admin_profile_id: adminId,
+      active: true,
+    });
+    const deactivatedAt = new Date('2026-10-07T10:00:00.000Z');
+    identities.deactivateRider.mockResolvedValue({
+      rider_profile_id: riderId,
+      deactivated_at: deactivatedAt,
+      online_status: 'OFFLINE',
+    });
+
+    const result = await service.deactivateRider(
+      {
+        identityId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        role: 'ADMIN',
+        profileId: adminId,
+      },
+      riderId,
+    );
+
+    expect(identities.deactivateRider).toHaveBeenCalledWith(riderId);
+    expect(result).toEqual({
+      deleted: true,
+      rider_profile_id: riderId,
+      deactivated_at: deactivatedAt,
+      online_status: 'OFFLINE',
+    });
+  });
+
+  it('does not pretend a missing rider was deleted', async () => {
+    const adminId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    identities.findAdminProfile.mockResolvedValue({
+      admin_profile_id: adminId,
+      active: true,
+    });
+    identities.deactivateRider.mockResolvedValue(null);
+
+    await expect(
+      service.deactivateRider(
+        {
+          identityId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          role: 'ADMIN',
+          profileId: adminId,
+        },
+        riderId,
+      ),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+  });
+
+  it('refuses rider deletion without an admin role', async () => {
+    await expect(service.deactivateRider(riderAuth(), riderId)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    expect(identities.deactivateRider).not.toHaveBeenCalled();
   });
 
   it('refuses a non-rider language update', async () => {

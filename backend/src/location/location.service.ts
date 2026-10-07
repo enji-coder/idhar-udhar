@@ -31,8 +31,9 @@ export class LocationService {
     }
     const recordedAt = this.parseTimestamp(body.timestamp);
     const receivedAt = new Date();
+    const riderProfileId = await this.riderProfileId(auth);
     const fix: RiderLocationFix = {
-      riderProfileId: auth.profileId,
+      riderProfileId,
       identityId: auth.identityId,
       latitude: coords.latitude,
       longitude: coords.longitude,
@@ -44,7 +45,7 @@ export class LocationService {
       receivedAt,
     };
     await this.store.upsert(fix);
-    await this.identities.touchRiderLastSeen(auth.profileId);
+    await this.identities.touchRiderLastSeen(riderProfileId);
     return this.serialize(fix);
   }
 
@@ -52,7 +53,7 @@ export class LocationService {
     if (auth.role !== 'RIDER') {
       throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider role required', 403);
     }
-    const fix = await this.store.get(auth.profileId);
+    const fix = await this.store.get(await this.riderProfileId(auth));
     return {
       store: this.store.backend,
       durable: this.store.durable,
@@ -81,6 +82,15 @@ export class LocationService {
       location: this.serializeFix(fix),
       stale: ageMs > 120_000,
     };
+  }
+
+  /**
+   * Online status is stored on the identity's rider profile. The session
+   * profile id can lag that row, so GPS must use the same id dispatch reads.
+   */
+  private async riderProfileId(auth: AuthContext): Promise<string> {
+    const profile = await this.identities.findRiderProfile(auth.identityId);
+    return profile?.rider_profile_id ?? auth.profileId;
   }
 
   private parseTimestamp(raw: string): Date {

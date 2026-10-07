@@ -92,6 +92,9 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   @override
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
+    final user = ref.watch(sessionProvider).user;
+    final String senderName = user?.name.trim() ?? '';
+    final String senderPhone = user?.phone.trim() ?? '';
     final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
     final bool quoteCurrent =
         hold != null && hold.bookingKey == draft.quoteBookingKey;
@@ -120,7 +123,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
               const SizedBox(width: 44),
             ],
           ),
-          const SizedBox(height: AppSpacing.xl),
+          const SizedBox(height: AppSpacing.lg),
           GlassContainer(
             hero: true,
             showAmbientGlow: true,
@@ -128,19 +131,29 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _row('Pickup', draft.pickup == null ? '—' : draft.locationAddress(draft.pickup!)),
-                const Divider(height: 24),
-                _row('Drop', draft.drop == null ? '—' : draft.locationAddress(draft.drop!)),
-                if (draft.receiverName.trim().isNotEmpty) ...[
-                  const Divider(height: 24),
-                  _row('Receiver', draft.receiverName.trim()),
-                ],
-                if (draft.receiverMobile.trim().isNotEmpty) ...[
-                  const Divider(height: 24),
-                  _row('Receiver mobile', draft.receiverMobile.trim()),
-                ],
+                _sectionTitle('Route'),
+                const SizedBox(height: AppSpacing.md),
+                _stop(
+                  label: 'Pickup',
+                  value: draft.pickup == null ? '—' : draft.locationAddress(draft.pickup!),
+                  color: AppColors.orange,
+                  showLine: true,
+                ),
+                _stop(
+                  label: 'Drop',
+                  value: draft.drop == null ? '—' : draft.locationAddress(draft.drop!),
+                  color: AppColors.navy,
+                  showLine: draft.extraDrops.isNotEmpty,
+                ),
+                for (int i = 0; i < draft.extraDrops.length; i++)
+                  _stop(
+                    label: 'Drop ${i + 2}',
+                    value: draft.locationAddress(draft.extraDrops[i]),
+                    color: AppColors.navy,
+                    showLine: i < draft.extraDrops.length - 1,
+                  ),
                 if (draft.hasRouteForCurrentStops) ...[
-                  const Divider(height: 24),
+                  const SizedBox(height: AppSpacing.sm),
                   _row(
                     'Distance',
                     '${draft.routeDistanceKm!.toStringAsFixed(1)} km',
@@ -153,30 +166,56 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                     ),
                   ],
                 ] else if (quote != null && _hasDistanceCoordinates(draft)) ...[
-                  const Divider(height: 24),
+                  const SizedBox(height: AppSpacing.sm),
                   _row(
                     'Distance',
                     '${quote.distanceKm.toStringAsFixed(1)} km',
                   ),
                 ],
-                for (int i = 0; i < draft.extraDrops.length; i++) ...[
-                  const Divider(height: 24),
-                  _row('Drop ${i + 2}', draft.locationAddress(draft.extraDrops[i])),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          GlassContainer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _sectionTitle('People'),
+                const SizedBox(height: AppSpacing.md),
+                _row('Sender name', senderName.isEmpty ? '—' : senderName),
+                const SizedBox(height: AppSpacing.sm),
+                _row('Sender contact', senderPhone.isEmpty ? '—' : senderPhone),
+                if (draft.receiverName.trim().isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _row('Receiver', draft.receiverName.trim()),
                 ],
-                const Divider(height: 24),
+                if (draft.receiverMobile.trim().isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _row('Receiver mobile', draft.receiverMobile.trim()),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          GlassContainer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _sectionTitle('Shipment'),
+                const SizedBox(height: AppSpacing.md),
                 _row('Vehicle', draft.vehicle?.name ?? '—'),
-                const Divider(height: 24),
+                const SizedBox(height: AppSpacing.sm),
                 _row('Package', '${draft.categoryLabel} · ${draft.sizeLabel}'),
-                const Divider(height: 24),
+                const SizedBox(height: AppSpacing.sm),
                 _row('Weight', '${draft.weightKg.toStringAsFixed(0)} kg'),
                 if (draft.instructions.trim().isNotEmpty) ...[
-                  const Divider(height: 24),
+                  const SizedBox(height: AppSpacing.sm),
                   _row('Notes', draft.instructions),
                 ],
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.md),
           if (draft.vehicle != null)
             GlassContainer(
               child: Row(
@@ -230,12 +269,12 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 ],
               ),
             ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.md),
           GlassContainer(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Fare breakdown', style: AppTextStyles.headingS),
+                _sectionTitle('Fare breakdown'),
                 const SizedBox(height: AppSpacing.md),
                 if (displayedFare != null)
                   _fareLine('Trip Fare', displayedFare)
@@ -276,12 +315,12 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.md),
           GlassContainer(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Payment', style: AppTextStyles.headingS),
+                _sectionTitle('Payment'),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   'Who pays is separate from how they pay.',
@@ -523,7 +562,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
             isDense: true,
             filled: true,
             fillColor: AppColors.softPeach.withValues(alpha: 0.45),
-            border: OutlineInputBorder(
+            border: const OutlineInputBorder(
               borderRadius: AppRadius.smAll,
               borderSide: BorderSide.none,
             ),
@@ -560,12 +599,61 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
         drop?.longitude != null;
   }
 
+  Widget _sectionTitle(String title) {
+    return Text(title, style: AppTextStyles.headingS.copyWith(color: AppColors.navy));
+  }
+
+  Widget _stop({
+    required String label,
+    required String value,
+    required Color color,
+    required bool showLine,
+  }) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 18,
+            child: Column(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+                if (showLine)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: AppColors.softPeach,
+                    ),
+                  )
+                else
+                  const SizedBox(height: AppSpacing.md),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: _row(label, value),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _row(String label, String value) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 88,
+          width: 118,
           child: Text(
             label,
             style: AppTextStyles.caption.copyWith(

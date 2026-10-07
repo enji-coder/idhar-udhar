@@ -71,6 +71,10 @@ export async function fetchAdminRider(id) {
   return mapRider(await apiRequest(`/v1/admin/riders/${id}`));
 }
 
+export async function deleteAdminRider(id) {
+  return apiRequest(`/v1/admin/riders/${id}`, { method: 'DELETE' });
+}
+
 export async function fetchAdminRiderDocuments(riderId) {
   return apiRequest(adminRiderDocumentsPath(riderId));
 }

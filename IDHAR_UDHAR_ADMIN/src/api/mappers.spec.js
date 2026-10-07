@@ -65,6 +65,8 @@ describe('admin mappers', () => {
     assert.equal(rider.name, 'Rider 3210');
     assert.equal(rider.source, 'api');
     assert.equal(rider.vehicle, '');
+    assert.equal(rider.verification, 'Approved');
+    assert.equal(rider.approval, 'APPROVED');
   });
 
   it('maps the stored vehicle category instead of a generic label', () => {

@@ -16,6 +16,7 @@ class RiderLocationPublisher {
   final RiderApi _api;
   Timer? _timer;
   bool _started = false;
+  bool _askedForPermission = false;
 
   void start() {
     if (_started) {
@@ -33,8 +34,10 @@ class RiderLocationPublisher {
   }
 
   Future<void> _tick() async {
+    final bool ask = !_askedForPermission;
+    _askedForPermission = true;
     final LocationResult result =
-        await _location.currentLocation(requestPermission: false);
+        await _location.currentLocation(requestPermission: ask);
     if (!result.isOk) {
       return;
     }

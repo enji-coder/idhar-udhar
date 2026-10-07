@@ -409,6 +409,7 @@ export class IdentityRepository {
       ) veh ON TRUE
       LEFT JOIN cities c ON c.city_id = r.home_city_id
       LEFT JOIN zones z ON z.zone_id = r.home_zone_id
+      WHERE r.deactivated_at IS NULL
       ORDER BY r.created_at DESC
       LIMIT 200
       `,
@@ -501,6 +502,7 @@ export class IdentityRepository {
       LEFT JOIN cities c ON c.city_id = r.home_city_id
       LEFT JOIN zones z ON z.zone_id = r.home_zone_id
       WHERE r.rider_profile_id = $1
+        AND r.deactivated_at IS NULL
       `,
       [riderProfileId],
     );
@@ -563,6 +565,47 @@ export class IdentityRepository {
       [customerProfileId],
     );
     return result.rows[0] ?? null;
+  }
+
+  async deactivateRider(
+    riderProfileId: string,
+  ): Promise<{
+    rider_profile_id: string;
+    deactivated_at: Date;
+    online_status: string;
+  } | null> {
+    return this.postgres.transaction(async (tx) => {
+      const updated = await tx.query<{
+        rider_profile_id: string;
+        deactivated_at: Date;
+        online_status: string;
+      }>(
+        `
+        UPDATE rider_profiles
+        SET
+          deactivated_at = now(),
+          online_status = 'OFFLINE'
+        WHERE rider_profile_id = $1
+          AND deactivated_at IS NULL
+        RETURNING rider_profile_id, deactivated_at, online_status
+        `,
+        [riderProfileId],
+      );
+      const row = updated.rows[0];
+      if (!row) {
+        return null;
+      }
+      await tx.query(
+        `
+        UPDATE sessions
+        SET revoked_at = now()
+        WHERE rider_profile_id = $1
+          AND revoked_at IS NULL
+        `,
+        [riderProfileId],
+      );
+      return row;
+    });
   }
 
   async findRiderGate(riderProfileId: string): Promise<{

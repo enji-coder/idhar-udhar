@@ -202,8 +202,12 @@ export class OrdersService {
   }
 
   async getById(auth: OrderActor, orderId: string) {
-    const order = await this.requireOrder(orderId);
+    let order = await this.requireOrder(orderId);
     await this.assertCanReadOrder(auth, order);
+    if (order.canonical_status === 'SEARCHING' && auth.role !== 'RIDER') {
+      await this.retrySearchingDispatch(order.order_id);
+      order = (await this.orders.findById(order.order_id)) ?? order;
+    }
     const [stops, snapshot, waiting, assignedRider, rating] = await Promise.all([
       this.orders.listStops(order.order_id),
       this.fares.findSnapshotByOrder(order.order_id),
@@ -778,6 +782,14 @@ export class OrdersService {
       );
     }
     await this.releaseExpiredOffers();
+    if (rider.online_status === 'ONLINE' && !rider.deactivated_at) {
+      const searching = await this.orders.listSearchingOrderIdsForRider(
+        auth.profileId,
+      );
+      for (const searchingOrderId of searching) {
+        await this.retrySearchingDispatch(searchingOrderId);
+      }
+    }
     const ttlMs = this.offerTtlMs();
     const rows = await this.orders.listOffersForRider(auth.profileId);
     const now = Date.now();
@@ -1166,6 +1178,20 @@ export class OrdersService {
       if (searching) {
         await this.redispatchSearchingQuietly(orderId);
       }
+    }
+  }
+
+  /**
+   * Confirm dispatches once. A rider who is online with the right vehicle
+   * can still be missing a fresh GPS fix at that instant. The existing
+   * customer order poll and rider offer poll call this so the same
+   * nearest-rider rules run again after a location arrives.
+   */
+  private async retrySearchingDispatch(orderId: string): Promise<void> {
+    try {
+      await this.dispatchOffersForSearchingOrder(orderId);
+    } catch {
+      // Leave SEARCHING. The next poll can try again.
     }
   }
 

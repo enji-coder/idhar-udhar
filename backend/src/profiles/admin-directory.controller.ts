@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, HttpStatus, Param } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UuidParamPipe } from '../common/uuid-param.pipe';
@@ -22,6 +22,16 @@ export class AdminDirectoryController {
     @Param('id', UuidParamPipe) id: string,
   ) {
     return this.profiles.getRider(auth, id);
+  }
+
+  @Roles('ADMIN')
+  @Delete('riders/:id')
+  @HttpCode(HttpStatus.OK)
+  removeRider(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.profiles.deactivateRider(auth, id);
   }
 
   @Roles('ADMIN')

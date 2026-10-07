@@ -113,6 +113,7 @@ export function mapRider(row) {
     zone: row.zone_name || row.city_code || '—',
     status,
     rating: '—',
+    verification: approval === 'APPROVED' ? 'Approved' : approval === 'REJECTED' ? 'Rejected' : 'Pending',
     kyc: row.onboarding_kyc_status,
     approval: row.approval_status,
     online: row.online_status,

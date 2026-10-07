@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
-import { Bike, CircleCheck, Eye, Pause, Pencil, Plus, Radio, ShieldAlert, Trash2, Wallet, WifiOff } from 'lucide-react';
+import { Bike, CircleCheck, Eye, Pause, Plus, Radio, ShieldAlert, Trash2, Wallet, WifiOff } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
 import KpiCard from '../components/common/KpiCard';
 import GlassCard from '../components/common/GlassCard';
@@ -19,11 +19,12 @@ import Drawer from '../components/common/Drawer';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
 import useStore from '../hooks/useStore';
 import useQueryAction from '../hooks/useQueryAction';
-import { riderStore, vehicleStore } from '../services/stores';
+import { riderStore } from '../services/stores';
 import { defaultVehicleCategoryName, vehicleCategoryNames, vehicleCategoryStore } from '../services/vehicleCategories';
 import { useAuth } from '../context/AuthContext';
 import { formatINR, initials } from '../utils/format';
 import { compactErrors, required } from '../utils/validation';
+import { approveAdminDocument, deleteAdminRider, fetchAdminRiderDocuments, fetchAdminRiders } from '../api/adminApi';
 
 const icons = { total: Bike, active: Radio, offline: WifiOff, busy: ShieldAlert, pending: CircleCheck };
 
@@ -33,12 +34,12 @@ export default function Riders() {
   const { can } = useAuth();
   const [params, setParams] = useSearchParams();
   const riders = useStore(riderStore);
-  const vehicles = useStore(vehicleStore);
   useStore(vehicleCategoryStore);
   const categoryOptions = vehicleCategoryNames();
   const [status, setStatus] = useState(params.get('status') || 'All');
-  const [edit, setEdit] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [workingId, setWorkingId] = useState('');
+  const workingRef = useRef(false);
   const [create, setCreate] = useState(false);
   const [draft, setDraft] = useState({ name: '', phone: '', vehicle: defaultVehicleCategoryName(), zone: 'Navrangpura', status: 'Pending' });
   const [errors, setErrors] = useState({});
@@ -66,6 +67,81 @@ export default function Riders() {
     { id: 'busy', title: 'Busy', value: String(riders.filter((row) => row.status === 'Busy').length), trend: 0, note: 'On a delivery', spark: [riders.filter((row) => row.status === 'Busy').length] },
     { id: 'pending', title: 'Pending Verification', value: String(riders.filter((row) => row.status === 'Pending').length), trend: 0, note: 'KYC queue', spark: [riders.filter((row) => row.status === 'Pending').length] },
   ];
+
+  async function refreshRiders() {
+    riderStore.replace(await fetchAdminRiders());
+  }
+
+  async function approveRider(row) {
+    if (!row?.id || workingRef.current) return;
+    workingRef.current = true;
+    setWorkingId(row.id);
+    try {
+      const listed = await fetchAdminRiderDocuments(row.id);
+      const pending = (listed?.documents || []).filter(
+        (doc) => doc?.is_current !== false && doc.rider_document_id && doc.status !== 'APPROVED',
+      );
+      let approvalStatus = listed?.approval_status || row.approval || 'PENDING';
+      if (pending.length === 0) {
+        try {
+          await refreshRiders();
+        } catch {
+          // The document list already reported the stored approval state.
+        }
+        setToast(
+          approvalStatus === 'APPROVED'
+            ? 'This rider is already approved.'
+            : 'This rider cannot be approved until the required documents are uploaded.',
+        );
+        return;
+      }
+      for (const doc of pending) {
+        const result = await approveAdminDocument(doc.rider_document_id);
+        approvalStatus = result?.approval_status || approvalStatus;
+      }
+      try {
+        await refreshRiders();
+      } catch (error) {
+        setToast(error?.message || 'The decision was saved, but the rider list could not be refreshed.');
+        return;
+      }
+      setToast(
+        approvalStatus === 'APPROVED'
+          ? 'Rider approved.'
+          : 'Documents were saved, but the rider stays pending until every required document is approved.',
+      );
+    } catch (error) {
+      try {
+        await refreshRiders();
+      } catch {
+        // Keep the approval error. A later refresh still reads the stored decision.
+      }
+      setToast(error?.message || 'Could not approve the rider.');
+    } finally {
+      workingRef.current = false;
+      setWorkingId('');
+    }
+  }
+
+  async function deleteRider(row) {
+    if (!row?.id || workingRef.current) return;
+    workingRef.current = true;
+    setWorkingId(row.id);
+    try {
+      await deleteAdminRider(row.id);
+      try {
+        await refreshRiders();
+      } catch {
+        riderStore.remove(row.id);
+      }
+      setToast('Rider deleted.');
+    } catch (error) {
+      setToast(error?.message || 'Could not delete the rider.');
+    } finally {
+      workingRef.current = false;
+      setWorkingId('');
+    }
+  }
 
   function setStatusFilter(value) {
     setStatus(value);
@@ -104,13 +180,11 @@ export default function Riders() {
       render: (row) => (
         <ActionGroup>
           <ActionButton icon={Eye} tone="view" onClick={() => navigate(`/riders/${row.id}`)}>View</ActionButton>
-          {can('riders', 'edit') ? <ActionButton icon={Pencil} tone="edit" onClick={() => setEdit(row)}>Edit</ActionButton> : null}
-          {can('riders', 'edit') ? <ActionButton icon={Bike} tone="reassign" onClick={() => setEdit({ ...row, _assign: true })}>Assign Vehicle</ActionButton> : null}
           <ActionButton icon={Wallet} tone="invoice" onClick={() => setEarningsRow(row)}>View Earnings</ActionButton>
-          {can('riders', 'approve') && row.verification !== 'Approved' ? <ActionButton icon={CircleCheck} tone="approve" onClick={() => setToast('Rider approval is not available on the server yet.')}>Approve</ActionButton> : null}
+          {can('riders', 'approve') && row.verification !== 'Approved' ? <ActionButton icon={CircleCheck} tone="approve" loading={workingId === row.id} disabled={Boolean(workingId)} onClick={() => approveRider(row)}>Approve</ActionButton> : null}
           {can('riders', 'suspend') && row.status !== 'Suspended' && row.status !== 'Pending' ? <ActionButton icon={Pause} tone="danger" onClick={() => setConfirm({ type: 'suspend', row })}>Deactivate</ActionButton> : null}
           {can('riders', 'activate') && (row.status === 'Suspended' || row.status === 'Offline') ? <ActionButton icon={CircleCheck} tone="approve" onClick={() => setToast('Rider activation is not available on the server yet.')}>Activate</ActionButton> : null}
-          <ActionButton icon={Trash2} tone="danger" onClick={() => setConfirm({ type: 'delete', row })}>Delete</ActionButton>
+          <ActionButton icon={Trash2} tone="danger" disabled={Boolean(workingId)} onClick={() => setConfirm({ type: 'delete', row })}>Delete</ActionButton>
         </ActionGroup>
       ),
     },
@@ -130,23 +204,6 @@ export default function Riders() {
       <GlassCard className="overflow-hidden">
         {data.length === 0 ? <EmptyState title="No riders found" description="Try changing your filters or search criteria." action={<Button variant="secondary" onClick={() => setStatusFilter('All')}>Clear Filters</Button>} /> : <DataTable columns={columns} data={data} mobileTitleKey="name" pageSize={8} itemLabel="riders" compact />}
       </GlassCard>
-
-      <Modal open={Boolean(edit)} title={edit?._assign ? 'Assign vehicle' : 'Edit rider'} onClose={() => setEdit(null)} footer={<><Button variant="ghost" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={() => { setEdit(null); setToast('Editing riders from Admin is not available on the server yet.'); }}>Save</Button></>}>
-        {edit ? (
-          <div className="space-y-3">
-            <Field label="Name"><input className={inputClass} value={edit.name} onChange={(event) => setEdit({ ...edit, name: event.target.value })} /></Field>
-            <Field label="Phone"><input className={inputClass} value={edit.phone} onChange={(event) => setEdit({ ...edit, phone: event.target.value })} /></Field>
-            <Field label="Vehicle"><select className={inputClass} value={edit.vehicle} onChange={(event) => setEdit({ ...edit, vehicle: event.target.value })}>{vehicleCategoryNames({ current: edit.vehicle }).map((item) => <option key={item}>{item}</option>)}</select></Field>
-            <Field label="Vehicle number">
-              <select className={inputClass} value={edit.vehicleNumber || ''} onChange={(event) => setEdit({ ...edit, vehicleNumber: event.target.value })}>
-                <option value="">Unassigned</option>
-                {vehicles.map((item) => <option key={item.id} value={item.number}>{item.number}</option>)}
-              </select>
-            </Field>
-            <Field label="Zone"><input className={inputClass} value={edit.zone} onChange={(event) => setEdit({ ...edit, zone: event.target.value })} /></Field>
-          </div>
-        ) : null}
-      </Modal>
 
       <Modal open={create} title="Add Rider" onClose={() => setCreate(false)} footer={<><Button variant="ghost" onClick={() => setCreate(false)}>Cancel</Button><Button onClick={() => {
         const issues = compactErrors({ name: required(draft.name, 'Name is required.'), phone: required(draft.phone, 'Phone number cannot be empty.') });
@@ -193,7 +250,11 @@ export default function Riders() {
         open={confirm?.type === 'delete'}
         description={`${confirm?.row?.name} will be removed from the rider list.`}
         onClose={() => setConfirm(null)}
-        onConfirm={() => { setConfirm(null); setToast('Deleting riders from Admin is not available on the server yet.'); }}
+        onConfirm={() => {
+          const row = confirm?.row;
+          setConfirm(null);
+          if (row) deleteRider(row);
+        }}
       />
       <Toast open={Boolean(toast)} message={toast} onClose={() => setToast('')} />
     </PageContainer>

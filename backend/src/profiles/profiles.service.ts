@@ -306,6 +306,25 @@ export class ProfilesService {
     return this.serializeRiderDirectory(row);
   }
 
+  /**
+   * Admin removal uses rider_profiles.deactivated_at. Orders, documents,
+   * wallet, and vehicle rows stay in place. The rider is forced offline
+   * and their rider sessions are revoked.
+   */
+  async deactivateRider(auth: AuthContext, riderProfileId: string) {
+    await this.assertAdmin(auth);
+    const row = await this.identities.deactivateRider(riderProfileId);
+    if (!row) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider was not found', 404);
+    }
+    return {
+      deleted: true,
+      rider_profile_id: row.rider_profile_id,
+      deactivated_at: row.deactivated_at,
+      online_status: row.online_status,
+    };
+  }
+
   async listCustomers(auth: AuthContext) {
     await this.assertAdmin(auth);
     const rows = await this.identities.listCustomers();
