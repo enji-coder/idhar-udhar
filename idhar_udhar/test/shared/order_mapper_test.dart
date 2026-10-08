@@ -3,6 +3,7 @@ import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/api/rider_api.dart';
 
 void main() {
   test('maps backend statuses onto existing customer UI statuses', () {
@@ -82,5 +83,46 @@ void main() {
     expect(order.tripFare, 250);
     expect(order.crn, 'IU-CRN-AMD-0000000003');
     expect(order.vehicle.imagePath, contains('truck'));
+  });
+
+  test('rider offer shows full trip fare, earnings, stops, and server expiry', () {
+    final DateTime expiresAt = DateTime.now().add(const Duration(seconds: 300));
+    final RiderOrder order = OrderMapper.toRiderOrder(
+      offer: RiderOffer(
+        offerId: '66666666-6666-4666-8666-666666666666',
+        orderId: '55555555-5555-4555-8555-555555555555',
+        status: 'PENDING',
+        createdAt: DateTime.utc(2026, 10, 8, 6),
+        tripFare: 500,
+        riderAmount: 425,
+        distanceKm: 1.3,
+        estimatedDurationSeconds: 156,
+        expiresAt: expiresAt,
+        pickupAddress: '12 CG Road, Ahmedabad',
+        dropAddress: 'Navrangpura, Ahmedabad',
+        pickupLatitude: 23.03,
+        pickupLongitude: 72.57,
+        dropLatitude: 23.036,
+        dropLongitude: 72.561,
+        vehicleCategoryName: 'Bike',
+        packageWeightKg: 2,
+      ),
+    );
+
+    expect(order.tripAmount, 500);
+    expect(order.estimatedEarnings, 425);
+    expect(order.riderAmount, 425);
+    expect(order.pickup, '12 CG Road, Ahmedabad');
+    expect(order.drop, 'Navrangpura, Ahmedabad');
+    expect(order.pickup, isNot('Pickup'));
+    expect(order.drop, isNot('Drop'));
+    expect(order.distanceLabel, '1.3 km');
+    expect(order.estimatedMinutes, 3);
+    expect(order.decisionSeconds, inInclusiveRange(290, 300));
+    expect(order.expiresAt, expiresAt);
+    expect(order.vehicleName, 'Bike');
+    expect(order.packageLabel, '2 kg');
+    expect(order.pickupLatitude, 23.03);
+    expect(order.dropLongitude, 72.561);
   });
 }

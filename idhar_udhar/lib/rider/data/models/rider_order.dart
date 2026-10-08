@@ -1,3 +1,5 @@
+import 'package:idhar_udhar/shared/format/trip_distance.dart';
+
 enum RiderOrderPaymentMethod { cash, online }
 
 enum DeliveryLifecycleStatus {
@@ -91,7 +93,10 @@ class RiderOrder {
     this.backendOrderId,
     this.crn,
     this.paymentMethod = RiderOrderPaymentMethod.online,
-    this.decisionSeconds = 27,
+    this.decisionSeconds = 0,
+    this.expiresAt,
+    this.vehicleName = '',
+    this.packageLabel = '',
     this.tripAmount = 0,
     this.riderAmount = 0,
     this.companyShare = 0,
@@ -127,6 +132,9 @@ class RiderOrder {
   final String receiverName;
   final String receiverPhone;
   final int decisionSeconds;
+  final DateTime? expiresAt;
+  final String vehicleName;
+  final String packageLabel;
   final double tripAmount;
   final double riderAmount;
   final double companyShare;
@@ -145,6 +153,11 @@ class RiderOrder {
   final double? pickupLongitude;
   final double? dropLatitude;
   final double? dropLongitude;
+
+  String get distanceLabel => formatTripDistanceKm(distanceKm);
+
+  String get etaLabel =>
+      estimatedMinutes <= 0 ? '—' : '$estimatedMinutes min';
 
   bool get hasPickupCoords =>
       pickupLatitude != null && pickupLongitude != null;

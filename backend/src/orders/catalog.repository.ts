@@ -86,6 +86,25 @@ export class CatalogRepository {
     return result.rows[0] ?? null;
   }
 
+  /**
+   * Identity owns one rider profile. Session profile id can lag that row.
+   * Location writes and dispatch both use this id.
+   */
+  async findRiderProfileIdByIdentity(
+    identityId: string,
+    db: Queryable = this.postgres,
+  ): Promise<string | null> {
+    const result = await db.query<{ rider_profile_id: string }>(
+      `
+      SELECT rider_profile_id
+      FROM rider_profiles
+      WHERE identity_id = $1
+      `,
+      [identityId],
+    );
+    return result.rows[0]?.rider_profile_id ?? null;
+  }
+
   async findRider(
     riderProfileId: string,
     db: Queryable = this.postgres,

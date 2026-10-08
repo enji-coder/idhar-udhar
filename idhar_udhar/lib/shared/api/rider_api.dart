@@ -42,7 +42,19 @@ class RiderOffer {
     this.displayId,
     this.crn,
     this.orderStatus,
+    this.tripFare,
     this.riderAmount,
+    this.distanceKm,
+    this.estimatedDurationSeconds,
+    this.expiresAt,
+    this.vehicleCategoryName,
+    this.packageWeightKg,
+    this.pickupAddress,
+    this.dropAddress,
+    this.pickupLatitude,
+    this.pickupLongitude,
+    this.dropLatitude,
+    this.dropLongitude,
   });
 
   final String offerId;
@@ -52,7 +64,19 @@ class RiderOffer {
   final String? displayId;
   final String? crn;
   final String? orderStatus;
+  final double? tripFare;
   final double? riderAmount;
+  final double? distanceKm;
+  final int? estimatedDurationSeconds;
+  final DateTime? expiresAt;
+  final String? vehicleCategoryName;
+  final double? packageWeightKg;
+  final String? pickupAddress;
+  final String? dropAddress;
+  final double? pickupLatitude;
+  final double? pickupLongitude;
+  final double? dropLatitude;
+  final double? dropLongitude;
 
   factory RiderOffer.fromJson(Map<String, Object?> json) {
     return RiderOffer(
@@ -63,9 +87,34 @@ class RiderOffer {
       displayId: jsonString(json['display_id']),
       crn: jsonString(json['crn']),
       orderStatus: jsonString(json['order_status']),
+      tripFare: json['trip_fare'] == null ? null : jsonDouble(json['trip_fare']),
       riderAmount: json['rider_amount'] == null
           ? null
           : jsonDouble(json['rider_amount']),
+      distanceKm:
+          json['distance_km'] == null ? null : jsonDouble(json['distance_km']),
+      estimatedDurationSeconds: json['estimated_duration_seconds'] == null
+          ? null
+          : jsonInt(json['estimated_duration_seconds']),
+      expiresAt: jsonDate(json['expires_at']),
+      vehicleCategoryName: jsonString(json['vehicle_category_name']),
+      packageWeightKg: json['package_weight_kg'] == null
+          ? null
+          : jsonDouble(json['package_weight_kg']),
+      pickupAddress: jsonString(json['pickup_address']),
+      dropAddress: jsonString(json['drop_address']),
+      pickupLatitude: json['pickup_latitude'] == null
+          ? null
+          : jsonDouble(json['pickup_latitude']),
+      pickupLongitude: json['pickup_longitude'] == null
+          ? null
+          : jsonDouble(json['pickup_longitude']),
+      dropLatitude: json['drop_latitude'] == null
+          ? null
+          : jsonDouble(json['drop_latitude']),
+      dropLongitude: json['drop_longitude'] == null
+          ? null
+          : jsonDouble(json['drop_longitude']),
     );
   }
 }

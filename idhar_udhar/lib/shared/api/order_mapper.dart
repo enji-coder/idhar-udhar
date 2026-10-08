@@ -1,6 +1,7 @@
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
+import 'package:idhar_udhar/shared/format/trip_distance.dart';
 
 import 'orders_api.dart';
 import 'rider_api.dart';
@@ -214,26 +215,77 @@ abstract final class OrderMapper {
     });
     final String receiverName = (dropStop?.contactName ?? '').trim();
     final String receiverPhone = (dropStop?.contactPhone ?? '').trim();
+    final double? distanceKm = offer.distanceKm ?? order?.distanceKm;
+    final int minutes = offer.estimatedDurationSeconds != null &&
+            offer.estimatedDurationSeconds! > 0
+        ? (offer.estimatedDurationSeconds! / 60).ceil()
+        : plannedTripMinutes(distanceKm ?? 0);
+    final DateTime? expiresAt = offer.expiresAt;
+    final int remaining = expiresAt == null
+        ? 0
+        : expiresAt.difference(DateTime.now()).inSeconds.clamp(0, 86400);
+    final double? packageKg = offer.packageWeightKg ?? order?.packageWeightKg;
     return RiderOrder(
       id: offer.displayId ?? mapped?.displayLabel ?? offer.orderId,
       offerId: offer.offerId,
       backendOrderId: offer.orderId,
       crn: order?.crn ?? offer.crn,
-      pickup: mapped?.pickup.address ?? 'Pickup',
-      drop: mapped?.drop.address ?? 'Drop',
-      distanceKm: order?.distanceKm ?? 0,
-      estimatedEarnings: order?.riderAmount ?? offer.riderAmount ?? 0,
-      estimatedMinutes: 0,
+      pickup: _present(offer.pickupAddress, mapped?.pickup.address),
+      drop: _present(offer.dropAddress, mapped?.drop.address),
+      distanceKm: distanceKm ?? 0,
+      estimatedEarnings: offer.riderAmount ?? order?.riderAmount ?? 0,
+      estimatedMinutes: minutes,
       customerMaskedName: 'Customer',
       customerMaskedPhone: '••••',
       receiverName: receiverName,
       receiverPhone: receiverPhone,
-      tripAmount: order?.riderAmount ?? offer.riderAmount ?? 0,
-      pickupLatitude: mapped?.pickup.latitude,
-      pickupLongitude: mapped?.pickup.longitude,
-      dropLatitude: mapped?.drop.latitude,
-      dropLongitude: mapped?.drop.longitude,
+      decisionSeconds: remaining,
+      expiresAt: expiresAt,
+      vehicleName: _optional(
+        offer.vehicleCategoryName,
+        order?.vehicleCategoryName,
+      ),
+      packageLabel: packageKg == null || packageKg <= 0
+          ? ''
+          : '${_kg(packageKg)} kg',
+      tripAmount: offer.tripFare ?? order?.tripFare ?? 0,
+      riderAmount: offer.riderAmount ?? order?.riderAmount ?? 0,
+      pickupLatitude: offer.pickupLatitude ?? mapped?.pickup.latitude,
+      pickupLongitude: offer.pickupLongitude ?? mapped?.pickup.longitude,
+      dropLatitude: offer.dropLatitude ?? mapped?.drop.latitude,
+      dropLongitude: offer.dropLongitude ?? mapped?.drop.longitude,
     );
+  }
+
+  static String _optional(String? preferred, String? fallback) {
+    final String first = (preferred ?? '').trim();
+    if (first.isNotEmpty && first != '—') {
+      return first;
+    }
+    final String second = (fallback ?? '').trim();
+    if (second.isNotEmpty && second != '—') {
+      return second;
+    }
+    return '';
+  }
+
+  static String _present(String? preferred, String? fallback) {
+    final String first = (preferred ?? '').trim();
+    if (first.isNotEmpty) {
+      return first;
+    }
+    final String second = (fallback ?? '').trim();
+    if (second.isNotEmpty) {
+      return second;
+    }
+    return '—';
+  }
+
+  static String _kg(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toStringAsFixed(0);
+    }
+    return value.toStringAsFixed(1);
   }
 
   static MockLocation _stopToLocation(ApiStop stop) {

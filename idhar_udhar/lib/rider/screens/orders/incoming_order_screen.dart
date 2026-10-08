@@ -41,7 +41,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
   @override
   void initState() {
     super.initState();
-    _secondsLeft = 27;
+    _secondsLeft = 0;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_load());
     });
@@ -49,8 +49,18 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
 
   Future<void> _load() async {
     try {
-      await ref.read(riderSessionProvider.notifier).refreshOffers();
+      final bool loaded =
+          await ref.read(riderSessionProvider.notifier).refreshOffers();
       final offers = ref.read(riderSessionProvider).offers;
+      if (!loaded && offers.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _error = 'Could not load offers.';
+          });
+        }
+        return;
+      }
       if (offers.isEmpty) {
         if (mounted) {
           setState(() {
@@ -81,13 +91,21 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         _loading = false;
         _secondsLeft = mapped.decisionSeconds;
       });
+      if (mapped.expiresAt == null) {
+        return;
+      }
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (!mounted) return;
-        if (_secondsLeft <= 1) {
+        final int left = mapped.expiresAt!
+            .difference(DateTime.now())
+            .inSeconds
+            .clamp(0, 86400);
+        if (left <= 0) {
           _timer?.cancel();
+          setState(() => _secondsLeft = 0);
           unawaited(_reject());
         } else {
-          setState(() => _secondsLeft -= 1);
+          setState(() => _secondsLeft = left);
         }
       });
     } catch (_) {
@@ -316,24 +334,40 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                       value: order.receiverPhone.trim(),
                     ),
                   ],
+                  if (order.vehicleName.trim().isNotEmpty) ...[
+                    const Divider(height: RiderSpacing.xl),
+                    _InfoRow(
+                      icon: Icons.two_wheeler_rounded,
+                      label: 'Vehicle',
+                      value: order.vehicleName.trim(),
+                    ),
+                  ],
+                  if (order.packageLabel.trim().isNotEmpty) ...[
+                    const Divider(height: RiderSpacing.xl),
+                    _InfoRow(
+                      icon: Icons.inventory_2_outlined,
+                      label: 'Package',
+                      value: order.packageLabel.trim(),
+                    ),
+                  ],
                   const Divider(height: RiderSpacing.xl),
                   _InfoRow(
                     icon: Icons.route_rounded,
                     label: 'Distance',
-                    value: '${order.distanceKm} km',
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.payments_rounded,
-                    label: 'Estimated Earnings',
-                    value: currency.format(order.estimatedEarnings),
-                    emphasize: true,
+                    value: order.distanceLabel,
                   ),
                   const Divider(height: RiderSpacing.xl),
                   _InfoRow(
                     icon: Icons.receipt_long_rounded,
-                    label: 'Trip Amount',
+                    label: 'Trip Fare',
                     value: currency.format(order.tripAmount),
+                    emphasize: true,
+                  ),
+                  const Divider(height: RiderSpacing.xl),
+                  _InfoRow(
+                    icon: Icons.payments_rounded,
+                    label: 'Your Earnings',
+                    value: currency.format(order.estimatedEarnings),
                   ),
                   const Divider(height: RiderSpacing.xl),
                   _InfoRow(
@@ -357,7 +391,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                   _InfoRow(
                     icon: Icons.timer_outlined,
                     label: 'Estimated Time',
-                    value: '${order.estimatedMinutes} min',
+                    value: order.etaLabel,
                   ),
                 ],
               ),

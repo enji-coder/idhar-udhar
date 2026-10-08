@@ -281,12 +281,15 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     await _rememberProfile(updated);
   }
 
-  Future<void> refreshOffers() async {
+  /// Returns false when the request failed. The previous offer list stays.
+  /// An empty successful response is a real "no offers" result.
+  Future<bool> refreshOffers() async {
     try {
       final List<RiderOffer> offers = await _rider.listOffers();
       state = state.copyWith(offers: offers);
+      return true;
     } on ApiException {
-      state = state.copyWith(offers: const <RiderOffer>[]);
+      return false;
     }
   }
 

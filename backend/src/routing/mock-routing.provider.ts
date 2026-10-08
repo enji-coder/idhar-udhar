@@ -6,6 +6,7 @@ import {
   RoutingRequest,
   RoutingResult,
 } from './routing-provider';
+import { plannedTripDurationSeconds } from './trip-duration';
 
 /**
  * Deterministic stand-in. Never labeled as Google.
@@ -119,5 +120,5 @@ export function mockRoadMeters(points: LatLng[]): number {
 }
 
 function mockDurationSeconds(distanceMeters: number): number {
-  return Math.max(1, Math.round(distanceMeters / (30_000 / 3600)));
+  return plannedTripDurationSeconds(distanceMeters / 1000);
 }

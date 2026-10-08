@@ -283,7 +283,151 @@ describe('dispatch after confirm', () => {
     expect(query).toContain('r.deactivated_at IS NULL');
     expect(query).toContain('v.active = TRUE');
     expect(query).toContain('v.vehicle_category_id = $1');
+    expect(query).toContain('length(trim(d.name)) >= 2');
+    expect(query).toContain('d.date_of_birth IS NOT NULL');
+    expect(query).toContain("position('@' IN i.email) > 1");
+    expect(query).toContain(
+      "length(trim(coalesce(d.licence_encrypted_or_token, ''))) >= 8",
+    );
+    expect(query).toContain('v.manufacturing_year IS NOT NULL');
     expect(query).not.toContain('deactivated_at IS NOT NULL');
+    expect(query).not.toContain('home_zone_id');
+    expect(query).not.toContain('zone_id');
+  });
+
+  it('skips a rider who already has a live order', async () => {
+    const orders = {
+      lockById: jest.fn(async () => searchingOrder()),
+      insertOffer: jest.fn(),
+      riderHasLiveOrder: jest.fn(async () => true),
+      listStops: jest.fn(async () => [
+        { stop_type: 'PICKUP', latitude: '23.030000', longitude: '72.570000' },
+      ]),
+      listRiderIdsWithOffers: jest.fn(async () => []),
+    };
+    const service = buildService({
+      orders,
+      candidates: [RIDER],
+      locationFor: async () => ({
+        stale: false,
+        location: {
+          latitude: 23.03,
+          longitude: 72.57,
+          received_at: new Date().toISOString(),
+        },
+      }),
+    });
+
+    const result = await service.dispatchOffersForSearchingOrder(ORDER);
+
+    expect(result).toEqual({ offered: 0 });
+    expect(orders.insertOffer).not.toHaveBeenCalled();
+  });
+
+  it('creates no offer when the eligibility query returns nobody', async () => {
+    const orders = {
+      lockById: jest.fn(async () => searchingOrder()),
+      insertOffer: jest.fn(),
+      riderHasLiveOrder: jest.fn(async () => false),
+      listStops: jest.fn(async () => [
+        { stop_type: 'PICKUP', latitude: '23.030000', longitude: '72.570000' },
+      ]),
+      listRiderIdsWithOffers: jest.fn(async () => []),
+    };
+    const service = buildService({
+      orders,
+      candidates: [],
+      locationFor: async () => ({
+        stale: false,
+        location: { latitude: 23.03, longitude: 72.57 },
+      }),
+    });
+
+    const result = await service.dispatchOffersForSearchingOrder(ORDER);
+
+    expect(result).toEqual({ offered: 0 });
+    expect(orders.insertOffer).not.toHaveBeenCalled();
+  });
+
+  it('does not insert a second offer for the same searching order', async () => {
+    let status: 'SEARCHING' | 'OFFERED' = 'SEARCHING';
+    const orders = {
+      lockById: jest.fn(async () => ({
+        ...searchingOrder(),
+        canonical_status: status,
+      })),
+      insertOffer: jest.fn(async () => {
+        status = 'OFFERED';
+        return {
+          order_offer_id: '66666666-6666-4666-8666-666666666666',
+          order_id: ORDER,
+          rider_profile_id: RIDER,
+          status: 'PENDING',
+          created_at: new Date(),
+          responded_at: null,
+        };
+      }),
+      riderHasLiveOrder: jest.fn(async () => false),
+      listStops: jest.fn(async () => [
+        { stop_type: 'PICKUP', latitude: '23.030000', longitude: '72.570000' },
+      ]),
+      listRiderIdsWithOffers: jest.fn(async () => []),
+      compareAndSetStatus: jest.fn(async () => ({
+        ...searchingOrder(),
+        canonical_status: 'OFFERED',
+      })),
+      insertStatusEvent: jest.fn(async () => undefined),
+    };
+    const service = buildService({
+      orders,
+      candidates: [RIDER],
+      locationFor: async () => ({
+        stale: false,
+        location: { latitude: 23.031, longitude: 72.571 },
+      }),
+    });
+
+    await expect(service.dispatchOffersForSearchingOrder(ORDER)).resolves.toEqual({
+      offered: 1,
+    });
+    await expect(service.dispatchOffersForSearchingOrder(ORDER)).resolves.toEqual({
+      offered: 0,
+    });
+    expect(orders.insertOffer).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not create a duplicate pair when the unique constraint rejects the insert', async () => {
+    const duplicate = Object.assign(new Error('duplicate'), {
+      code: '23505',
+      constraint: 'order_offers_pair_unique',
+    });
+    const orders = {
+      lockById: jest.fn(async () => searchingOrder()),
+      insertOffer: jest.fn(async () => {
+        throw duplicate;
+      }),
+      riderHasLiveOrder: jest.fn(async () => false),
+      listStops: jest.fn(async () => [
+        { stop_type: 'PICKUP', latitude: '23.030000', longitude: '72.570000' },
+      ]),
+      listRiderIdsWithOffers: jest.fn(async () => []),
+      compareAndSetStatus: jest.fn(),
+      insertStatusEvent: jest.fn(),
+    };
+    const service = buildService({
+      orders,
+      candidates: [RIDER],
+      locationFor: async () => ({
+        stale: false,
+        location: { latitude: 23.031, longitude: 72.571 },
+      }),
+    });
+
+    await expect(service.dispatchOffersForSearchingOrder(ORDER)).resolves.toEqual({
+      offered: 0,
+    });
+    expect(orders.insertOffer).toHaveBeenCalledTimes(1);
+    expect(orders.compareAndSetStatus).not.toHaveBeenCalled();
   });
 });
 

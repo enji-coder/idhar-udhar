@@ -49,6 +49,23 @@ export type OrderOfferRow = {
   responded_at: Date | null;
 };
 
+export type RiderOfferListRow = OrderOfferRow & {
+  display_id: string;
+  crn: string | null;
+  canonical_status: OrderStatus;
+  vehicle_category_name: string | null;
+  package_weight_kg: string | null;
+  trip_fare: string | null;
+  distance_km: string | null;
+  rider_amount: string | null;
+  pickup_address: string | null;
+  pickup_latitude: string | null;
+  pickup_longitude: string | null;
+  drop_address: string | null;
+  drop_latitude: string | null;
+  drop_longitude: string | null;
+};
+
 export type InsertStopInput = {
   sequence: number;
   stop_type: 'PICKUP' | 'DROP';
@@ -696,24 +713,8 @@ export class OrdersRepository {
   async listOffersForRider(
     riderProfileId: string,
     db: Queryable = this.postgres,
-  ): Promise<
-    Array<
-      OrderOfferRow & {
-        display_id: string;
-        crn: string | null;
-        canonical_status: OrderStatus;
-        rider_amount: string | null;
-      }
-    >
-  > {
-    const result = await db.query<
-      OrderOfferRow & {
-        display_id: string;
-        crn: string | null;
-        canonical_status: OrderStatus;
-        rider_amount: string | null;
-      }
-    >(
+  ): Promise<RiderOfferListRow[]> {
+    const result = await db.query<RiderOfferListRow>(
       `
       SELECT
         off.order_offer_id,
@@ -725,10 +726,36 @@ export class OrdersRepository {
         o.display_id,
         o.crn,
         o.canonical_status,
-        ROUND(snap.trip_fare * snap.rider_percentage / 100, 2)::text AS rider_amount
+        o.vehicle_category_name_snapshot AS vehicle_category_name,
+        o.package_weight_kg::text AS package_weight_kg,
+        snap.trip_fare::text AS trip_fare,
+        snap.distance_km::text AS distance_km,
+        ROUND(snap.trip_fare * snap.rider_percentage / 100, 2)::text AS rider_amount,
+        pickup.address_text AS pickup_address,
+        pickup.latitude::text AS pickup_latitude,
+        pickup.longitude::text AS pickup_longitude,
+        dropoff.address_text AS drop_address,
+        dropoff.latitude::text AS drop_latitude,
+        dropoff.longitude::text AS drop_longitude
       FROM order_offers off
       JOIN orders o ON o.order_id = off.order_id
       LEFT JOIN order_fare_snapshots snap ON snap.order_id = o.order_id
+      LEFT JOIN LATERAL (
+        SELECT address_text, latitude, longitude
+        FROM order_stops
+        WHERE order_id = o.order_id
+          AND stop_type = 'PICKUP'
+        ORDER BY sequence
+        LIMIT 1
+      ) pickup ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT address_text, latitude, longitude
+        FROM order_stops
+        WHERE order_id = o.order_id
+          AND stop_type = 'DROP'
+        ORDER BY sequence
+        LIMIT 1
+      ) dropoff ON TRUE
       WHERE off.rider_profile_id = $1
       ORDER BY off.created_at DESC
       LIMIT 50

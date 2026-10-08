@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
@@ -46,8 +47,11 @@ class RiderLocationPublisher {
         latitude: result.location!.latitude,
         longitude: result.location!.longitude,
       );
-    } on ApiException {
-      // Existing backend may be offline; do not interrupt delivery UI.
+    } on ApiException catch (error) {
+      log(
+        'rider_location_post_failed code=${error.code} status=${error.statusCode}',
+        name: 'rider_location',
+      );
     }
   }
 }

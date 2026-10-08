@@ -817,13 +817,13 @@ class _IncomingOrderCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      '${order.distanceKm} km',
+                      order.distanceLabel,
                       style: _d(RiderTextStyles.caption),
                     ),
                   ),
                   Expanded(
                     child: Text(
-                      currency.format(order.estimatedEarnings),
+                      currency.format(order.tripAmount),
                       style: _d(RiderTextStyles.bodyMedium).copyWith(
                         color: RiderColors.primary,
                         fontWeight: FontWeight.w700,
@@ -833,12 +833,18 @@ class _IncomingOrderCard extends StatelessWidget {
                   ),
                   Expanded(
                     child: Text(
-                      '${order.estimatedMinutes} min',
+                      order.etaLabel,
                       style: _d(RiderTextStyles.caption),
                       textAlign: TextAlign.end,
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: RiderSpacing.xs),
+              Text(
+                'Trip Fare ${currency.format(order.tripAmount)} · Your Earnings ${currency.format(order.estimatedEarnings)}',
+                style: _d(RiderTextStyles.caption),
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: RiderSpacing.lg),
               Row(

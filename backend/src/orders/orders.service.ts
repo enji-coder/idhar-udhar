@@ -2,6 +2,7 @@ import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
+import { AppLogger } from '../common/logger/app-logger';
 import { isCheckViolation, isUniqueViolation } from '../common/pg-error';
 import { AppConfig } from '../config/configuration';
 import { Queryable } from '../database/queryable';
@@ -20,6 +21,7 @@ import {
 import { FareService } from '../fare/fare.service';
 import { formatInr } from '../fare/money';
 import { haversineMeters } from '../routing/coordinates';
+import { plannedTripDurationSeconds } from '../routing/trip-duration';
 import { RoutingService } from '../routing/routing.service';
 import { riderMayAccessRides } from '../files/rider-verification';
 import { riderProfileGaps } from '../profiles/rider-profile-completion';
@@ -42,12 +44,15 @@ import {
   OrderRow,
   OrderStopRow,
   OrdersRepository,
+  RiderOfferListRow,
 } from './orders.repository';
 
 export type OrderActor = AuthContext;
 
 @Injectable()
 export class OrdersService {
+  private readonly dispatchLog = new AppLogger();
+
   constructor(
     private readonly postgres: PostgresService,
     private readonly orders: OrdersRepository,
@@ -459,12 +464,16 @@ export class OrdersService {
         fare_snapshot: serializeSnapshot(snapshot),
       };
     }).then(async (payload) => {
-      // Confirm must succeed even if no riders are online yet.
-      // Dispatch uses the same order_offers seam as admin offer creation.
+      // Confirm stays successful when nobody is eligible. A thrown dispatch
+      // error is logged; it is not turned into a fake offer.
+      const orderId = payload.order_id as string;
       try {
-        await this.dispatchOffersForSearchingOrder(payload.order_id as string);
-      } catch {
-        // Leave order in SEARCHING; customer poll / admin can still dispatch.
+        await this.dispatchOffersForSearchingOrder(orderId);
+      } catch (err) {
+        this.dispatchLog.error('dispatch_after_confirm_failed', {
+          order_id: orderId,
+          error: err instanceof Error ? err.message : 'dispatch_failed',
+        });
       }
       return payload;
     });
@@ -524,7 +533,8 @@ export class OrdersService {
       if (actorType === 'CUSTOMER') {
         this.assertCustomerOwns(auth, order);
       } else if (actorType === 'RIDER') {
-        if (order.rider_profile_id !== auth.profileId) {
+        const riderProfileId = await this.canonicalRiderProfileId(auth);
+        if (order.rider_profile_id !== riderProfileId) {
           throw new ApiError(
             ErrorCodes.FORBIDDEN,
             'Rider is not assigned to this order',
@@ -587,15 +597,28 @@ export class OrdersService {
    * Offers the nearest eligible online rider who has a fresh GPS fix.
    * One offer at a time so a reject or expiry can try the next nearest rider.
    * Riders without a recent location are skipped, not replaced by a random id.
+   * Skip reasons are logged. Eligibility rules are not relaxed.
    */
   async dispatchOffersForSearchingOrder(orderId: string) {
     return this.postgres.transaction(async (tx) => {
       const order = await this.orders.lockById(orderId, tx);
       if (!order || order.canonical_status !== 'SEARCHING') {
+        this.dispatchLog.info('dispatch_skipped', {
+          order_id: orderId,
+          skip_reason: order ? 'order_not_searching' : 'order_not_found',
+          order_status: order?.canonical_status ?? null,
+          offer_created: false,
+        });
         return { offered: 0 };
       }
       const snapshot = await this.fares.findSnapshotByOrder(order.order_id, tx);
       if (!snapshot) {
+        this.dispatchLog.info('dispatch_skipped', {
+          order_id: order.order_id,
+          vehicle_category_id: order.vehicle_category_id,
+          skip_reason: 'fare_snapshot_missing',
+          offer_created: false,
+        });
         return { offered: 0 };
       }
       const stops = await this.orders.listStops(order.order_id, tx);
@@ -603,6 +626,12 @@ export class OrdersService {
       const pickupLat = pickup ? Number(pickup.latitude) : Number.NaN;
       const pickupLng = pickup ? Number(pickup.longitude) : Number.NaN;
       if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng)) {
+        this.dispatchLog.info('dispatch_skipped', {
+          order_id: order.order_id,
+          vehicle_category_id: order.vehicle_category_id,
+          skip_reason: 'pickup_coordinates_missing',
+          offer_created: false,
+        });
         return { offered: 0 };
       }
       const alreadyOffered = new Set(
@@ -612,22 +641,49 @@ export class OrdersService {
         order.vehicle_category_id,
         tx,
       );
+      const skips: Array<Record<string, unknown>> = [];
       const ranked: Array<{ riderProfileId: string; meters: number }> = [];
       for (const riderProfileId of candidates) {
+        const base = {
+          order_id: order.order_id,
+          rider_profile_id: riderProfileId,
+          vehicle_category_id: order.vehicle_category_id,
+          online_status: 'ONLINE',
+          approval_status: 'APPROVED',
+          offer_created: false,
+        };
         if (alreadyOffered.has(riderProfileId)) {
+          skips.push({ ...base, skip_reason: 'already_offered', eligibility_result: 'skipped' });
           continue;
         }
         if (await this.orders.riderHasLiveOrder(riderProfileId, tx)) {
+          skips.push({
+            ...base,
+            has_live_order: true,
+            skip_reason: 'live_order',
+            eligibility_result: 'skipped',
+          });
           continue;
         }
         const fix = await this.locations.getRiderLocationForConsumer(riderProfileId);
         const latitude = fix.location?.latitude;
         const longitude = fix.location?.longitude;
+        const locationFound = fix.location != null;
+        const ageSeconds = locationAgeSeconds(fix.location?.received_at);
         if (
           fix.stale ||
           typeof latitude !== 'number' ||
           typeof longitude !== 'number'
         ) {
+          skips.push({
+            ...base,
+            has_live_order: false,
+            location_found: locationFound,
+            location_age_seconds: ageSeconds,
+            location_fresh: false,
+            skip_reason: locationFound ? 'stale_location' : 'missing_location',
+            eligibility_result: 'skipped',
+          });
           continue;
         }
         ranked.push({
@@ -648,10 +704,55 @@ export class OrdersService {
             actorProfileId: null,
             tx,
           });
+          this.dispatchLog.info('dispatch_offer_created', {
+            order_id: order.order_id,
+            rider_profile_id: candidate.riderProfileId,
+            vehicle_category_id: order.vehicle_category_id,
+            online_status: 'ONLINE',
+            approval_status: 'APPROVED',
+            location_found: true,
+            location_fresh: true,
+            has_live_order: false,
+            cod_suspended: false,
+            eligibility_result: 'offered',
+            skip_reason: null,
+            offer_created: true,
+            distance_to_pickup_meters: Math.round(candidate.meters),
+            skipped_count: skips.length,
+          });
+          for (const skip of skips) {
+            this.dispatchLog.info('dispatch_rider_skipped', skip);
+          }
           return { offered: 1 };
-        } catch {
-          // Duplicate or ineligible; try the next nearest rider.
+        } catch (err) {
+          const reason = this.dispatchSkipReason(err);
+          skips.push({
+            order_id: order.order_id,
+            rider_profile_id: candidate.riderProfileId,
+            vehicle_category_id: order.vehicle_category_id,
+            online_status: 'ONLINE',
+            approval_status: 'APPROVED',
+            location_found: true,
+            location_fresh: true,
+            has_live_order: false,
+            cod_suspended: reason === 'cod_suspended',
+            eligibility_result: 'skipped',
+            skip_reason: reason,
+            offer_created: false,
+          });
         }
+      }
+      this.dispatchLog.info('dispatch_no_offer', {
+        order_id: order.order_id,
+        vehicle_category_id: order.vehicle_category_id,
+        candidate_count: candidates.length,
+        ranked_count: ranked.length,
+        skipped_count: skips.length,
+        offer_created: false,
+        skip_reason: candidates.length === 0 ? 'no_eligible_riders' : 'all_candidates_skipped',
+      });
+      for (const skip of skips) {
+        this.dispatchLog.info('dispatch_rider_skipped', skip);
       }
       return { offered: 0 };
     });
@@ -767,7 +868,8 @@ export class OrdersService {
 
   async listRiderOffers(auth: OrderActor) {
     this.assertRider(auth);
-    const rider = await this.catalog.findRider(auth.profileId);
+    const riderProfileId = await this.canonicalRiderProfileId(auth);
+    const rider = await this.catalog.findRider(riderProfileId);
     if (
       !rider ||
       !riderMayAccessRides({
@@ -784,14 +886,14 @@ export class OrdersService {
     await this.releaseExpiredOffers();
     if (rider.online_status === 'ONLINE' && !rider.deactivated_at) {
       const searching = await this.orders.listSearchingOrderIdsForRider(
-        auth.profileId,
+        riderProfileId,
       );
       for (const searchingOrderId of searching) {
         await this.retrySearchingDispatch(searchingOrderId);
       }
     }
     const ttlMs = this.offerTtlMs();
-    const rows = await this.orders.listOffersForRider(auth.profileId);
+    const rows = await this.orders.listOffersForRider(riderProfileId);
     const now = Date.now();
     return {
       offers: rows
@@ -804,20 +906,15 @@ export class OrdersService {
           }
           return row.created_at.getTime() + ttlMs > now;
         })
-        .map((row) => ({
-          ...this.serializeOffer(row),
-          display_id: row.display_id,
-          crn: row.crn,
-          order_status: row.canonical_status,
-          rider_amount: row.rider_amount,
-        })),
+        .map((row) => this.serializeRiderOffer(row, ttlMs)),
     };
   }
 
   async acceptOffer(auth: OrderActor, offerId: string) {
     this.assertRider(auth);
-    const idempotencyKey = `${auth.profileId}:${offerId}`;
-    const requestHash = hashRequest({ offer_id: offerId, rider_profile_id: auth.profileId });
+    const riderProfileId = await this.canonicalRiderProfileId(auth);
+    const idempotencyKey = `${riderProfileId}:${offerId}`;
+    const requestHash = hashRequest({ offer_id: offerId, rider_profile_id: riderProfileId });
     const existing = await this.idempotency.find('accept-offer', idempotencyKey);
     if (existing) {
       return this.replayOrConflict(existing.request_hash, requestHash, existing.result_payload);
@@ -843,14 +940,14 @@ export class OrdersService {
         if (!offer) {
           throw new ApiError(ErrorCodes.OFFER_NOT_FOUND, 'Offer was not found', 404);
         }
-        if (offer.rider_profile_id !== auth.profileId) {
+        if (offer.rider_profile_id !== riderProfileId) {
           throw new ApiError(
             ErrorCodes.FORBIDDEN,
             'Offer does not belong to this rider',
             403,
           );
         }
-        if (offer.status === 'ACCEPTED' && order.rider_profile_id === auth.profileId) {
+        if (offer.status === 'ACCEPTED' && order.rider_profile_id === riderProfileId) {
           const payload = {
             ...this.serializeOffer(offer),
             order: this.serializeOrder(order),
@@ -859,7 +956,7 @@ export class OrdersService {
         }
         if (
           (order.rider_profile_id &&
-            order.rider_profile_id !== auth.profileId) ||
+            order.rider_profile_id !== riderProfileId) ||
           (order.canonical_status !== 'OFFERED' &&
             order.canonical_status !== 'SEARCHING')
         ) {
@@ -914,9 +1011,9 @@ export class OrdersService {
           return { __offerExpired: true as const };
         }
         this.assertOfferAcceptable(offer, order);
-        await this.assertRiderEligible(auth.profileId, tx);
-        await this.assertRiderOnboardingComplete(auth.profileId, tx);
-        if (await this.orders.riderHasLiveOrder(auth.profileId, tx)) {
+        await this.assertRiderEligible(riderProfileId, tx);
+        await this.assertRiderOnboardingComplete(riderProfileId, tx);
+        if (await this.orders.riderHasLiveOrder(riderProfileId, tx)) {
           throw new ApiError(
             ErrorCodes.RIDER_HAS_ACTIVE_ORDER,
             'Rider already has a live order',
@@ -950,10 +1047,10 @@ export class OrdersService {
             order,
             to: 'ASSIGNED',
             actor: 'RIDER',
-            actorProfileId: auth.profileId,
+            actorProfileId: riderProfileId,
             reason: 'offer_accepted',
             eventKey: `${order.canonical_status}->ASSIGNED:${offer.order_offer_id}`,
-            riderProfileId: auth.profileId,
+            riderProfileId,
           },
           tx,
         );
@@ -1011,6 +1108,7 @@ export class OrdersService {
 
   async rejectOffer(auth: OrderActor, offerId: string) {
     this.assertRider(auth);
+    const riderProfileId = await this.canonicalRiderProfileId(auth);
     const result = await this.postgres.transaction(async (tx) => {
       const unlocked = await this.orders.findOffer(offerId, tx);
       if (!unlocked) {
@@ -1024,7 +1122,7 @@ export class OrdersService {
       if (!offer) {
         throw new ApiError(ErrorCodes.OFFER_NOT_FOUND, 'Offer was not found', 404);
       }
-      if (offer.rider_profile_id !== auth.profileId) {
+      if (offer.rider_profile_id !== riderProfileId) {
         throw new ApiError(
           ErrorCodes.FORBIDDEN,
           'Offer does not belong to this rider',
@@ -1060,7 +1158,7 @@ export class OrdersService {
             order,
             to: 'SEARCHING',
             actor: 'RIDER',
-            actorProfileId: auth.profileId,
+            actorProfileId: riderProfileId,
             reason: 'offer_rejected',
             eventKey: `OFFERED->SEARCHING:${offer.order_offer_id}`,
           },
@@ -1172,8 +1270,12 @@ export class OrdersService {
           );
           return true;
         });
-      } catch {
+      } catch (err) {
         searching = false;
+        this.dispatchLog.error('offer_expiry_transition_failed', {
+          order_id: orderId,
+          error: err instanceof Error ? err.message : 'offer_expiry_failed',
+        });
       }
       if (searching) {
         await this.redispatchSearchingQuietly(orderId);
@@ -1190,8 +1292,11 @@ export class OrdersService {
   private async retrySearchingDispatch(orderId: string): Promise<void> {
     try {
       await this.dispatchOffersForSearchingOrder(orderId);
-    } catch {
-      // Leave SEARCHING. The next poll can try again.
+    } catch (err) {
+      this.dispatchLog.error('dispatch_retry_failed', {
+        order_id: orderId,
+        error: err instanceof Error ? err.message : 'dispatch_failed',
+      });
     }
   }
 
@@ -1199,8 +1304,11 @@ export class OrdersService {
   private async redispatchSearchingQuietly(orderId: string): Promise<void> {
     try {
       await this.dispatchOffersForSearchingOrder(orderId);
-    } catch {
-      // Leave SEARCHING; admin or a later retry can dispatch.
+    } catch (err) {
+      this.dispatchLog.error('dispatch_redispatch_failed', {
+        order_id: orderId,
+        error: err instanceof Error ? err.message : 'dispatch_failed',
+      });
     }
   }
 
@@ -1419,10 +1527,18 @@ export class OrdersService {
       return;
     }
     if (auth.role === 'RIDER') {
-      if (order.rider_profile_id === auth.profileId) {
+      const riderProfileId = await this.canonicalRiderProfileId(auth);
+      if (
+        order.rider_profile_id === riderProfileId ||
+        order.rider_profile_id === auth.profileId
+      ) {
         return;
       }
-      if (await this.orders.riderHasOffer(order.order_id, auth.profileId)) {
+      if (
+        (await this.orders.riderHasOffer(order.order_id, riderProfileId)) ||
+        (riderProfileId !== auth.profileId &&
+          (await this.orders.riderHasOffer(order.order_id, auth.profileId)))
+      ) {
         return;
       }
       throw new ApiError(
@@ -1684,5 +1800,77 @@ export class OrdersService {
       responded_at: offer.responded_at ? offer.responded_at.toISOString() : null,
     };
   }
+
+  /**
+   * Trip fare stays the snapshot trip_fare. rider_amount is the 85/15 share
+   * and is returned separately. Expiry is created_at plus the configured TTL.
+   */
+  private serializeRiderOffer(row: RiderOfferListRow, ttlMs: number) {
+    const distanceKm = row.distance_km == null ? null : Number(row.distance_km);
+    const duration =
+      distanceKm != null && Number.isFinite(distanceKm)
+        ? plannedTripDurationSeconds(distanceKm)
+        : null;
+    return {
+      ...this.serializeOffer(row),
+      display_id: row.display_id,
+      crn: row.crn,
+      order_status: row.canonical_status,
+      trip_fare: row.trip_fare,
+      rider_amount: row.rider_amount,
+      distance_km: row.distance_km,
+      estimated_duration_seconds: duration,
+      expires_at: new Date(row.created_at.getTime() + ttlMs).toISOString(),
+      offer_ttl_seconds: ttlMs / 1000,
+      vehicle_category_name: row.vehicle_category_name,
+      package_weight_kg: row.package_weight_kg,
+      pickup_address: row.pickup_address,
+      pickup_latitude: row.pickup_latitude,
+      pickup_longitude: row.pickup_longitude,
+      drop_address: row.drop_address,
+      drop_latitude: row.drop_latitude,
+      drop_longitude: row.drop_longitude,
+    };
+  }
+
+  /**
+   * GPS, online status, and offer rows use the identity's rider profile.
+   * A lagging session profile id must not hide that offer.
+   */
+  private async canonicalRiderProfileId(auth: OrderActor): Promise<string> {
+    if (auth.role !== 'RIDER') {
+      return auth.profileId;
+    }
+    const lookup = this.catalog.findRiderProfileIdByIdentity;
+    if (typeof lookup !== 'function') {
+      return auth.profileId;
+    }
+    const id = await lookup.call(this.catalog, auth.identityId);
+    return typeof id === 'string' && id.length > 0 ? id : auth.profileId;
+  }
+
+  private dispatchSkipReason(err: unknown): string {
+    if (err instanceof ApiError) {
+      if (err.message.toLowerCase().includes('suspended for cod')) {
+        return 'cod_suspended';
+      }
+      if (err.code === ErrorCodes.OFFER_ALREADY_EXISTS) {
+        return 'already_offered';
+      }
+      return err.code;
+    }
+    return 'offer_create_failed';
+  }
+}
+
+function locationAgeSeconds(receivedAt: string | undefined): number | null {
+  if (!receivedAt) {
+    return null;
+  }
+  const at = new Date(receivedAt).getTime();
+  if (Number.isNaN(at)) {
+    return null;
+  }
+  return Math.max(0, Math.round((Date.now() - at) / 1000));
 }
 
