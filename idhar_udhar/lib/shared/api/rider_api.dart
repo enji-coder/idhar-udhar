@@ -149,6 +149,18 @@ class RiderApi {
     return ApiOrder.fromJson(await _client.get('/v1/rider/orders/$orderId'));
   }
 
+  /// Existing payment view. Null when the body has no usable allocation.
+  /// HTTP failures propagate and must not be stored as a zero-cash order.
+  Future<ApiOrderPaymentView?> getOrderPayment(String orderId) async {
+    final ApiOrderPaymentView? view = ApiOrderPaymentView.tryParse(
+      await _client.get('/v1/orders/$orderId/payment'),
+    );
+    if (view == null || view.orderId != orderId) {
+      return null;
+    }
+    return view;
+  }
+
   Future<ApiOrder> transitionStatus({
     required String orderId,
     required String toStatus,

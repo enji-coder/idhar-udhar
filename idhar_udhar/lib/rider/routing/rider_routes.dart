@@ -24,6 +24,7 @@ abstract final class RiderRoutes {
   static const String acceptConfirmation = '/rider/orders/accepted';
   static const String orderDetails = '/rider/orders/details';
   static const String activeDelivery = '/rider/orders/active';
+  static const String deliveryComplete = '/rider/orders/complete';
   static const String profile = '/rider/profile';
   static const String vehicleEdit = '/rider/vehicle/edit';
   static const String bankEdit = '/rider/bank/edit';

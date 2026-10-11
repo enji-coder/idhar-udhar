@@ -1,4 +1,92 @@
-import { CashfreePaymentService } from './cashfree-payment.service';
+import {
+  CashfreePaymentService,
+  cashfreeTransportErrorFields,
+  defaultCashfreeHttp,
+} from './cashfree-payment.service';
+
+describe('cashfreeTransportErrorFields', () => {
+  it('allowlists only safe name/code fields and omits message text', () => {
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND 1.2.3.4'), {
+      code: 'ENOTFOUND',
+    });
+    const err = Object.assign(new TypeError('fetch failed https://evil.example'), {
+      cause,
+    });
+    expect(cashfreeTransportErrorFields(err)).toEqual({
+      error_name: 'TypeError',
+      error_code: null,
+      cause_name: 'Error',
+      cause_code: 'ENOTFOUND',
+    });
+    expect(JSON.stringify(cashfreeTransportErrorFields(err))).not.toContain(
+      'fetch failed',
+    );
+    expect(JSON.stringify(cashfreeTransportErrorFields(err))).not.toContain(
+      '1.2.3.4',
+    );
+  });
+
+  it('drops codes that are not safe identifiers', () => {
+    const err = Object.assign(new Error('x'), {
+      code: 'not-a-safe-code',
+    });
+    expect(cashfreeTransportErrorFields(err).error_code).toBeNull();
+  });
+});
+
+describe('defaultCashfreeHttp', () => {
+  it('logs allowlisted transport fields and preserves client ApiError', async () => {
+    const warn = jest.fn();
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('connect ECONNREFUSED 1.2.3.4:443'), {
+            code: 'ECONNREFUSED',
+          }),
+        }),
+      );
+    try {
+      await expect(
+        defaultCashfreeHttp(
+          'https://api.cashfree.com/pg/orders',
+          {
+            method: 'POST',
+            headers: {
+              'x-client-id': 'cid',
+              'x-client-secret': 'super_secret_value',
+            },
+            body: JSON.stringify({
+              customer_details: { customer_phone: '9876543210' },
+            }),
+            timeoutMs: 1000,
+          },
+          { warn },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PAYMENT_GATEWAY_REJECTED',
+        message: 'Cashfree did not respond',
+        status: 503,
+      });
+      expect(warn).toHaveBeenCalledWith('cashfree_transport_failed', {
+        method: 'POST',
+        timeout_ms: 1000,
+        error_name: 'TypeError',
+        error_code: null,
+        cause_name: 'Error',
+        cause_code: 'ECONNREFUSED',
+      });
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain('super_secret_value');
+      expect(logged).not.toContain('9876543210');
+      expect(logged).not.toContain('fetch failed');
+      expect(logged).not.toContain('1.2.3.4');
+      expect(logged).not.toContain('api.cashfree.com');
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+});
 
 describe('CashfreePaymentService', () => {
   function serviceWith(environment: 'sandbox' | 'production') {

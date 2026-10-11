@@ -651,6 +651,147 @@ class OrdersApi {
   }
 }
 
+/// GET /v1/orders/:id/payment. Null responsibility or plan means the server
+/// has no allocation yet. A null parse means the body is not that shape.
+class ApiOrderPaymentView {
+  const ApiOrderPaymentView({
+    required this.orderId,
+    required this.responsibility,
+    required this.plan,
+  });
+
+  final String orderId;
+  final ApiPaymentResponsibility? responsibility;
+  final ApiPaymentPlan? plan;
+
+  bool get hasAllocation => responsibility != null && plan != null;
+
+  static ApiOrderPaymentView? tryParse(Object? raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    final Map<String, Object?> json = jsonObject(raw);
+    final String orderId = (jsonString(json['order_id']) ?? '').trim();
+    if (orderId.isEmpty ||
+        !json.containsKey('responsibility') ||
+        !json.containsKey('plan')) {
+      return null;
+    }
+    if (json['responsibility'] == null || json['plan'] == null) {
+      return ApiOrderPaymentView(
+        orderId: orderId,
+        responsibility: null,
+        plan: null,
+      );
+    }
+    if (json['responsibility'] is! Map || json['plan'] is! Map) {
+      return null;
+    }
+    final ApiPaymentResponsibility? responsibility =
+        ApiPaymentResponsibility.tryParse(jsonObject(json['responsibility']));
+    final ApiPaymentPlan? plan =
+        ApiPaymentPlan.tryParse(jsonObject(json['plan']));
+    if (responsibility == null || plan == null) {
+      return null;
+    }
+    if (responsibility.orderId != orderId || plan.orderId != orderId) {
+      return null;
+    }
+    return ApiOrderPaymentView(
+      orderId: orderId,
+      responsibility: responsibility,
+      plan: plan,
+    );
+  }
+}
+
+class ApiPaymentResponsibility {
+  const ApiPaymentResponsibility({
+    required this.orderId,
+    required this.applicableBillTotal,
+    required this.customerResponsibility,
+    required this.receiverResponsibility,
+  });
+
+  final String orderId;
+  final double applicableBillTotal;
+  final double customerResponsibility;
+  final double receiverResponsibility;
+
+  static ApiPaymentResponsibility? tryParse(Map<String, Object?> json) {
+    final String orderId = (jsonString(json['order_id']) ?? '').trim();
+    final double? bill = _requiredInr(json, 'applicable_bill_total');
+    final double? customer = _requiredInr(json, 'customer_responsibility');
+    final double? receiver = _requiredInr(json, 'receiver_responsibility');
+    if (orderId.isEmpty || bill == null || customer == null || receiver == null) {
+      return null;
+    }
+    return ApiPaymentResponsibility(
+      orderId: orderId,
+      applicableBillTotal: bill,
+      customerResponsibility: customer,
+      receiverResponsibility: receiver,
+    );
+  }
+}
+
+class ApiPaymentPlan {
+  const ApiPaymentPlan({
+    required this.orderId,
+    required this.customerPlannedOnline,
+    required this.customerPlannedCash,
+    required this.receiverPlannedOnline,
+    required this.receiverPlannedCash,
+  });
+
+  final String orderId;
+  final double customerPlannedOnline;
+  final double customerPlannedCash;
+  final double receiverPlannedOnline;
+  final double receiverPlannedCash;
+
+  static ApiPaymentPlan? tryParse(Map<String, Object?> json) {
+    final String orderId = (jsonString(json['order_id']) ?? '').trim();
+    final double? customerOnline = _requiredInr(json, 'customer_planned_online');
+    final double? customerCash = _requiredInr(json, 'customer_planned_cash');
+    final double? receiverOnline = _requiredInr(json, 'receiver_planned_online');
+    final double? receiverCash = _requiredInr(json, 'receiver_planned_cash');
+    if (orderId.isEmpty ||
+        customerOnline == null ||
+        customerCash == null ||
+        receiverOnline == null ||
+        receiverCash == null) {
+      return null;
+    }
+    return ApiPaymentPlan(
+      orderId: orderId,
+      customerPlannedOnline: customerOnline,
+      customerPlannedCash: customerCash,
+      receiverPlannedOnline: receiverOnline,
+      receiverPlannedCash: receiverCash,
+    );
+  }
+}
+
+double? _requiredInr(Map<String, Object?> json, String key) {
+  if (!json.containsKey(key)) {
+    return null;
+  }
+  final Object? value = json[key];
+  if (value is num) {
+    final double number = value.toDouble();
+    return number.isFinite ? number : null;
+  }
+  if (value is String) {
+    final double? number = double.tryParse(value.trim());
+    if (number == null || !number.isFinite) {
+      return null;
+    }
+    return number;
+  }
+  return null;
+}
+
 class RiderLiveLocation {
   const RiderLiveLocation({
     required this.latitude,

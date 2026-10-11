@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../features/orders/external_navigation.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
@@ -106,7 +107,17 @@ class OrderDetailsScreen extends ConsumerWidget {
       ),
       bottom: RiderPrimaryButton(
         label: 'Start Delivery',
-        onPressed: () => context.push(RiderRoutes.activeDelivery),
+        onPressed: () async {
+          await openRiderExternalNavigation(
+            context,
+            latitude: order.pickupLatitude,
+            longitude: order.pickupLongitude,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          context.push(RiderRoutes.activeDelivery);
+        },
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -223,17 +234,10 @@ class OrderDetailsScreen extends ConsumerWidget {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                behavior: SnackBarBehavior.floating,
-                                backgroundColor: RiderColors.secondary,
-                                content: Text(
-                                  'Navigation (demo)',
-                                  style: RiderTextStyles.bodyMedium.copyWith(
-                                    color: RiderColors.textOnPrimary,
-                                  ),
-                                ),
-                              ),
+                            openRiderExternalNavigation(
+                              context,
+                              latitude: order.pickupLatitude,
+                              longitude: order.pickupLongitude,
                             );
                           },
                           icon: const Icon(Icons.navigation_rounded),
