@@ -30,6 +30,7 @@ abstract final class AppRoutes {
   static const String help = '/help';
   static const String terms = '/terms';
   static const String notifications = '/profile/notifications';
+  static const String notificationSettings = '/profile/notification-settings';
 
   static String orderDetailsPath(String id) => '/orders/$id';
 }

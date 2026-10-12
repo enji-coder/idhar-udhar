@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../data/local/rider_permissions.dart';
 import '../../data/local/rider_prefs.dart';
+import '../../push/rider_offer_alerts.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -34,6 +35,7 @@ class _PermissionSetupScreenState extends ConsumerState<PermissionSetupScreen>
   bool _cameraGranted = false;
   bool _notificationGranted = false;
   bool _overlayGranted = false;
+  bool _fullScreenGranted = false;
   bool _loadingLocation = false;
   bool _loadingCamera = false;
   bool _loadingNotification = false;
@@ -83,12 +85,14 @@ class _PermissionSetupScreenState extends ConsumerState<PermissionSetupScreen>
       overlay = (await RiderPermissions.safeStatus(Permission.systemAlertWindow))
           .isGranted;
     }
+    final bool fullScreen = await riderFullScreenOffersAllowed();
     if (!mounted) return;
     setState(() {
       _locationGranted = RiderPermissions.isUsable(location);
       _cameraGranted = RiderPermissions.isUsable(camera);
       _notificationGranted = RiderPermissions.isUsable(notification);
       _overlayGranted = overlay;
+      _fullScreenGranted = fullScreen;
       _locationPermanent = location.isPermanentlyDenied;
       _cameraPermanent = camera.isPermanentlyDenied;
       _notificationPermanent = notification.isPermanentlyDenied;
@@ -318,6 +322,29 @@ class _PermissionSetupScreenState extends ConsumerState<PermissionSetupScreen>
                   _notificationPermanent ? 'Open Settings' : 'Allow Notifications',
               onAllow: _requestNotifications,
             ),
+            if (_isAndroid) ...[
+              const SizedBox(height: RiderSpacing.md),
+              _PermissionCard(
+                title: 'Full-screen order offers',
+                icon: Icons.notifications_active_outlined,
+                granted: _fullScreenGranted,
+                loading: false,
+                explanation:
+                    'Android can show a new delivery over the lock screen or another app only when full-screen alerts are allowed. If this is off, you still get a loud heads-up notification with Accept and Reject. This does not override silent mode or Do Not Disturb.',
+                reasons: const [
+                  'Offer while using another app',
+                  'Offer on the lock screen when Android allows it',
+                ],
+                actionLabel: _fullScreenGranted
+                    ? 'Allowed'
+                    : 'Open full-screen settings',
+                onAllow: _fullScreenGranted
+                    ? () {}
+                    : () async {
+                        await openRiderFullScreenOfferSettings();
+                      },
+              ),
+            ],
             if (_isAndroid) ...[
               const SizedBox(height: RiderSpacing.md),
               _PermissionCard(

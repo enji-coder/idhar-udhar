@@ -2,6 +2,9 @@
     xmlns:tools="http://schemas.android.com/tools">
     <!-- Rider-only: Android 13+ notifications for order alerts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Full-screen incoming offers when Android grants this special access. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Rider-only: special overlay permission (opened via system settings). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Release Rider builds do not merge debug/profile manifests. Maps + API need INTERNET. -->
@@ -13,5 +16,10 @@
     <application
         android:icon="@mipmap/ic_launcher_rider"
         android:roundIcon="@mipmap/ic_launcher_rider"
-        tools:replace="android:icon,android:roundIcon" />
+        tools:replace="android:icon,android:roundIcon">
+        <activity
+            android:name=".MainActivity"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true" />
+    </application>
 </manifest>

@@ -190,6 +190,24 @@ export class NotificationService {
     return { updated };
   }
 
+  async dismiss(auth: AuthContext, notificationId: string) {
+    const deleted = await this.postgres.transaction((tx) =>
+      this.repo.deleteOwned(
+        {
+          notificationId,
+          identityId: auth.identityId,
+          role: auth.role,
+          profileId: auth.profileId,
+        },
+        tx,
+      ),
+    );
+    if (!deleted) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Notification was not found', 404);
+    }
+    return { deleted: true };
+  }
+
   async getPreferences(auth: AuthContext) {
     const row = await this.repo.ensurePreferences(auth.identityId);
     return this.serializePreferences(row);

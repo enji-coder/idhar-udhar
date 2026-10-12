@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,8 @@ import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/push/firebase_fcm_token_source.dart';
 import 'package:idhar_udhar/shared/push/push_token_sync.dart';
 
+import 'push/rider_offer_alerts.dart';
+import 'push/rider_offer_listener.dart';
 import 'routing/rider_router.dart';
 import 'theme/rider_colors.dart';
 import 'theme/rider_theme.dart';
@@ -23,6 +26,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ApiConfig.useProductionDefault();
   final bool firebaseReady = await _initializeRiderFirebase();
+  riderFirebaseReady = firebaseReady;
+  await ensureRiderOfferAlerts();
+  if (firebaseReady) {
+    FirebaseMessaging.onBackgroundMessage(riderFirebaseBackgroundHandler);
+  }
 
   await SystemChrome.setPreferredOrientations(const [
     DeviceOrientation.portraitUp,
@@ -88,6 +96,9 @@ class IdharUdharRiderApp extends StatelessWidget {
       theme: RiderTheme.light,
       color: RiderColors.background,
       routerConfig: RiderRouter.config,
+      builder: (context, child) {
+        return RiderOfferListener(child: child ?? const SizedBox.shrink());
+      },
     );
   }
 }

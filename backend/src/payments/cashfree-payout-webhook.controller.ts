@@ -45,11 +45,11 @@ export class CashfreePayoutWebhookController {
       payment.provider !== 'cashfree' ||
       (payment.cashfree.environment !== 'sandbox' &&
         payment.cashfree.environment !== 'production') ||
-      !payment.cashfree.clientSecret
+      !payment.cashfree.payoutClientSecret
     ) {
       throw new ApiError(
         ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
-        'Cashfree payout webhooks are not configured',
+        'Cashfree payout webhooks require CASHFREE_PAYOUT_CLIENT_SECRET',
         503,
       );
     }
@@ -62,7 +62,7 @@ export class CashfreePayoutWebhookController {
       );
     }
     const check = verifyCashfreeWebhookSignature({
-      secret: payment.cashfree.clientSecret,
+      secret: payment.cashfree.payoutClientSecret,
       rawBody: raw,
       timestamp: headerValue(req.headers['x-webhook-timestamp']),
       signature: headerValue(req.headers['x-webhook-signature']),

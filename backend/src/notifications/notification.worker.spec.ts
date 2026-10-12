@@ -65,6 +65,7 @@ describe('NotificationWorkerService FCM retry semantics', () => {
       title: 'Order confirmed',
       body: 'body',
       order_id: null,
+      rider_profile_id: null,
     });
     (push.send as jest.Mock).mockResolvedValue({
       ok: false,
@@ -101,6 +102,7 @@ describe('NotificationWorkerService FCM retry semantics', () => {
       title: 'Order confirmed',
       body: 'body',
       order_id: null,
+      rider_profile_id: null,
     });
     (push.send as jest.Mock).mockResolvedValue({
       ok: false,

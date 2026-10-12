@@ -50,4 +50,14 @@ export class NotificationsController {
   ) {
     return this.notifications.markRead(auth, id);
   }
+
+  @Roles('CUSTOMER', 'RIDER', 'ADMIN')
+  @Post(':id/dismiss')
+  @HttpCode(HttpStatus.OK)
+  dismiss(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.notifications.dismiss(auth, id);
+  }
 }

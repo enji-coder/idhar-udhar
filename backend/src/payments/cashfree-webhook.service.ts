@@ -150,16 +150,36 @@ export class CashfreeWebhookService {
     if (decision === 'ignore') {
       return { result: 'ignored', paymentTransactionId: attempt.payment_transaction_id };
     }
+    // Reject before PAID / gateway SUCCESS so a missing rider cannot leave a
+    // committed PAID top-up without a wallet credit.
+    const walletRiderProfileId = attempt.rider_profile_id;
+    if (
+      decision === 'apply-paid' &&
+      attempt.charge_purpose === 'WALLET_TOPUP' &&
+      !walletRiderProfileId
+    ) {
+      return { result: 'rejected', paymentTransactionId: attempt.payment_transaction_id };
+    }
     const nextStatus = decision === 'apply-paid' ? 'PAID' : 'FAILED';
+    // SUCCESS may CAS from PENDING or FAILED. Failure only from PENDING so a
+    // late FAILED webhook cannot downgrade an already-PAID charge.
     const updated = await tx.query<{ payment_transaction_id: string }>(
-      `
+      decision === 'apply-paid'
+        ? `
       UPDATE payment_transactions
-      SET transaction_status = $2
+      SET transaction_status = 'PAID'
+      WHERE payment_transaction_id = $1
+        AND transaction_status IN ('PENDING', 'FAILED')
+      RETURNING payment_transaction_id
+      `
+        : `
+      UPDATE payment_transactions
+      SET transaction_status = 'FAILED'
       WHERE payment_transaction_id = $1
         AND transaction_status = 'PENDING'
       RETURNING payment_transaction_id
       `,
-      [attempt.payment_transaction_id, nextStatus],
+      [attempt.payment_transaction_id],
     );
     if (!updated.rows[0]) {
       return { result: 'ignored', paymentTransactionId: attempt.payment_transaction_id };
@@ -176,14 +196,15 @@ export class CashfreeWebhookService {
     const order = attempt.order_id
       ? await this.orders.findById(attempt.order_id, tx)
       : null;
-    if (nextStatus === 'PAID' && attempt.charge_purpose === 'WALLET_TOPUP') {
-      if (!attempt.rider_profile_id) {
-        return { result: 'rejected', paymentTransactionId: attempt.payment_transaction_id };
-      }
+    if (
+      nextStatus === 'PAID' &&
+      attempt.charge_purpose === 'WALLET_TOPUP' &&
+      walletRiderProfileId
+    ) {
       await this.walletCod.applyVerifiedWalletTopUp(
         {
           paymentTransactionId: attempt.payment_transaction_id,
-          riderProfileId: attempt.rider_profile_id,
+          riderProfileId: walletRiderProfileId,
           amount: attempt.transaction_amount,
         },
         tx,
@@ -202,6 +223,14 @@ export class CashfreeWebhookService {
         },
         tx,
       );
+    } else if (
+      nextStatus === 'PAID' &&
+      attempt.charge_purpose === 'BOOKING' &&
+      order
+    ) {
+      // Amount and INR checks already passed. Settlement no-ops until the
+      // order is delivered and the frozen snapshot exists.
+      await this.walletCod.syncOrderFinance(order, tx);
     }
     if (order) {
       await this.notifications.onTransactionRecorded(

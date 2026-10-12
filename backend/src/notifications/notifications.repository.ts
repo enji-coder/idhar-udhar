@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ProfileRole } from '../auth/types/auth-context';
 import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
+import { plannedTripDurationSeconds } from '../routing/trip-duration';
 
 export type NotificationRow = {
   notification_id: string;
@@ -52,6 +53,7 @@ export type ClaimedDelivery = NotificationDeliveryRow & {
   title: string | null;
   body: string;
   order_id: string | null;
+  rider_profile_id: string | null;
 };
 
 const NOTIFICATION_COLUMNS = `
@@ -308,6 +310,57 @@ export class NotificationsRepository {
     return result.rows[0] ?? null;
   }
 
+  async deleteOwned(
+    input: {
+      notificationId: string;
+      identityId: string;
+      role: ProfileRole;
+      profileId: string;
+    },
+    db: Queryable = this.postgres,
+  ): Promise<boolean> {
+    const profileFilter = this.profileFilter(input.role);
+    const owned = await db.query<{ notification_id: string }>(
+      `
+      SELECT notification_id
+      FROM notifications
+      WHERE notification_id = $1
+        AND recipient_identity_id = $2
+        AND recipient_profile_type = $3
+        AND ${profileFilter} = $4
+      `,
+      [
+        input.notificationId,
+        input.identityId,
+        input.role,
+        input.profileId,
+      ],
+    );
+    if (!owned.rows[0]) {
+      return false;
+    }
+    await db.query(
+      `DELETE FROM notification_deliveries WHERE notification_id = $1`,
+      [input.notificationId],
+    );
+    const removed = await db.query(
+      `
+      DELETE FROM notifications
+      WHERE notification_id = $1
+        AND recipient_identity_id = $2
+        AND recipient_profile_type = $3
+        AND ${profileFilter} = $4
+      `,
+      [
+        input.notificationId,
+        input.identityId,
+        input.role,
+        input.profileId,
+      ],
+    );
+    return (removed.rowCount ?? 0) > 0;
+  }
+
   async markAllRead(
     input: { identityId: string; role: ProfileRole; profileId: string },
     db: Queryable = this.postgres,
@@ -502,6 +555,74 @@ export class NotificationsRepository {
     }));
   }
 
+  async findPendingOfferPushFacts(
+    input: { orderId: string; riderProfileId: string; ttlMs: number },
+    db: Queryable = this.postgres,
+  ): Promise<Record<string, string> | null> {
+    const result = await db.query<{
+      order_offer_id: string;
+      created_at: Date;
+      display_id: string | null;
+      trip_fare: string | null;
+      distance_km: string | null;
+      pickup_address: string | null;
+      drop_address: string | null;
+    }>(
+      `
+      SELECT
+        off.order_offer_id,
+        off.created_at,
+        o.display_id,
+        snap.trip_fare::text AS trip_fare,
+        snap.distance_km::text AS distance_km,
+        pickup.address_text AS pickup_address,
+        dropoff.address_text AS drop_address
+      FROM order_offers off
+      JOIN orders o ON o.order_id = off.order_id
+      LEFT JOIN order_fare_snapshots snap ON snap.order_id = o.order_id
+      LEFT JOIN LATERAL (
+        SELECT address_text
+        FROM order_stops
+        WHERE order_id = o.order_id AND stop_type = 'PICKUP'
+        ORDER BY sequence
+        LIMIT 1
+      ) pickup ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT address_text
+        FROM order_stops
+        WHERE order_id = o.order_id AND stop_type = 'DROP'
+        ORDER BY sequence
+        LIMIT 1
+      ) dropoff ON TRUE
+      WHERE off.order_id = $1
+        AND off.rider_profile_id = $2
+        AND off.status = 'PENDING'
+      ORDER BY off.created_at DESC
+      LIMIT 1
+      `,
+      [input.orderId, input.riderProfileId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    const distance = row.distance_km == null ? null : Number(row.distance_km);
+    const duration =
+      distance != null && Number.isFinite(distance)
+        ? plannedTripDurationSeconds(distance)
+        : 0;
+    return {
+      offer_id: row.order_offer_id,
+      display_id: row.display_id ?? '',
+      pickup_address: row.pickup_address ?? '',
+      drop_address: row.drop_address ?? '',
+      trip_fare: row.trip_fare ?? '',
+      distance_km: row.distance_km ?? '',
+      estimated_duration_seconds: duration > 0 ? String(duration) : '',
+      expires_at: new Date(row.created_at.getTime() + input.ttlMs).toISOString(),
+    };
+  }
+
   async claimPendingDelivery(
     backoffSeconds: number,
     db: Queryable,
@@ -553,7 +674,8 @@ export class NotificationsRepository {
         n.type,
         n.title,
         n.body,
-        n.order_id
+        n.order_id,
+        n.rider_profile_id
       FROM updated u
       JOIN notifications n ON n.notification_id = u.notification_id
       `,

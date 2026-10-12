@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Optional, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
@@ -24,6 +24,7 @@ import { haversineMeters } from '../routing/coordinates';
 import { plannedTripDurationSeconds } from '../routing/trip-duration';
 import { RoutingService } from '../routing/routing.service';
 import { riderMayAccessRides } from '../files/rider-verification';
+import { OBJECT_STORAGE, ObjectStorage } from '../storage/object-storage';
 import { riderProfileGaps } from '../profiles/rider-profile-completion';
 import { CatalogRepository } from './catalog.repository';
 import { CreateOrderDto, CreateOrderStopDto } from './dto/create-order.dto';
@@ -70,6 +71,7 @@ export class OrdersService {
     @Inject(forwardRef(() => FinanceService))
     private readonly finance: FinanceService,
     private readonly locations: LocationService,
+    @Optional() @Inject(OBJECT_STORAGE) private readonly storage?: ObjectStorage,
   ) {}
 
   async create(auth: OrderActor, body: CreateOrderDto, idempotencyKey: string) {
@@ -224,16 +226,46 @@ export class OrdersService {
         : Promise.resolve(null),
       this.orders.findCustomerRating(order.order_id),
     ]);
+    let profilePictureUrl: string | null = null;
+    const pictureKey = assignedRider?.profile_picture_key ?? null;
+    if (pictureKey && this.storage) {
+      try {
+        const signed = await this.storage.getSignedGetUrl(pictureKey, 'profile.jpg', {
+          disposition: 'inline',
+        });
+        profilePictureUrl = signed.url;
+      } catch {
+        profilePictureUrl = null;
+      }
+    }
+    let senderContact: { display_name: string | null; phone: string | null } | null =
+      null;
+    if (auth.role === 'RIDER' && order.rider_profile_id) {
+      const riderProfileId = await this.canonicalRiderProfileId(auth);
+      if (
+        order.rider_profile_id === riderProfileId ||
+        order.rider_profile_id === auth.profileId
+      ) {
+        senderContact = await this.orders.findCustomerContact(order.customer_profile_id);
+      }
+    }
     return {
       ...this.serializeOrder(order, stops),
       customer_rating: this.serializeRating(rating),
       fare_snapshot: snapshot ? serializeSnapshot(snapshot) : null,
+      ...(senderContact
+        ? {
+            customer_name: senderContact.display_name,
+            customer_phone: senderContact.phone,
+          }
+        : {}),
       assigned_rider: assignedRider
         ? {
             name: assignedRider.name,
             vehicle_registration: assignedRider.vehicle_registration,
             vehicle_category_name: assignedRider.vehicle_category_name,
             phone: assignedRider.phone,
+            profile_picture_url: profilePictureUrl,
           }
         : null,
       ...(auth.role === 'RIDER'

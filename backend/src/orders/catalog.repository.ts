@@ -175,22 +175,26 @@ export class CatalogRepository {
     vehicle_registration: string | null;
     vehicle_category_name: string | null;
     phone: string | null;
+    profile_picture_key: string | null;
   } | null> {
     const result = await db.query<{
       name: string | null;
       vehicle_registration: string | null;
       vehicle_category_name: string | null;
       phone: string | null;
+      profile_picture_key: string | null;
     }>(
       `
       SELECT
         d.name,
         v.registration AS vehicle_registration,
         vc.name AS vehicle_category_name,
-        i.phone_normalized AS phone
+        i.phone_normalized AS phone,
+        pic.storage_key AS profile_picture_key
       FROM rider_profiles r
       LEFT JOIN identities i ON i.identity_id = r.identity_id
       LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
+      LEFT JOIN stored_files pic ON pic.file_id = r.profile_picture_file_id
       LEFT JOIN LATERAL (
         SELECT registration, vehicle_category_id
         FROM vehicles

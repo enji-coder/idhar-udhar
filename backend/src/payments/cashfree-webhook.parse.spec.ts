@@ -179,6 +179,13 @@ describe('Cashfree signature and webhook parsing', () => {
         outcome: 'success',
         amountMatches: true,
       }),
+    ).toBe('apply-paid');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'REFUNDED',
+        outcome: 'success',
+        amountMatches: true,
+      }),
     ).toBe('ignore');
     expect(
       decideChargeTransition({
@@ -187,6 +194,37 @@ describe('Cashfree signature and webhook parsing', () => {
         amountMatches: true,
       }),
     ).toBe('apply-failed');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'PAID',
+        outcome: 'failed',
+        amountMatches: true,
+      }),
+    ).toBe('ignore');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'FAILED',
+        outcome: 'failed',
+        amountMatches: true,
+      }),
+    ).toBe('ignore');
+  });
+
+  it('recovers FAILED to apply-paid only when amounts already matched', () => {
+    expect(
+      decideChargeTransition({
+        currentStatus: 'FAILED',
+        outcome: 'success',
+        amountMatches: false,
+      }),
+    ).toBe('reject');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'FAILED',
+        outcome: 'success',
+        amountMatches: true,
+      }),
+    ).toBe('apply-paid');
   });
 
   it('formats gateway amounts without treating binary floats as authority', () => {

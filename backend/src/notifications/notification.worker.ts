@@ -149,6 +149,25 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
           return 'sent';
         }
 
+        let offerData: Record<string, string> | undefined;
+        if (
+          claimed.type === 'OFFER_NEW' &&
+          claimed.order_id &&
+          claimed.rider_profile_id
+        ) {
+          const ttlMs =
+            this.configService.getOrThrow<AppConfig['dispatch']>('dispatch')
+              .offerTtlSeconds * 1000;
+          offerData =
+            (await this.repo.findPendingOfferPushFacts(
+              {
+                orderId: claimed.order_id,
+                riderProfileId: claimed.rider_profile_id,
+                ttlMs,
+              },
+              tx,
+            )) ?? undefined;
+        }
         const pushResult = await this.push.send({
           deliveryId: claimed.notification_delivery_id,
           notificationId: claimed.notification_id,
@@ -158,6 +177,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
           title: claimed.title ?? '',
           body: claimed.body,
           orderId: claimed.order_id,
+          data: offerData,
         });
         if (pushResult.ok) {
           await this.repo.completeDelivery(

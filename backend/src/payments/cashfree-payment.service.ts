@@ -29,6 +29,47 @@ export type CashfreeHttp = (
   },
 ) => Promise<{ status: number; json: unknown }>;
 
+type CashfreeTransportLogger = Pick<AppLogger, 'warn'>;
+
+const SAFE_ERROR_NAME = /^[A-Za-z][A-Za-z0-9._]{0,63}$/;
+const SAFE_ERROR_CODE = /^[A-Z0-9_]{1,64}$/;
+
+/**
+ * Allowlisted transport diagnostics only. Never includes message text, URLs,
+ * IPs, headers, bodies, stacks, credentials, or customer data.
+ */
+export function cashfreeTransportErrorFields(err: unknown): {
+  error_name: string;
+  error_code: string | null;
+  cause_name: string | null;
+  cause_code: string | null;
+} {
+  const asError = (value: unknown): Error | null =>
+    value instanceof Error ? value : null;
+  const safeName = (value: unknown): string | null => {
+    const name = asError(value)?.name;
+    return typeof name === 'string' && SAFE_ERROR_NAME.test(name) ? name : null;
+  };
+  const safeCode = (value: unknown): string | null => {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+    const code = (value as { code?: unknown }).code;
+    return typeof code === 'string' && SAFE_ERROR_CODE.test(code) ? code : null;
+  };
+  const root = asError(err);
+  const causeRaw =
+    root && 'cause' in root
+      ? (root as Error & { cause?: unknown }).cause
+      : undefined;
+  return {
+    error_name: safeName(err) ?? 'unknown',
+    error_code: safeCode(err),
+    cause_name: safeName(causeRaw),
+    cause_code: safeCode(causeRaw),
+  };
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -44,6 +85,7 @@ export async function defaultCashfreeHttp(
     body?: string;
     timeoutMs: number;
   },
+  log?: CashfreeTransportLogger,
 ): Promise<{ status: number; json: unknown }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs);
@@ -64,7 +106,12 @@ export async function defaultCashfreeHttp(
       }
     }
     return { status: response.status, json };
-  } catch {
+  } catch (err) {
+    log?.warn('cashfree_transport_failed', {
+      method: init.method,
+      timeout_ms: init.timeoutMs,
+      ...cashfreeTransportErrorFields(err),
+    });
     throw new ApiError(
       ErrorCodes.PAYMENT_GATEWAY_REJECTED,
       'Cashfree did not respond',
@@ -91,13 +138,16 @@ function mapRefundStatus(raw: unknown): OnlineRefundResult['refundStatus'] {
 
 @Injectable()
 export class CashfreePaymentService implements PaymentProvider {
-  private http: CashfreeHttp = defaultCashfreeHttp;
+  private http: CashfreeHttp;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly postgres: PostgresService,
     private readonly logger: AppLogger,
-  ) {}
+  ) {
+    this.http = (requestUrl, init) =>
+      defaultCashfreeHttp(requestUrl, init, this.logger);
+  }
 
   useHttp(http: CashfreeHttp): void {
     this.http = http;
@@ -124,6 +174,23 @@ export class CashfreePaymentService implements PaymentProvider {
     }
   }
 
+  private assertPayoutConfigured(settings: CashfreeSettings): void {
+    if (settings.environment !== 'sandbox' && settings.environment !== 'production') {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Cashfree environment is not configured',
+        503,
+      );
+    }
+    if (!settings.payoutClientId || !settings.payoutClientSecret) {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Cashfree payouts require CASHFREE_PAYOUT_CLIENT_ID and CASHFREE_PAYOUT_CLIENT_SECRET',
+        503,
+      );
+    }
+  }
+
   private pgHeaders(settings: CashfreeSettings, idempotencyKey?: string): Record<string, string> {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
@@ -144,8 +211,8 @@ export class CashfreePaymentService implements PaymentProvider {
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       'x-api-version': settings.payoutApiVersion,
-      'x-client-id': settings.clientId ?? '',
-      'x-client-secret': settings.clientSecret ?? '',
+      'x-client-id': settings.payoutClientId ?? '',
+      'x-client-secret': settings.payoutClientSecret ?? '',
     };
     if (idempotencyKey) {
       headers['x-request-id'] = idempotencyKey;
@@ -361,7 +428,7 @@ export class CashfreePaymentService implements PaymentProvider {
     failureReason: string | null;
   }> {
     const settings = this.settings();
-    this.assertConfigured(settings);
+    this.assertPayoutConfigured(settings);
     const transferMode = input.payoutMethod === 'UPI' ? 'upi' : 'banktransfer';
     const instrument =
       input.payoutMethod === 'UPI'
@@ -395,7 +462,7 @@ export class CashfreePaymentService implements PaymentProvider {
     failureReason: string | null;
   }> {
     const settings = this.settings();
-    this.assertConfigured(settings);
+    this.assertPayoutConfigured(settings);
     const response = await this.http(
       `${settings.payoutApiBaseUrl}/transfers?transfer_id=${encodeURIComponent(merchantTransferId)}`,
       {

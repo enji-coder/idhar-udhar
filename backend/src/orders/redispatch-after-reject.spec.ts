@@ -93,7 +93,7 @@ describe('redispatch after last reject', () => {
       {} as never,
       { find: jest.fn(async () => null), insert: jest.fn(async () => undefined) } as never,
       new OrderStateMachine(),
-      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 300 })) } as never,
+      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 30 })) } as never,
       { assertNotSuspended: jest.fn(async () => undefined) } as never,
       notifications as never,
       {} as never,

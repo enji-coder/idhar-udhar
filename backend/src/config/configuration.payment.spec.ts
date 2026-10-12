@@ -7,6 +7,8 @@ describe('payment configuration', () => {
   const originalEnvironment = process.env.CASHFREE_ENVIRONMENT;
   const originalClientId = process.env.CASHFREE_CLIENT_ID;
   const originalSecret = process.env.CASHFREE_CLIENT_SECRET;
+  const originalPayoutClientId = process.env.CASHFREE_PAYOUT_CLIENT_ID;
+  const originalPayoutSecret = process.env.CASHFREE_PAYOUT_CLIENT_SECRET;
 
   function restore(name: string, value: string | undefined): void {
     if (value === undefined) {
@@ -22,6 +24,8 @@ describe('payment configuration', () => {
     restore('CASHFREE_ENVIRONMENT', originalEnvironment);
     restore('CASHFREE_CLIENT_ID', originalClientId);
     restore('CASHFREE_CLIENT_SECRET', originalSecret);
+    restore('CASHFREE_PAYOUT_CLIENT_ID', originalPayoutClientId);
+    restore('CASHFREE_PAYOUT_CLIENT_SECRET', originalPayoutSecret);
   });
 
   it('defaults to unconfigured and does not select a gateway', () => {
@@ -69,6 +73,30 @@ describe('payment configuration', () => {
     expect(payment.cashfree.payoutApiBaseUrl).toBe(
       'https://api.cashfree.com/payout',
     );
+  });
+
+  it('keeps payout credentials separate from the payment gateway client', () => {
+    process.env.PAYMENT_PROVIDER = 'cashfree';
+    process.env.CASHFREE_ENVIRONMENT = 'sandbox';
+    process.env.CASHFREE_CLIENT_ID = 'pg_client_id';
+    process.env.CASHFREE_CLIENT_SECRET = 'pg_client_secret';
+    delete process.env.CASHFREE_PAYOUT_CLIENT_ID;
+    delete process.env.CASHFREE_PAYOUT_CLIENT_SECRET;
+    const withoutPayout = loadAppConfig().payment.cashfree;
+    expect(withoutPayout.clientId).toBe('pg_client_id');
+    expect(withoutPayout.clientSecret).toBe('pg_client_secret');
+    expect(withoutPayout.payoutClientId).toBeNull();
+    expect(withoutPayout.payoutClientSecret).toBeNull();
+    expect(withoutPayout.payoutApiBaseUrl).toBe('https://sandbox.cashfree.com/payout');
+    expect(withoutPayout.apiBaseUrl).toBe('https://sandbox.cashfree.com/pg');
+
+    process.env.CASHFREE_PAYOUT_CLIENT_ID = 'payout_client_id';
+    process.env.CASHFREE_PAYOUT_CLIENT_SECRET = 'payout_client_secret';
+    const withPayout = loadAppConfig().payment.cashfree;
+    expect(withPayout.clientId).toBe('pg_client_id');
+    expect(withPayout.payoutClientId).toBe('payout_client_id');
+    expect(withPayout.payoutClientSecret).toBe('payout_client_secret');
+    expect(withPayout.payoutClientSecret).not.toBe(withPayout.clientSecret);
   });
 
   it('requires Cashfree credentials before selecting the gateway', () => {

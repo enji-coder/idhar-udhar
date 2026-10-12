@@ -60,6 +60,7 @@ class CustomerNotice {
     required this.body,
     this.orderId,
     this.read = false,
+    this.createdAt,
   });
 
   final String id;
@@ -67,6 +68,29 @@ class CustomerNotice {
   final String body;
   final String? orderId;
   final bool read;
+  final DateTime? createdAt;
+}
+
+CustomerNotice _noticeFromApi(ApiNotification item) {
+  return CustomerNotice(
+    id: item.id,
+    title: item.title,
+    body: item.body,
+    orderId: item.orderId,
+    read: item.isRead,
+    createdAt: item.createdAt,
+  );
+}
+
+CustomerNotice _noticeWithRead(CustomerNotice notice, {required bool read}) {
+  return CustomerNotice(
+    id: notice.id,
+    title: notice.title,
+    body: notice.body,
+    orderId: notice.orderId,
+    read: read,
+    createdAt: notice.createdAt,
+  );
 }
 
 class SessionNotifier extends StateNotifier<SessionState> {
@@ -346,17 +370,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
     if (api == null || !state.isAuthenticated) {
       return;
     }
-    final notices = (await api.list())
-        .map(
-          (item) => CustomerNotice(
-            id: item.id,
-            title: item.title,
-            body: item.body,
-            orderId: item.orderId,
-            read: item.isRead,
-          ),
-        )
-        .toList(growable: false);
+    final notices = (await api.list()).map(_noticeFromApi).toList(growable: false);
     state = state.copyWith(notices: notices);
   }
 
@@ -369,15 +383,23 @@ class SessionNotifier extends StateNotifier<SessionState> {
       notices: state.notices
           .map(
             (CustomerNotice notice) => notice.id == id
-                ? CustomerNotice(
-                    id: notice.id,
-                    title: notice.title,
-                    body: notice.body,
-                    orderId: notice.orderId,
-                    read: true,
-                  )
+                ? _noticeWithRead(notice, read: true)
                 : notice,
           )
+          .toList(growable: false),
+    );
+  }
+
+  /// Removes one notice only after the server dismiss succeeds.
+  Future<void> deleteNotice(String id) async {
+    final NotificationsApi? api = _notificationsApi;
+    if (api == null) {
+      throw StateError('Notifications are unavailable');
+    }
+    await api.dismiss(id);
+    state = state.copyWith(
+      notices: state.notices
+          .where((CustomerNotice notice) => notice.id != id)
           .toList(growable: false),
     );
   }
@@ -390,13 +412,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
     state = state.copyWith(
       notices: state.notices
           .map(
-            (CustomerNotice notice) => CustomerNotice(
-              id: notice.id,
-              title: notice.title,
-              body: notice.body,
-              orderId: notice.orderId,
-              read: true,
-            ),
+            (CustomerNotice notice) => _noticeWithRead(notice, read: true),
           )
           .toList(growable: false),
     );
@@ -479,17 +495,8 @@ class SessionNotifier extends StateNotifier<SessionState> {
       try {
         final NotificationsApi? api = _notificationsApi;
         if (api != null) {
-          notices = (await api.list())
-              .map(
-                (item) => CustomerNotice(
-                  id: item.id,
-                  title: item.title,
-                  body: item.body,
-                  orderId: item.orderId,
-                  read: item.isRead,
-                ),
-              )
-              .toList(growable: false);
+          notices =
+              (await api.list()).map(_noticeFromApi).toList(growable: false);
         }
       } catch (_) {
         notices = const <CustomerNotice>[];

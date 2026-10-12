@@ -85,21 +85,45 @@ describe('CashfreeWebhookService wallet top-up', () => {
 
   function makeWalletWebhookService(
     applyVerifiedWalletTopUp: jest.Mock,
-    attemptStatus: 'PENDING' | 'PAID' = 'PENDING',
+    attemptStatus: 'PENDING' | 'PAID' | 'FAILED' = 'PENDING',
+    options?: { duplicateEvent?: boolean; riderProfileId?: string | null },
   ) {
     const tx = {
       query: jest.fn(async (sql: string) => {
         if (sql.includes('INSERT INTO payment_webhook_events')) {
+          if (options?.duplicateEvent) {
+            return { rows: [] };
+          }
           return { rows: [{ event_id: 'evt-wallet' }] };
         }
         if (
           sql.includes('UPDATE payment_transactions') &&
-          sql.includes("'PENDING'")
+          sql.includes("transaction_status = 'PAID'")
         ) {
+          // CAS succeeds only from PENDING or FAILED (matches service SQL).
           if (attemptStatus === 'PAID') {
             return { rows: [] };
           }
-          return { rows: [{ payment_transaction_id: attempt.payment_transaction_id }] };
+          if (
+            attemptStatus === 'PENDING' ||
+            attemptStatus === 'FAILED'
+          ) {
+            return {
+              rows: [{ payment_transaction_id: attempt.payment_transaction_id }],
+            };
+          }
+          return { rows: [] };
+        }
+        if (
+          sql.includes('UPDATE payment_transactions') &&
+          sql.includes("transaction_status = 'FAILED'")
+        ) {
+          if (attemptStatus === 'PENDING') {
+            return {
+              rows: [{ payment_transaction_id: attempt.payment_transaction_id }],
+            };
+          }
+          return { rows: [] };
         }
         if (sql.includes('UPDATE payment_webhook_events')) {
           return { rows: [] };
@@ -111,6 +135,10 @@ describe('CashfreeWebhookService wallet top-up', () => {
       findByGatewayOrder: jest.fn(async () => ({
         ...attempt,
         transaction_status: attemptStatus,
+        rider_profile_id:
+          options && 'riderProfileId' in options
+            ? options.riderProfileId ?? null
+            : attempt.rider_profile_id,
       })),
       updateAttempt: jest.fn(async () => undefined),
     };
@@ -128,7 +156,7 @@ describe('CashfreeWebhookService wallet top-up', () => {
       { creditOnlineClearance: jest.fn() } as never,
       { applyVerifiedWalletTopUp } as never,
     );
-    return { service, applyVerifiedWalletTopUp, gateway };
+    return { service, applyVerifiedWalletTopUp, gateway, tx };
   }
 
   it('credits the rider wallet once when Cashfree marks the top-up PAID', async () => {
@@ -156,6 +184,92 @@ describe('CashfreeWebhookService wallet top-up', () => {
     );
   });
 
+  it('settles a delivered booking only after the verified webhook marks it PAID', async () => {
+    const syncOrderFinance = jest.fn(async () => undefined);
+    const order = {
+      order_id: 'order-1',
+      rider_profile_id: 'rider-1',
+      customer_profile_id: 'customer-1',
+      display_id: 'IU-1',
+    };
+    const tx = {
+      query: jest.fn(async (sql: string) => {
+        if (sql.includes('INSERT INTO payment_webhook_events')) {
+          return { rows: [{ event_id: 'evt-booking' }] };
+        }
+        if (
+          sql.includes('UPDATE payment_transactions') &&
+          sql.includes("transaction_status = 'PAID'")
+        ) {
+          return { rows: [{ payment_transaction_id: 'pt-booking' }] };
+        }
+        if (sql.includes('UPDATE payment_webhook_events')) {
+          return { rows: [] };
+        }
+        throw new Error(`unexpected query: ${sql.slice(0, 80)}`);
+      }),
+    };
+    const service = new CashfreeWebhookService(
+      { getOrThrow: () => ({}) } as never,
+      { transaction: async (work: (db: typeof tx) => Promise<unknown>) => work(tx) } as never,
+      {
+        findByGatewayOrder: jest.fn(async () => ({
+          ...attempt,
+          payment_transaction_id: 'pt-booking',
+          gateway_order_id: 'iu-booking-1',
+          order_id: 'order-1',
+          rider_profile_id: null,
+          payer_type: 'CUSTOMER' as const,
+          transaction_amount: '100.00',
+          charge_purpose: 'BOOKING' as const,
+        })),
+        updateAttempt: jest.fn(async () => undefined),
+      } as never,
+      { amountsEqual: jest.fn(async (left: string, right: string) => left === right) } as never,
+      { findById: jest.fn(async () => order) } as never,
+      { onTransactionRecorded: jest.fn(async () => undefined) } as never,
+      { info: jest.fn() } as never,
+      { creditOnlineClearance: jest.fn() } as never,
+      { applyVerifiedWalletTopUp: jest.fn(), syncOrderFinance } as never,
+    );
+    await expect(
+      service.apply({
+        eventId: 'evt-booking-paid',
+        rawBody: '{"type":"PAYMENT_SUCCESS_WEBHOOK"}',
+        parsed: {
+          ...payment,
+          gatewayOrderId: 'iu-booking-1',
+          orderAmount: '100.00',
+          paymentAmount: '100.00',
+        },
+      }),
+    ).resolves.toBe('applied');
+    expect(syncOrderFinance).toHaveBeenCalledTimes(1);
+    expect(syncOrderFinance).toHaveBeenCalledWith(order, expect.anything());
+  });
+
+  it('recovers FAILED to PAID and credits the wallet exactly once', async () => {
+    const applyVerifiedWalletTopUp = jest.fn(async () => ({
+      idempotent_replay: false,
+    }));
+    const { service, gateway } = makeWalletWebhookService(
+      applyVerifiedWalletTopUp,
+      'FAILED',
+    );
+    await expect(
+      service.apply({
+        eventId: 'evt-wallet-failed-then-success',
+        rawBody: '{"type":"PAYMENT_SUCCESS_WEBHOOK","data":{"recover":true}}',
+        parsed: payment,
+      }),
+    ).resolves.toBe('applied');
+    expect(applyVerifiedWalletTopUp).toHaveBeenCalledTimes(1);
+    expect(gateway.updateAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ gatewayStatus: 'SUCCESS' }),
+      expect.anything(),
+    );
+  });
+
   it('does not credit again when the charge is already PAID', async () => {
     const applyVerifiedWalletTopUp = jest.fn();
     const { service } = makeWalletWebhookService(applyVerifiedWalletTopUp, 'PAID');
@@ -167,5 +281,95 @@ describe('CashfreeWebhookService wallet top-up', () => {
       }),
     ).resolves.toBe('ignored');
     expect(applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+  });
+
+  it('treats a duplicate SUCCESS event id as duplicate without crediting', async () => {
+    const applyVerifiedWalletTopUp = jest.fn();
+    const { service } = makeWalletWebhookService(
+      applyVerifiedWalletTopUp,
+      'FAILED',
+      { duplicateEvent: true },
+    );
+    await expect(
+      service.apply({
+        eventId: 'evt-wallet-dup',
+        rawBody: '{"type":"PAYMENT_SUCCESS_WEBHOOK"}',
+        parsed: payment,
+      }),
+    ).resolves.toBe('duplicate');
+    expect(applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+  });
+
+  it('ignores a failure webhook after the charge is already PAID', async () => {
+    const applyVerifiedWalletTopUp = jest.fn();
+    const { service, gateway } = makeWalletWebhookService(
+      applyVerifiedWalletTopUp,
+      'PAID',
+    );
+    const failed: ParsedCashfreeEvent = {
+      kind: 'payment',
+      eventType: 'PAYMENT_FAILED_WEBHOOK',
+      gatewayOrderId: 'iu-wallet-1',
+      orderAmount: '25.00',
+      orderCurrency: 'INR',
+      paymentAmount: '25.00',
+      paymentCurrency: 'INR',
+      outcome: 'failed',
+      cfPaymentId: 'cf-pay-wallet',
+      failureReason: 'late failure',
+    };
+    await expect(
+      service.apply({
+        eventId: 'evt-wallet-late-fail',
+        rawBody: '{"type":"PAYMENT_FAILED_WEBHOOK"}',
+        parsed: failed,
+      }),
+    ).resolves.toBe('ignored');
+    expect(applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+    expect(gateway.updateAttempt).not.toHaveBeenCalled();
+  });
+
+  it('rejects SUCCESS recovery when payment amount does not match', async () => {
+    const applyVerifiedWalletTopUp = jest.fn();
+    const { service } = makeWalletWebhookService(
+      applyVerifiedWalletTopUp,
+      'FAILED',
+    );
+    await expect(
+      service.apply({
+        eventId: 'evt-wallet-bad-amount',
+        rawBody: '{"type":"PAYMENT_SUCCESS_WEBHOOK"}',
+        parsed: {
+          ...payment,
+          paymentAmount: '24.00',
+        },
+      }),
+    ).resolves.toBe('rejected');
+    expect(applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+  });
+
+  it('rejects a SUCCESS WALLET_TOPUP before PAID when rider_profile_id is missing', async () => {
+    const applyVerifiedWalletTopUp = jest.fn();
+    const { service, gateway, tx } = makeWalletWebhookService(
+      applyVerifiedWalletTopUp,
+      'PENDING',
+      { riderProfileId: null },
+    );
+    await expect(
+      service.apply({
+        eventId: 'evt-wallet-missing-rider',
+        rawBody: '{"type":"PAYMENT_SUCCESS_WEBHOOK"}',
+        parsed: payment,
+      }),
+    ).resolves.toBe('rejected');
+    expect(applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+    expect(gateway.updateAttempt).not.toHaveBeenCalled();
+    expect(
+      tx.query.mock.calls.some(
+        ([sql]: [string]) =>
+          sql.includes('UPDATE payment_transactions') &&
+          sql.includes("transaction_status = 'PAID'"),
+      ),
+    ).toBe(false);
   });
 });

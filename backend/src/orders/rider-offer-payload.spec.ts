@@ -54,7 +54,7 @@ describe('rider offer payload', () => {
       {} as never,
       { find: jest.fn(), insert: jest.fn() } as never,
       new OrderStateMachine(),
-      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 300 })) } as never,
+      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 30 })) } as never,
       { assertNotSuspended: jest.fn() } as never,
       { onNewOffer: jest.fn(), onOffersUnavailable: jest.fn(), onStatusChange: jest.fn() } as never,
       {} as never,
@@ -81,7 +81,7 @@ describe('rider offer payload', () => {
     expect(offer.vehicle_category_name).toBe('Bike');
     expect(offer.package_weight_kg).toBe('2.000');
     expect(offer.estimated_duration_seconds).toBe(plannedTripDurationSeconds(1.3));
-    expect(offer.expires_at).toBe(new Date(createdAt.getTime() + 300_000).toISOString());
-    expect(offer.offer_ttl_seconds).toBe(300);
+    expect(offer.expires_at).toBe(new Date(createdAt.getTime() + 30_000).toISOString());
+    expect(offer.offer_ttl_seconds).toBe(30);
   });
 });

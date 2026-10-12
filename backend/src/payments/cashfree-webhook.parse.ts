@@ -168,6 +168,11 @@ export function parseCashfreeWebhook(body: unknown): ParsedCashfreeEvent {
   };
 }
 
+/**
+ * Authoritative SUCCESS may recover a premature FAILED charge.
+ * PAID and REFUNDED stay terminal for success; failure never moves PAID/REFUNDED.
+ * Amount/order matching is decided by the caller before this transition.
+ */
 export function decideChargeTransition(input: {
   currentStatus: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
   outcome: CashfreeChargeOutcome;
@@ -180,7 +185,13 @@ export function decideChargeTransition(input: {
     return 'ignore';
   }
   if (input.outcome === 'success') {
-    return input.currentStatus === 'PENDING' ? 'apply-paid' : 'ignore';
+    if (
+      input.currentStatus === 'PENDING' ||
+      input.currentStatus === 'FAILED'
+    ) {
+      return 'apply-paid';
+    }
+    return 'ignore';
   }
   return input.currentStatus === 'PENDING' ? 'apply-failed' : 'ignore';
 }

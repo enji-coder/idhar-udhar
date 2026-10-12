@@ -103,6 +103,8 @@ export type AppConfig = {
       environment: 'sandbox' | 'production';
       clientId: string | null;
       clientSecret: string | null;
+      payoutClientId: string | null;
+      payoutClientSecret: string | null;
       apiVersion: string;
       apiBaseUrl: string;
       payoutApiBaseUrl: string;
@@ -343,6 +345,10 @@ export function loadAppConfig(): AppConfig {
   const cashfreeEnvironment = cashfreeEnvironmentRaw as 'sandbox' | 'production';
   const cashfreeClientId = (process.env.CASHFREE_CLIENT_ID ?? '').trim() || null;
   const cashfreeClientSecret = (process.env.CASHFREE_CLIENT_SECRET ?? '').trim() || null;
+  const cashfreePayoutClientId =
+    (process.env.CASHFREE_PAYOUT_CLIENT_ID ?? '').trim() || null;
+  const cashfreePayoutClientSecret =
+    (process.env.CASHFREE_PAYOUT_CLIENT_SECRET ?? '').trim() || null;
   const cashfreeApiVersion =
     (process.env.CASHFREE_API_VERSION ?? '').trim() || '2025-01-01';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cashfreeApiVersion)) {
@@ -475,7 +481,7 @@ export function loadAppConfig(): AppConfig {
       quoteTtlSeconds: integer('FARE_QUOTE_TTL_SECONDS', 900),
     },
     dispatch: {
-      offerTtlSeconds: integer('OFFER_TTL_SECONDS', 300),
+      offerTtlSeconds: integer('OFFER_TTL_SECONDS', 30),
     },
     notifications: {
       workerEnabled,
@@ -496,6 +502,8 @@ export function loadAppConfig(): AppConfig {
         environment: cashfreeEnvironment,
         clientId: cashfreeClientId,
         clientSecret: cashfreeClientSecret,
+        payoutClientId: cashfreePayoutClientId,
+        payoutClientSecret: cashfreePayoutClientSecret,
         apiVersion: cashfreeApiVersion,
         apiBaseUrl: cashfreeApiBaseUrl(
           paymentProvider === 'cashfree' ? cashfreeEnvironment : 'sandbox',

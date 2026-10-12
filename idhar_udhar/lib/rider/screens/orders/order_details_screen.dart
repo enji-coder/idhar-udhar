@@ -5,14 +5,17 @@ import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/models/rider_order.dart';
+import '../../features/orders/external_navigation.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
+import '../../widgets/rider_contact_call.dart';
 import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_section_header.dart';
+import '../profile/rider_profile_screen.dart';
 
 class AcceptConfirmationScreen extends ConsumerWidget {
   const AcceptConfirmationScreen({super.key});
@@ -95,6 +98,9 @@ class OrderDetailsScreen extends ConsumerWidget {
     if (order == null) return const _NoActiveOrder();
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    final String? photoUrl = _httpPhotoUrl(
+      ref.watch(riderProfileStateProvider).photoUrl,
+    );
 
     return RiderScaffold(
       appBar: AppBar(
@@ -103,10 +109,29 @@ class OrderDetailsScreen extends ConsumerWidget {
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => context.pop(),
         ),
+        actions: [
+          if (photoUrl != null)
+            Padding(
+              padding: const EdgeInsets.only(right: RiderSpacing.lg),
+              child: Center(
+                child: RiderProfileAvatar(photoUrl: photoUrl, radius: 16),
+              ),
+            ),
+        ],
       ),
       bottom: RiderPrimaryButton(
         label: 'Start Delivery',
-        onPressed: () => context.push(RiderRoutes.activeDelivery),
+        onPressed: () async {
+          await openRiderExternalNavigation(
+            context,
+            latitude: order.pickupLatitude,
+            longitude: order.pickupLongitude,
+          );
+          if (!context.mounted) {
+            return;
+          }
+          context.push(RiderRoutes.activeDelivery);
+        },
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -136,8 +161,14 @@ class OrderDetailsScreen extends ConsumerWidget {
                   const SizedBox(height: RiderSpacing.md),
                   _Detail(
                     label: 'Distance',
-                    value: '${order.distanceKm} km',
+                    value: order.distanceLabel,
                     icon: Icons.route_rounded,
+                  ),
+                  const SizedBox(height: RiderSpacing.md),
+                  _Detail(
+                    label: 'Estimated time',
+                    value: order.etaLabel,
+                    icon: Icons.timer_outlined,
                   ),
                   const SizedBox(height: RiderSpacing.md),
                   _Detail(
@@ -183,13 +214,20 @@ class OrderDetailsScreen extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const RiderSectionHeader(title: 'Customer'),
+                  const RiderSectionHeader(title: 'Contacts'),
                   const SizedBox(height: RiderSpacing.md),
-                  Text(order.customerMaskedName, style: RiderTextStyles.title),
-                  const SizedBox(height: RiderSpacing.xs),
-                  Text(
-                    order.customerMaskedPhone,
-                    style: RiderTextStyles.caption,
+                  RiderContactCall(
+                    label: 'Sender',
+                    name: order.senderName.trim().isEmpty
+                        ? order.customerMaskedName
+                        : order.senderName,
+                    phone: order.senderPhone,
+                  ),
+                  const SizedBox(height: RiderSpacing.lg),
+                  RiderContactCall(
+                    label: 'Receiver',
+                    name: order.receiverName,
+                    phone: order.receiverPhone,
                   ),
                   const SizedBox(height: RiderSpacing.lg),
                   Row(
@@ -197,43 +235,10 @@ class OrderDetailsScreen extends ConsumerWidget {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                behavior: SnackBarBehavior.floating,
-                                backgroundColor: RiderColors.secondary,
-                                content: Text(
-                                  'Masked calling (demo)',
-                                  style: RiderTextStyles.bodyMedium.copyWith(
-                                    color: RiderColors.textOnPrimary,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.call_rounded),
-                          label: const Text('Call'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: RiderColors.primary,
-                            side: const BorderSide(color: RiderColors.primary),
-                            minimumSize: const Size.fromHeight(48),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: RiderSpacing.md),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                behavior: SnackBarBehavior.floating,
-                                backgroundColor: RiderColors.secondary,
-                                content: Text(
-                                  'Navigation (demo)',
-                                  style: RiderTextStyles.bodyMedium.copyWith(
-                                    color: RiderColors.textOnPrimary,
-                                  ),
-                                ),
-                              ),
+                            openRiderExternalNavigation(
+                              context,
+                              latitude: order.pickupLatitude,
+                              longitude: order.pickupLongitude,
                             );
                           },
                           icon: const Icon(Icons.navigation_rounded),
@@ -312,4 +317,16 @@ class _Detail extends StatelessWidget {
       ],
     );
   }
+}
+
+String? _httpPhotoUrl(String? raw) {
+  final String value = (raw ?? '').trim();
+  final Uri? uri = Uri.tryParse(value);
+  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+    return null;
+  }
+  if (uri.host.isEmpty) {
+    return null;
+  }
+  return value;
 }

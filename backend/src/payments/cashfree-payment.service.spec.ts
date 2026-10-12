@@ -1,4 +1,92 @@
-import { CashfreePaymentService } from './cashfree-payment.service';
+import {
+  CashfreePaymentService,
+  cashfreeTransportErrorFields,
+  defaultCashfreeHttp,
+} from './cashfree-payment.service';
+
+describe('cashfreeTransportErrorFields', () => {
+  it('allowlists only safe name/code fields and omits message text', () => {
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND 1.2.3.4'), {
+      code: 'ENOTFOUND',
+    });
+    const err = Object.assign(new TypeError('fetch failed https://evil.example'), {
+      cause,
+    });
+    expect(cashfreeTransportErrorFields(err)).toEqual({
+      error_name: 'TypeError',
+      error_code: null,
+      cause_name: 'Error',
+      cause_code: 'ENOTFOUND',
+    });
+    expect(JSON.stringify(cashfreeTransportErrorFields(err))).not.toContain(
+      'fetch failed',
+    );
+    expect(JSON.stringify(cashfreeTransportErrorFields(err))).not.toContain(
+      '1.2.3.4',
+    );
+  });
+
+  it('drops codes that are not safe identifiers', () => {
+    const err = Object.assign(new Error('x'), {
+      code: 'not-a-safe-code',
+    });
+    expect(cashfreeTransportErrorFields(err).error_code).toBeNull();
+  });
+});
+
+describe('defaultCashfreeHttp', () => {
+  it('logs allowlisted transport fields and preserves client ApiError', async () => {
+    const warn = jest.fn();
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(
+        Object.assign(new TypeError('fetch failed'), {
+          cause: Object.assign(new Error('connect ECONNREFUSED 1.2.3.4:443'), {
+            code: 'ECONNREFUSED',
+          }),
+        }),
+      );
+    try {
+      await expect(
+        defaultCashfreeHttp(
+          'https://api.cashfree.com/pg/orders',
+          {
+            method: 'POST',
+            headers: {
+              'x-client-id': 'cid',
+              'x-client-secret': 'super_secret_value',
+            },
+            body: JSON.stringify({
+              customer_details: { customer_phone: '9876543210' },
+            }),
+            timeoutMs: 1000,
+          },
+          { warn },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PAYMENT_GATEWAY_REJECTED',
+        message: 'Cashfree did not respond',
+        status: 503,
+      });
+      expect(warn).toHaveBeenCalledWith('cashfree_transport_failed', {
+        method: 'POST',
+        timeout_ms: 1000,
+        error_name: 'TypeError',
+        error_code: null,
+        cause_name: 'Error',
+        cause_code: 'ECONNREFUSED',
+      });
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain('super_secret_value');
+      expect(logged).not.toContain('9876543210');
+      expect(logged).not.toContain('fetch failed');
+      expect(logged).not.toContain('1.2.3.4');
+      expect(logged).not.toContain('api.cashfree.com');
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+});
 
 describe('CashfreePaymentService', () => {
   function serviceWith(environment: 'sandbox' | 'production') {
@@ -10,6 +98,8 @@ describe('CashfreePaymentService', () => {
           environment,
           clientId: 'sandbox_client',
           clientSecret: 'sandbox_secret',
+          payoutClientId: 'payout_client',
+          payoutClientSecret: 'payout_secret',
           apiVersion: '2025-01-01',
           apiBaseUrl:
             environment === 'sandbox'
@@ -111,7 +201,51 @@ describe('CashfreePaymentService', () => {
       vpa: 'rider@upi',
     });
     expect(calls[0].url).toBe('https://sandbox.cashfree.com/payout/transfers');
+    expect(calls[0].headers['x-client-id']).toBe('payout_client');
+    expect(calls[0].headers['x-client-secret']).toBe('payout_secret');
+    expect(calls[0].headers['x-api-version']).toBe('2024-01-01');
+    expect(calls[0].headers['x-client-secret']).not.toBe('sandbox_secret');
     expect(result.outcome).toBe('accepted');
     expect(result.providerTransferId).toBe('cf-transfer-1');
+  });
+
+  it('refuses a payout when payout credentials are missing', async () => {
+    const config = {
+      getOrThrow: () => ({
+        provider: 'cashfree',
+        cashfree: {
+          environment: 'sandbox' as const,
+          clientId: 'sandbox_client',
+          clientSecret: 'sandbox_secret',
+          payoutClientId: null,
+          payoutClientSecret: null,
+          apiVersion: '2025-01-01',
+          apiBaseUrl: 'https://sandbox.cashfree.com/pg',
+          payoutApiBaseUrl: 'https://sandbox.cashfree.com/payout',
+          payoutApiVersion: '2024-01-01',
+          timeoutMs: 1000,
+        },
+      }),
+    };
+    const unconfigured = new CashfreePaymentService(
+      config as never,
+      { query: jest.fn() } as never,
+      { info: jest.fn(), warn: jest.fn() } as never,
+    );
+    const http = jest.fn();
+    unconfigured.useHttp(http);
+    await expect(
+      unconfigured.initiatePayoutTransfer({
+        merchantTransferId: 'wabc',
+        amount: '25.00',
+        payoutMethod: 'UPI',
+        beneficiaryId: 'rider1',
+        vpa: 'rider@upi',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+      status: 503,
+    });
+    expect(http).not.toHaveBeenCalled();
   });
 });

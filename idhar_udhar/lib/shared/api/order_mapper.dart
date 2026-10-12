@@ -1,10 +1,101 @@
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
-import 'package:idhar_udhar/shared/format/trip_distance.dart';
 
 import 'orders_api.dart';
 import 'rider_api.dart';
+
+/// Result of one guarded delivery-status advance.
+class RiderStatusAdvanceOutcome {
+  const RiderStatusAdvanceOutcome({
+    required this.supported,
+    required this.completed,
+    this.canonicalStatus,
+    this.failure,
+    this.hopsSent = const <String>[],
+  });
+
+  /// False when the server status is not on a legal path to the target.
+  final bool supported;
+
+  /// True only when every required hop succeeded, or none were required.
+  final bool completed;
+
+  /// Authoritative status when a fetch or hop returned one. Null if unknown.
+  final String? canonicalStatus;
+
+  final Object? failure;
+
+  final List<String> hopsSent;
+}
+
+/// Sends only the hops still ahead of the server status.
+///
+/// A second call while one is running returns null and sends nothing.
+class RiderStatusAdvance {
+  bool _inFlight = false;
+
+  Future<RiderStatusAdvanceOutcome?> run({
+    required DeliveryLifecycleStatus target,
+    required Future<String> Function() fetchStatus,
+    required Future<String> Function(String hop) applyHop,
+  }) async {
+    if (_inFlight) {
+      return null;
+    }
+    _inFlight = true;
+    final List<String> sent = <String>[];
+    try {
+      final String serverStatus = await fetchStatus();
+      final List<String>? hops = OrderMapper.remainingRiderHops(
+        serverStatus: serverStatus,
+        target: target,
+      );
+      if (hops == null) {
+        return RiderStatusAdvanceOutcome(
+          supported: false,
+          completed: false,
+          canonicalStatus: serverStatus,
+        );
+      }
+      var status = serverStatus;
+      for (final String hop in hops) {
+        try {
+          status = await applyHop(hop);
+          sent.add(hop);
+        } catch (error) {
+          String? refreshed;
+          try {
+            refreshed = await fetchStatus();
+          } catch (_) {
+            refreshed = null;
+          }
+          return RiderStatusAdvanceOutcome(
+            supported: true,
+            completed: false,
+            canonicalStatus: refreshed ?? status,
+            failure: error,
+            hopsSent: List<String>.unmodifiable(sent),
+          );
+        }
+      }
+      return RiderStatusAdvanceOutcome(
+        supported: true,
+        completed: true,
+        canonicalStatus: status,
+        hopsSent: List<String>.unmodifiable(sent),
+      );
+    } catch (error) {
+      return RiderStatusAdvanceOutcome(
+        supported: false,
+        completed: false,
+        failure: error,
+      );
+    } finally {
+      _inFlight = false;
+    }
+  }
+}
 
 abstract final class OrderMapper {
   static OrderStatus toUiStatus(String canonical) {
@@ -110,6 +201,112 @@ abstract final class OrderMapper {
     return const <String>[];
   }
 
+  static const List<String> _happyPathStatuses = <String>[
+    'ASSIGNED',
+    'EN_ROUTE_PICKUP',
+    'ARRIVED_PICKUP',
+    'PICKED_UP',
+    'IN_TRANSIT',
+    'NEAR_DROP',
+    'DELIVERY_ATTEMPT',
+    'DELIVERED',
+  ];
+
+  /// Drop-leg failure path. Does not include office handover.
+  static const List<String> _receiverUnavailableStatuses = <String>[
+    'PICKED_UP',
+    'IN_TRANSIT',
+    'NEAR_DROP',
+    'DELIVERY_ATTEMPT',
+    'RECEIVER_UNAVAILABLE',
+  ];
+
+  static const List<String> _officeHandoverStatuses = <String>[
+    'RECEIVER_UNAVAILABLE',
+    'FAILED_DELIVERY',
+    'PARCEL_AT_COMPANY_OFFICE',
+  ];
+
+  /// Hops still required to reach [target] from the server status.
+  ///
+  /// An empty list means the server is already at or beyond [target] on that
+  /// path. Null means [serverStatus] is not on a legal path to [target].
+  static List<String>? remainingRiderHops({
+    required String serverStatus,
+    required DeliveryLifecycleStatus target,
+  }) {
+    switch (target) {
+      case DeliveryLifecycleStatus.goingToPickup:
+        return _remainingOn(_happyPathStatuses, serverStatus, 'EN_ROUTE_PICKUP');
+      case DeliveryLifecycleStatus.arrivedAtPickup:
+        return _remainingOn(_happyPathStatuses, serverStatus, 'ARRIVED_PICKUP');
+      case DeliveryLifecycleStatus.packagePickedUp:
+        return _remainingOn(_happyPathStatuses, serverStatus, 'PICKED_UP');
+      case DeliveryLifecycleStatus.goingToDrop:
+        return _remainingOn(_happyPathStatuses, serverStatus, 'IN_TRANSIT');
+      case DeliveryLifecycleStatus.delivered:
+        return _remainingOn(_happyPathStatuses, serverStatus, 'DELIVERED');
+      case DeliveryLifecycleStatus.receiverUnavailable:
+        return _remainingOn(
+          _receiverUnavailableStatuses,
+          serverStatus,
+          'RECEIVER_UNAVAILABLE',
+        );
+      case DeliveryLifecycleStatus.parcelAtCompanyOffice:
+        return _remainingOn(
+          _officeHandoverStatuses,
+          serverStatus,
+          'PARCEL_AT_COMPANY_OFFICE',
+        );
+      case DeliveryLifecycleStatus.accepted:
+        return null;
+    }
+  }
+
+  static List<String>? _remainingOn(
+    List<String> chain,
+    String serverStatus,
+    String targetStatus,
+  ) {
+    final int index = chain.indexOf(serverStatus);
+    final int targetIndex = chain.indexOf(targetStatus);
+    if (index < 0 || targetIndex < 0) {
+      return null;
+    }
+    if (index >= targetIndex) {
+      return const <String>[];
+    }
+    return List<String>.unmodifiable(chain.sublist(index + 1, targetIndex + 1));
+  }
+
+  /// Known rider lifecycle for a canonical status. Unknown statuses return null
+  /// so the UI does not invent a step.
+  static DeliveryLifecycleStatus? tryRiderLifecycle(String canonical) {
+    switch (canonical) {
+      case 'ASSIGNED':
+        return DeliveryLifecycleStatus.accepted;
+      case 'EN_ROUTE_PICKUP':
+        return DeliveryLifecycleStatus.goingToPickup;
+      case 'ARRIVED_PICKUP':
+        return DeliveryLifecycleStatus.arrivedAtPickup;
+      case 'PICKED_UP':
+        return DeliveryLifecycleStatus.packagePickedUp;
+      case 'IN_TRANSIT':
+      case 'NEAR_DROP':
+      case 'DELIVERY_ATTEMPT':
+        return DeliveryLifecycleStatus.goingToDrop;
+      case 'DELIVERED':
+        return DeliveryLifecycleStatus.delivered;
+      case 'RECEIVER_UNAVAILABLE':
+      case 'FAILED_DELIVERY':
+        return DeliveryLifecycleStatus.receiverUnavailable;
+      case 'PARCEL_AT_COMPANY_OFFICE':
+        return DeliveryLifecycleStatus.parcelAtCompanyOffice;
+      default:
+        return null;
+    }
+  }
+
   static MockOrder toMockOrder(
     ApiOrder order, {
     MockVehicle? vehicle,
@@ -160,6 +357,7 @@ abstract final class OrderMapper {
             rating: 0,
             phone: assigned?.phone?.trim() ?? '',
             trips: 0,
+            imagePath: _httpUrl(assigned?.profilePictureUrl),
           );
     return MockOrder(
       id: order.orderId,
@@ -219,7 +417,7 @@ abstract final class OrderMapper {
     final int minutes = offer.estimatedDurationSeconds != null &&
             offer.estimatedDurationSeconds! > 0
         ? (offer.estimatedDurationSeconds! / 60).ceil()
-        : plannedTripMinutes(distanceKm ?? 0);
+        : 0;
     final DateTime? expiresAt = offer.expiresAt;
     final int remaining = expiresAt == null
         ? 0
@@ -237,6 +435,8 @@ abstract final class OrderMapper {
       estimatedMinutes: minutes,
       customerMaskedName: 'Customer',
       customerMaskedPhone: '••••',
+      senderName: (order?.customerName ?? '').trim(),
+      senderPhone: (order?.customerPhone ?? '').trim(),
       receiverName: receiverName,
       receiverPhone: receiverPhone,
       decisionSeconds: remaining,
@@ -255,6 +455,41 @@ abstract final class OrderMapper {
       dropLatitude: offer.dropLatitude ?? mapped?.drop.latitude,
       dropLongitude: offer.dropLongitude ?? mapped?.drop.longitude,
     );
+  }
+
+  /// Copies a verified payment view onto [order]. Returns null when the view
+  /// is missing, incomplete, or belongs to a different order.
+  static RiderOrder? applyPaymentView({
+    required RiderOrder order,
+    required ApiOrderPaymentView payment,
+  }) {
+    final String id = (order.backendOrderId ?? '').trim();
+    final ApiPaymentResponsibility? responsibility = payment.responsibility;
+    final ApiPaymentPlan? plan = payment.plan;
+    if (id.isEmpty ||
+        payment.orderId != id ||
+        responsibility == null ||
+        plan == null ||
+        responsibility.orderId != id ||
+        plan.orderId != id) {
+      return null;
+    }
+    return order.withPaymentAllocation(
+      customerResponsibility: responsibility.customerResponsibility,
+      receiverResponsibility: responsibility.receiverResponsibility,
+      customerOnline: plan.customerPlannedOnline,
+      customerCash: plan.customerPlannedCash,
+      receiverOnline: plan.receiverPlannedOnline,
+      receiverCash: plan.receiverPlannedCash,
+    );
+  }
+
+  static String? _httpUrl(String? raw) {
+    final String value = (raw ?? '').trim();
+    if (value.startsWith('https://') || value.startsWith('http://')) {
+      return value;
+    }
+    return null;
   }
 
   static String _optional(String? preferred, String? fallback) {

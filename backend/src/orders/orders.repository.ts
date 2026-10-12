@@ -324,6 +324,25 @@ export class OrdersRepository {
     return result.rows;
   }
 
+  async findCustomerContact(
+    customerProfileId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{ display_name: string | null; phone: string | null } | null> {
+    const result = await db.query<{
+      display_name: string | null;
+      phone: string | null;
+    }>(
+      `
+      SELECT cp.display_name, i.phone_normalized AS phone
+      FROM customer_profiles cp
+      JOIN identities i ON i.identity_id = cp.identity_id
+      WHERE cp.customer_profile_id = $1
+      `,
+      [customerProfileId],
+    );
+    return result.rows[0] ?? null;
+  }
+
   async listAll(db: Queryable = this.postgres): Promise<OrderRow[]> {
     const result = await db.query<OrderRow>(
       `

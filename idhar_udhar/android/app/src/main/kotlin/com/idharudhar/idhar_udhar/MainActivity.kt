@@ -8,6 +8,7 @@ class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MapsBridge.register(flutterEngine, this)
+        RiderOfferBridge.register(flutterEngine, this)
         registerCustomerOtp(flutterEngine)
     }
 

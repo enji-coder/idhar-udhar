@@ -24,6 +24,7 @@ import '../../features/home/presentation/screens/profile_screen.dart';
 import '../../features/home/presentation/screens/wallet_screen.dart';
 import '../../features/location_permission/presentation/screens/location_permission_screen.dart';
 import '../../features/profile/presentation/screens/edit_profile_screen.dart';
+import '../../features/profile/presentation/screens/notification_settings_screen.dart';
 import '../../features/profile/presentation/screens/saved_addresses_screen.dart';
 import '../../features/splash/presentation/screens/splash_screen.dart';
 import '../../features/support/presentation/screens/help_screen.dart';
@@ -295,6 +296,14 @@ abstract final class AppRouter {
         pageBuilder: (context, state) => RouteTransitions.fadeThrough(
           key: state.pageKey,
           child: const NotificationsScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.notificationSettings,
+        name: 'notificationSettings',
+        pageBuilder: (context, state) => RouteTransitions.fadeThrough(
+          key: state.pageKey,
+          child: const NotificationSettingsScreen(),
         ),
       ),
     ],

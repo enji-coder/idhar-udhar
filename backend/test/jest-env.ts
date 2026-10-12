@@ -46,6 +46,7 @@ process.env.DATABASE_HOST ??= 'localhost';
 process.env.DATABASE_PORT ??= '5432';
 process.env.DATABASE_NAME ??= 'idhar_udhar';
 process.env.DATABASE_USER ??= 'idhar_admin';
+process.env.DATABASE_PASSWORD ??= 'test-database-password';
 process.env.DATABASE_SSL ??= 'false';
 process.env.DATABASE_POOL_MAX ??= '10';
 process.env.OTP_DELIVERY_PROVIDER = 'capture';

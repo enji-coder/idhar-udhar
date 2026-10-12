@@ -267,6 +267,7 @@ class _HomeTab extends ConsumerWidget {
               _DashboardHeader(
                 greeting: '${_greeting()}, $greetingName 👋',
                 online: online,
+                photoUrl: profile.photoUrl,
                 onNotifications: () {
                   final unread =
                       notices.where((n) => n.readAt == null).length;
@@ -413,10 +414,19 @@ class _HomeTab extends ConsumerWidget {
                             .read(riderApiProvider)
                             .acceptOffer(offerId);
                         if (!context.mounted) return;
+                        var details = accepted;
+                        if (accepted.orderId.isNotEmpty) {
+                          try {
+                            details = await ref
+                                .read(riderApiProvider)
+                                .getOrder(accepted.orderId);
+                          } catch (_) {}
+                        }
+                        if (!context.mounted) return;
                         ref.read(activeOrderProvider.notifier).state =
                             OrderMapper.toRiderOrder(
                           offer: pendingOffer!,
-                          order: accepted,
+                          order: details,
                         );
                         ref.read(deliveryStatusProvider.notifier).state =
                             DeliveryLifecycleStatus.accepted;
@@ -623,11 +633,13 @@ class _DashboardHeader extends StatelessWidget {
   const _DashboardHeader({
     required this.greeting,
     required this.online,
+    required this.photoUrl,
     required this.onNotifications,
   });
 
   final String greeting;
   final bool online;
+  final String? photoUrl;
   final VoidCallback onNotifications;
 
   @override
@@ -642,11 +654,7 @@ class _DashboardHeader extends StatelessWidget {
             color: RiderColors.textPrimary,
           ),
         ),
-        CircleAvatar(
-          radius: 23,
-          backgroundColor: RiderColors.primary.withValues(alpha: 0.15),
-          child: const Icon(Icons.person_rounded, color: RiderColors.primary),
-        ),
+        _HeaderAvatar(photoUrl: photoUrl),
         const SizedBox(width: RiderSpacing.md),
         Expanded(
           child: Column(
@@ -676,6 +684,104 @@ class _DashboardHeader extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Signed profile photo from GET /v1/rider/profile/picture (`download_url`).
+/// A missing, local, or failed URL keeps the original header avatar.
+class _HeaderAvatar extends ConsumerStatefulWidget {
+  const _HeaderAvatar({this.photoUrl});
+
+  final String? photoUrl;
+
+  @override
+  ConsumerState<_HeaderAvatar> createState() => _HeaderAvatarState();
+}
+
+class _HeaderAvatarState extends ConsumerState<_HeaderAvatar> {
+  String? _url;
+  bool _refreshing = false;
+
+  Widget get _fallback => CircleAvatar(
+        radius: 23,
+        backgroundColor: RiderColors.primary.withValues(alpha: 0.15),
+        child: const Icon(Icons.person_rounded, color: RiderColors.primary),
+      );
+
+  @override
+  void initState() {
+    super.initState();
+    _url = _httpUrl(widget.photoUrl);
+  }
+
+  @override
+  void didUpdateWidget(covariant _HeaderAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.photoUrl != widget.photoUrl) {
+      _refreshing = false;
+      _url = _httpUrl(widget.photoUrl);
+    }
+  }
+
+  static String? _httpUrl(String? raw) {
+    final String value = (raw ?? '').trim();
+    final Uri? uri = Uri.tryParse(value);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return null;
+    }
+    if (uri.host.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  Future<void> _refreshOnce() async {
+    if (_refreshing) {
+      return;
+    }
+    _refreshing = true;
+    try {
+      final picture = await ref.read(profilesApiProvider).riderProfilePicture();
+      final String? next = _httpUrl(picture?.downloadUrl);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _url = next != null && next != _url ? next : null);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _url = null);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String? url = _url;
+    if (url == null) {
+      return _fallback;
+    }
+    return ClipOval(
+      child: Image.network(
+        url,
+        width: 46,
+        height: 46,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) {
+            return child;
+          }
+          return _fallback;
+        },
+        errorBuilder: (_, __, ___) {
+          if (!_refreshing) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              unawaited(_refreshOnce());
+            });
+          }
+          return _fallback;
+        },
+      ),
     );
   }
 }

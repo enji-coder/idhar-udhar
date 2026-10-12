@@ -638,6 +638,64 @@ export class WalletCodRepository {
     return formatInr(result.rows[0].planned);
   }
 
+  /**
+   * Authoritative payment-plan totals. Null when no plan row exists.
+   * A missing plan is not cash and is not a digital trip.
+   */
+  async findOrderPaymentPlan(
+    orderId: string,
+    db: Queryable,
+  ): Promise<{ planned_online: string; planned_cash: string } | null> {
+    const result = await db.query<{
+      planned_online: string;
+      planned_cash: string;
+    }>(
+      `
+      SELECT
+        (customer_planned_online + receiver_planned_online)::text AS planned_online,
+        (customer_planned_cash + receiver_planned_cash)::text AS planned_cash
+      FROM order_payment_plans
+      WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return {
+      planned_online: formatInr(row.planned_online),
+      planned_cash: formatInr(row.planned_cash),
+    };
+  }
+
+  /**
+   * Sum of BOOKING charges marked PAID only after a Cashfree webhook stored
+   * SUCCESS on an INR gateway attempt whose amount matches the charge.
+   * PENDING, FAILED, and attempts without that SUCCESS row contribute nothing.
+   */
+  async verifiedOnlineBookingPaid(orderId: string, db: Queryable): Promise<string> {
+    const result = await db.query<{ paid: string }>(
+      `
+      SELECT COALESCE(SUM(t.amount), 0)::text AS paid
+      FROM payment_transactions t
+      JOIN payment_gateway_attempts g
+        ON g.payment_transaction_id = t.payment_transaction_id
+      WHERE t.order_id = $1
+        AND t.method = 'ONLINE'
+        AND t.direction = 'CHARGE'
+        AND t.transaction_status = 'PAID'
+        AND t.charge_purpose = 'BOOKING'
+        AND g.provider = 'cashfree'
+        AND g.currency = 'INR'
+        AND g.gateway_status = 'SUCCESS'
+        AND g.amount = t.amount
+      `,
+      [orderId],
+    );
+    return formatInr(result.rows[0].paid);
+  }
+
   async postedCashCompanyShare(
     codAccountId: string,
     orderId: string,

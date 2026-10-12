@@ -84,8 +84,13 @@ export function localDateOf(at: Date, timeZone: string): string {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(at);
-  return parts;
+  }).formatToParts(at);
+  const lookup = (type: string) =>
+    Number.parseInt(parts.find((part) => part.type === type)?.value ?? '', 10);
+  const year = lookup('year');
+  const month = lookup('month');
+  const day = lookup('day');
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function addDays(dateOnly: string, days: number): string {

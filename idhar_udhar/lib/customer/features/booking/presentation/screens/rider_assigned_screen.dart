@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/phone/native_dialer.dart';
 
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -14,6 +16,121 @@ import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 import '../../../../shared/widgets/rider_card.dart';
 import '../cancel_trip_flow.dart';
+
+class _AssignedRiderAvatar extends ConsumerStatefulWidget {
+  const _AssignedRiderAvatar({this.url, this.orderId});
+
+  final String? url;
+  final String? orderId;
+
+  @override
+  ConsumerState<_AssignedRiderAvatar> createState() =>
+      _AssignedRiderAvatarState();
+}
+
+class _AssignedRiderAvatarState extends ConsumerState<_AssignedRiderAvatar> {
+  static const Widget _fallback = SafeAssetImage(
+    path: AssetPaths.rider,
+    height: 48,
+    fit: BoxFit.contain,
+  );
+
+  String? _url;
+  bool _refreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _url = _usable(widget.url);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AssignedRiderAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _refreshing = false;
+      _url = _usable(widget.url);
+    }
+  }
+
+  static String? _usable(String? raw) {
+    final String value = (raw ?? '').trim();
+    final Uri? uri = Uri.tryParse(value);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return null;
+    }
+    if (uri.host.isEmpty) {
+      return null;
+    }
+    return value;
+  }
+
+  Future<void> _refreshOnce() async {
+    if (_refreshing) {
+      return;
+    }
+    _refreshing = true;
+    final String? orderId = widget.orderId;
+    if (orderId == null || orderId.isEmpty) {
+      if (mounted) {
+        setState(() => _url = null);
+      }
+      return;
+    }
+    try {
+      final latest = await ref.read(ordersApiProvider).getById(orderId);
+      final String? next = _usable(latest.assignedRider?.profilePictureUrl);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _url = next != null && next != _url ? next : null);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _url = null);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String? imageUrl = _url;
+    if (imageUrl == null) {
+      return _fallback;
+    }
+    return ClipOval(
+      child: Image.network(
+        imageUrl,
+        width: 48,
+        height: 48,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) {
+          if (!_refreshing) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _refreshOnce();
+            });
+          }
+          return _fallback;
+        },
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) {
+            return child;
+          }
+          return const SizedBox(
+            width: 48,
+            height: 48,
+            child: Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
 
 class RiderAssignedScreen extends ConsumerWidget {
   const RiderAssignedScreen({super.key});
@@ -198,11 +315,11 @@ class RiderAssignedScreen extends ConsumerWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppSpacing.xl),
-          Center(
+          const Center(
             child: AmbientGlow(
               diameter: 240,
               opacity: 0.3,
-              child: const SafeAssetImage(
+              child: SafeAssetImage(
                 path: AssetPaths.rider,
                 height: 180,
                 fit: BoxFit.contain,
@@ -218,12 +335,11 @@ class RiderAssignedScreen extends ConsumerWidget {
                   : rider.vehicleLabel,
               rating: rider.rating > 0 ? rider.rating : null,
               subtitle: 'Assigned to your delivery',
-              avatar: const SafeAssetImage(
-                path: AssetPaths.rider,
-                height: 48,
-                fit: BoxFit.contain,
+              avatar: _AssignedRiderAvatar(
+                url: rider.imagePath,
+                orderId: order?.backendOrderId,
               ),
-              onCall: () {},
+              onCall: () => openNativePhoneDialer(context, rider.phone),
               onMessage: () {},
             )
           else

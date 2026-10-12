@@ -12,6 +12,8 @@ import 'package:intl/intl.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../data/models/rider_order.dart';
+import '../../push/rider_offer_alerts.dart';
+import '../../push/rider_offer_diag.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
@@ -21,6 +23,7 @@ import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_secondary_button.dart';
+import '../profile/rider_profile_screen.dart';
 
 class IncomingOrderScreen extends ConsumerStatefulWidget {
   const IncomingOrderScreen({super.key});
@@ -32,52 +35,67 @@ class IncomingOrderScreen extends ConsumerStatefulWidget {
 
 class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
   RiderOrder? _order;
+  RiderOffer? _sourceOffer;
   late int _secondsLeft;
   Timer? _timer;
+  StreamSubscription<RiderOfferUserAction>? _actions;
   bool _expired = false;
   bool _loading = true;
+  bool _submitting = false;
+  bool _inLoad = false;
+  bool _applyingAction = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
     _secondsLeft = 0;
+    _actions = riderOfferUserActions.listen((_) {
+      unawaited(_applyPendingAction());
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_load());
     });
   }
 
   Future<void> _load() async {
+    if (_inLoad) {
+      return;
+    }
+    _inLoad = true;
     try {
+      final String? targetId = riderOfferActionGate.pending?.offerId ??
+          riderOfferLaunchOfferId;
       final bool loaded =
           await ref.read(riderSessionProvider.notifier).refreshOffers();
       final offers = ref.read(riderSessionProvider).offers;
+      if (!mounted) {
+        return;
+      }
       if (!loaded && offers.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _loading = false;
-            _error = 'Could not load offers.';
-          });
-        }
+        setState(() {
+          _loading = false;
+          _error = 'Could not load offers.';
+        });
         return;
       }
-      if (offers.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _loading = false;
-            _error = 'No incoming orders right now.';
-          });
-        }
+      final RiderOffer? offer = _selectOffer(offers, targetId);
+      if (offer == null) {
+        _dropPending(targetId);
+        riderOfferLaunchOfferId = null;
+        riderOfferLaunchAction = null;
+        setState(() {
+          _loading = false;
+          _order = null;
+          _sourceOffer = null;
+          _error = (targetId ?? '').trim().isEmpty
+              ? 'No incoming orders right now.'
+              : 'This order request is no longer available.';
+        });
         return;
       }
-      RiderOffer? offer;
-      for (final RiderOffer candidate in offers) {
-        if (candidate.status == 'PENDING') {
-          offer = candidate;
-          break;
-        }
-      }
-      offer ??= offers.first;
+      riderOfferLaunchOfferId = null;
+      riderOfferLaunchAction = null;
       RiderOrder mapped = OrderMapper.toRiderOrder(offer: offer);
       try {
         final details = await ref.read(riderApiProvider).getOrder(offer.orderId);
@@ -86,24 +104,56 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _order = mapped;
-        _loading = false;
-        _secondsLeft = mapped.decisionSeconds;
-      });
-      if (mapped.expiresAt == null) {
+      final bool alreadyExpired = mapped.expiresAt != null &&
+          !mapped.expiresAt!.isAfter(DateTime.now());
+      if (offer.status != 'PENDING' || alreadyExpired) {
+        _dropPending(offer.offerId);
+        unawaited(cancelRiderOfferAlert(offer.offerId));
+        setState(() {
+          _sourceOffer = offer;
+          _loading = false;
+          _secondsLeft = 0;
+          if (offer.status != 'PENDING') {
+            _order = null;
+            _expired = false;
+            _error = 'This order request is no longer available.';
+          } else {
+            _order = mapped;
+            _expired = true;
+            _error = null;
+          }
+        });
         return;
       }
+      setState(() {
+        _order = mapped;
+        _sourceOffer = offer;
+        _loading = false;
+        _expired = false;
+        _error = null;
+        _secondsLeft = mapped.decisionSeconds;
+      });
+      riderOfferLog(
+        'incoming_screen_ready',
+        offerId: offer.offerId,
+        reason: 'seconds_left=${mapped.decisionSeconds}',
+      );
+      await _applyPendingAction();
+      if (!mounted || _expired || _submitting || _order?.expiresAt == null) {
+        return;
+      }
+      final DateTime expiresAt = _order!.expiresAt!;
+      _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (!mounted) return;
-        final int left = mapped.expiresAt!
-            .difference(DateTime.now())
-            .inSeconds
-            .clamp(0, 86400);
+        final int left = expiresAt.difference(DateTime.now()).inSeconds.clamp(0, 86400);
         if (left <= 0) {
           _timer?.cancel();
-          setState(() => _secondsLeft = 0);
-          unawaited(_reject());
+          setState(() {
+            _secondsLeft = 0;
+            _expired = true;
+          });
+          unawaited(cancelRiderOfferAlert(_order?.offerId));
         } else {
           setState(() => _secondsLeft = left);
         }
@@ -115,11 +165,75 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
           _error = 'Could not load offers.';
         });
       }
+    } finally {
+      _inLoad = false;
+    }
+    final RiderOfferUserAction? pending = riderOfferActionGate.pending;
+    if (mounted &&
+        _error == null &&
+        pending != null &&
+        _sourceOffer?.offerId != pending.offerId &&
+        !_loading) {
+      await _load();
+    }
+  }
+
+  RiderOffer? _selectOffer(List<RiderOffer> offers, String? targetId) {
+    final String id = (targetId ?? '').trim();
+    if (id.isNotEmpty) {
+      return riderOfferById(offers, id);
+    }
+    for (final RiderOffer candidate in offers) {
+      if (candidate.status == 'PENDING') {
+        return candidate;
+      }
+    }
+    return offers.isEmpty ? null : offers.first;
+  }
+
+  void _dropPending(String? offerId) {
+    final RiderOfferUserAction? pending = riderOfferActionGate.pending;
+    final String id = (offerId ?? '').trim();
+    if (pending != null && id.isNotEmpty && pending.offerId == id) {
+      riderOfferActionGate.consume(pending);
+    }
+  }
+
+  Future<void> _applyPendingAction() async {
+    if (_applyingAction || _submitting || _loading || _order == null) {
+      return;
+    }
+    final RiderOfferUserAction? action = riderOfferActionGate.pending;
+    if (action == null) {
+      return;
+    }
+    if (_sourceOffer?.offerId != action.offerId) {
+      if (_inLoad) {
+        return;
+      }
+      await _load();
+      return;
+    }
+    if (_expired || _sourceOffer?.status != 'PENDING') {
+      riderOfferActionGate.consume(action);
+      return;
+    }
+    _applyingAction = true;
+    riderOfferActionGate.consume(action);
+    try {
+      if (action.action == 'reject') {
+        await _reject();
+      } else if (action.action == 'accept') {
+        await _accept();
+      }
+    } finally {
+      _applyingAction = false;
     }
   }
 
   @override
   void dispose() {
+    _actions?.cancel();
     _timer?.cancel();
     super.dispose();
   }
@@ -132,7 +246,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
 
   Future<void> _accept() async {
     final RiderOrder? order = _order;
-    if (_expired || order == null) {
+    if (_expired || _submitting || order == null) {
       return;
     }
     if (!ref.read(riderSessionProvider).isApproved) {
@@ -170,26 +284,46 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       );
       return;
     }
+    setState(() => _submitting = true);
+    var acceptedOk = false;
     try {
       final accepted =
           await ref.read(riderApiProvider).acceptOffer(offerId);
       if (!mounted) {
         return;
       }
+      var details = accepted;
+      if (accepted.orderId.isNotEmpty) {
+        try {
+          details =
+              await ref.read(riderApiProvider).getOrder(accepted.orderId);
+        } catch (_) {}
+      }
+      if (!mounted) {
+        return;
+      }
       _timer?.cancel();
+      unawaited(cancelRiderOfferAlert(order.offerId));
+      final RiderOffer active = _sourceOffer ??
+          RiderOffer(
+            offerId: offerId,
+            orderId: order.backendOrderId ?? details.orderId,
+            status: 'PENDING',
+            createdAt: DateTime.now(),
+            displayId: order.id,
+            tripFare: order.tripAmount,
+            distanceKm: order.distanceKm,
+            estimatedDurationSeconds:
+                order.estimatedMinutes > 0 ? order.estimatedMinutes * 60 : null,
+          );
       ref.read(activeOrderProvider.notifier).state = OrderMapper.toRiderOrder(
-        offer: RiderOffer(
-          offerId: offerId,
-          orderId: order.backendOrderId ?? accepted.orderId,
-          status: 'ACCEPTED',
-          createdAt: DateTime.now(),
-          displayId: order.id,
-        ),
-        order: accepted,
+        offer: acceptedOfferState(active: active, order: details),
+        order: details,
       );
       ref.read(deliveryStatusProvider.notifier).state =
           DeliveryLifecycleStatus.accepted;
-      unawaited(context.push(RiderRoutes.acceptConfirmation));
+      acceptedOk = true;
+      context.go(RiderRoutes.orderDetails);
     } on ApiException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -197,19 +331,49 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         );
         unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       }
+    } finally {
+      if (mounted && _submitting && !acceptedOk) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
   Future<void> _reject() async {
-    final String? offerId = _order?.offerId;
-    if (offerId != null) {
-      try {
-        await ref.read(riderApiProvider).rejectOffer(offerId);
-      } catch (_) {}
+    if (_submitting || _expired) {
+      return;
     }
-    _timer?.cancel();
-    if (mounted) {
-      context.pop();
+    final String? offerId = _order?.offerId;
+    if (offerId == null || offerId.isEmpty) {
+      _timer?.cancel();
+      if (mounted) {
+        context.pop();
+      }
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      await ref.read(riderApiProvider).rejectOffer(offerId);
+      unawaited(cancelRiderOfferAlert(offerId));
+      _timer?.cancel();
+      if (mounted) {
+        context.pop();
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message)),
+        );
+        setState(() => _submitting = false);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not reject this request. Try again.'),
+          ),
+        );
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -228,6 +392,9 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
     }
     final RiderOrder order = _order!;
     final bool approved = ref.watch(riderSessionProvider).isApproved;
+    final String? photoUrl = _httpPhotoUrl(
+      ref.watch(riderProfileStateProvider).photoUrl,
+    );
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
@@ -236,9 +403,20 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         title: const Text('New order'),
         automaticallyImplyLeading: false,
         actions: [
+          if (photoUrl != null)
+            Padding(
+              padding: const EdgeInsets.only(right: RiderSpacing.sm),
+              child: Center(
+                child: RiderProfileAvatar(photoUrl: photoUrl, radius: 16),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.close_rounded),
-            onPressed: _reject,
+            onPressed: _submitting
+                ? null
+                : _expired
+                    ? () => context.go(RiderRoutes.dashboard)
+                    : _reject,
           ),
         ],
       ),
@@ -253,7 +431,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                   child: RiderSecondaryButton(
                     label: 'Reject',
                     destructive: true,
-                    onPressed: _reject,
+                    onPressed: _submitting || _expired ? null : _reject,
                   ),
                 ),
                 const SizedBox(width: RiderSpacing.md),
@@ -261,8 +439,10 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                   flex: 2,
                   child: RiderPrimaryButton(
                     label: 'Accept',
-                    enabled: approved,
-                    onPressed: approved ? _accept : null,
+                    enabled: approved && !_submitting && !_expired,
+                    onPressed: approved && !_submitting && !_expired
+                        ? _accept
+                        : null,
                   ),
                 ),
               ],
@@ -295,6 +475,23 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
             Text(
               _expired ? 'Order Expired' : 'Incoming delivery request',
               style: RiderTextStyles.title,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: RiderSpacing.md),
+            Text(
+              order.tripAmount > 0
+                  ? currency.format(order.tripAmount)
+                  : '—',
+              style: RiderTextStyles.heading.copyWith(
+                color: RiderColors.primary,
+                fontSize: 40,
+                fontWeight: FontWeight.w800,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            Text(
+              'Trip fare',
+              style: RiderTextStyles.caption,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: RiderSpacing.xl),
@@ -360,7 +557,9 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
                   _InfoRow(
                     icon: Icons.receipt_long_rounded,
                     label: 'Trip Fare',
-                    value: currency.format(order.tripAmount),
+                    value: order.tripAmount > 0
+                        ? currency.format(order.tripAmount)
+                        : '—',
                     emphasize: true,
                   ),
                   const Divider(height: RiderSpacing.xl),
@@ -441,4 +640,16 @@ class _InfoRow extends StatelessWidget {
       ],
     );
   }
+}
+
+String? _httpPhotoUrl(String? raw) {
+  final String value = (raw ?? '').trim();
+  final Uri? uri = Uri.tryParse(value);
+  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+    return null;
+  }
+  if (uri.host.isEmpty) {
+    return null;
+  }
+  return value;
 }

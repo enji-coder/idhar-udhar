@@ -3,8 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
-import 'package:idhar_udhar/shared/api/api_providers.dart';
-import 'package:idhar_udhar/shared/api/notifications_api.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/state/session_provider.dart';
 import '../../../../core/theme/theme.dart';
@@ -21,8 +20,9 @@ class NotificationsScreen extends ConsumerStatefulWidget {
 }
 
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
-  NotificationPreferences? _prefs;
-  bool _loadingPrefs = true;
+  bool _loading = true;
+  String? _error;
+  String? _deletingId;
 
   @override
   void initState() {
@@ -33,38 +33,78 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   }
 
   Future<void> _load() async {
-    await ref.read(sessionProvider.notifier).refreshNotices();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final NotificationPreferences prefs =
-          await ref.read(notificationsApiProvider).getPreferences();
+      await ref.read(sessionProvider.notifier).refreshNotices();
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    } on ApiException catch (error) {
       if (mounted) {
         setState(() {
-          _prefs = prefs;
-          _loadingPrefs = false;
+          _loading = false;
+          _error = error.message;
         });
       }
     } catch (_) {
       if (mounted) {
-        setState(() => _loadingPrefs = false);
+        setState(() {
+          _loading = false;
+          _error = 'Could not load notifications.';
+        });
       }
     }
   }
 
-  Future<void> _setPrefs({required bool inApp, required bool push}) async {
+  Future<void> _open(CustomerNotice notice) async {
+    if (notice.read) {
+      return;
+    }
     try {
-      final NotificationPreferences prefs =
-          await ref.read(notificationsApiProvider).updatePreferences(
-                inAppEnabled: inApp,
-                pushEnabled: push,
-              );
-      if (mounted) {
-        setState(() => _prefs = prefs);
-      }
+      await ref.read(sessionProvider.notifier).markNoticeRead(notice.id);
     } on ApiException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(error.message)),
         );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update this notification.')),
+        );
+      }
+    }
+  }
+
+  Future<bool> _delete(CustomerNotice notice) async {
+    if (_deletingId != null) {
+      return false;
+    }
+    setState(() => _deletingId = notice.id);
+    try {
+      await ref.read(sessionProvider.notifier).deleteNotice(notice.id);
+      return true;
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.message)),
+        );
+      }
+      return false;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete this notification.')),
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() => _deletingId = null);
       }
     }
   }
@@ -100,85 +140,135 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 child: const Text('Mark all read'),
               ),
             ),
-          Expanded(
-            child: notices.isEmpty
-                ? Center(
-                    child: Text(
-                      'No notifications yet.',
-                      style: AppTextStyles.body.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    itemCount: notices.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: AppSpacing.sm),
-                    itemBuilder: (context, index) {
-                      final CustomerNotice notice = notices[index];
-                      return Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => ref
-                              .read(sessionProvider.notifier)
-                              .markNoticeRead(notice.id),
-                          child: GlassContainer(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  notice.title,
-                                  style: AppTextStyles.bodyMedium.copyWith(
-                                    fontWeight: notice.read
-                                        ? FontWeight.w500
-                                        : FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: AppSpacing.xs),
-                                Text(
-                                  notice.body,
-                                  style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          if (!_loadingPrefs && _prefs != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            GlassContainer(
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('In-app notifications'),
-                    value: _prefs!.inAppEnabled,
-                    onChanged: (value) => _setPrefs(
-                      inApp: value,
-                      push: _prefs!.pushEnabled,
-                    ),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Push notifications'),
-                    subtitle: const Text('Delivery comes in a later phase.'),
-                    value: _prefs!.pushEnabled,
-                    onChanged: (value) => _setPrefs(
-                      inApp: _prefs!.inAppEnabled,
-                      push: value,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          Expanded(child: _body(notices)),
         ],
       ),
     );
+  }
+
+  Widget _body(List<CustomerNotice> notices) {
+    if (_loading && notices.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && notices.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _error!,
+              style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextButton(onPressed: _load, child: const Text('Try again')),
+          ],
+        ),
+      );
+    }
+    if (notices.isEmpty) {
+      return Center(
+        child: Text(
+          'No notifications yet.',
+          style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+    return ListView.separated(
+      itemCount: notices.length,
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+      itemBuilder: (context, index) {
+        final CustomerNotice notice = notices[index];
+        final String title = notice.title.trim().isEmpty
+            ? 'Notification'
+            : notice.title.trim();
+        final String body = notice.body.trim();
+        return Dismissible(
+          key: ValueKey<String>(notice.id),
+          direction: DismissDirection.endToStart,
+          confirmDismiss: (_) => _delete(notice),
+          background: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            decoration: const BoxDecoration(
+              color: AppColors.danger,
+              borderRadius: AppRadius.lgAll,
+            ),
+            child: const Icon(
+              Icons.delete_outline_rounded,
+              color: AppColors.white,
+            ),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _open(notice),
+              child: GlassContainer(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!notice.read) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppColors.info,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                    ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              fontWeight: notice.read
+                                  ? FontWeight.w500
+                                  : FontWeight.w700,
+                            ),
+                          ),
+                          if (body.isNotEmpty) ...[
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              body,
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            _whenLabel(notice.createdAt),
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _whenLabel(DateTime? createdAt) {
+    if (createdAt == null) {
+      return '—';
+    }
+    final DateTime local = createdAt.toLocal();
+    final String date = DateFormat('d MMM yyyy').format(local);
+    final String time = DateFormat('h:mm a').format(local);
+    return '$date · $time';
   }
 }

@@ -15,7 +15,7 @@ import {
   IdempotencyRepository,
   IdempotencyScope,
 } from '../orders/idempotency.repository';
-import { OrderRow } from '../orders/orders.repository';
+import { OrderRow, OrdersRepository } from '../orders/orders.repository';
 import { CashfreePaymentService } from '../payments/cashfree-payment.service';
 import { WalletNotificationDispatcher } from '../notifications/wallet-notification.dispatcher';
 import {
@@ -42,6 +42,8 @@ export class WalletCodService {
     @Inject(forwardRef(() => CashfreePaymentService))
     private readonly cashfree: CashfreePaymentService,
     private readonly config: ConfigService,
+    @Inject(forwardRef(() => OrdersRepository))
+    private readonly orders: OrdersRepository,
     private readonly logger: AppLogger,
   ) {}
 
@@ -954,68 +956,91 @@ export class WalletCodService {
   /**
    * Posts COD / digital-earning consequences for a frozen order.
    * Cash-trip rider share is physical cash and is NOT posted to wallet.
-   * Digital earning uses the frozen snapshot rider_amount (never live 85/15).
+   * A fully digital trip credits the frozen snapshot rider_amount only after
+   * the booking charge is PAID by a verified Cashfree webhook. A missing
+   * payment plan is neither cash nor a paid digital trip.
    */
   async syncOrderFinance(order: OrderRow, db: Queryable): Promise<void> {
     if (!order.rider_profile_id) {
+      return;
+    }
+    const lockedOrder = await this.orders.lockById(order.order_id, db);
+    if (!lockedOrder?.rider_profile_id) {
       return;
     }
     const snapshot = await this.repo.findOriginalSnapshot(order.order_id, db);
     if (!snapshot) {
       return;
     }
-    const finance = await this.repo.lockAccounts(order.rider_profile_id, db);
+    const finance = await this.repo.lockAccounts(lockedOrder.rider_profile_id, db);
     const cash = await this.repo.cashCollected(order.order_id, db);
-    const plannedCash = await this.repo.plannedCash(order.order_id, db);
     const riderAmount = formatInr(snapshot.rider_amount);
+    const plan = await this.repo.findOrderPaymentPlan(order.order_id, db);
 
-    if (await this.repo.isPositive(cash, db)) {
-      const targetDue = await this.repo.companyDueFromCash(cash, riderAmount, db);
-      const posted = await this.repo.postedCashCompanyShare(
-        finance.cod.cod_account_id,
-        order.order_id,
-        db,
-      );
-      if (await this.repo.exceeds(targetDue, posted, db)) {
-        const delta = await this.repo.subtract(targetDue, posted, db);
-        await this.postCodIncrease(finance, {
-          amount: delta,
-          source: 'CASH_COMPANY_SHARE',
-          relatedOrderId: order.order_id,
-          sourceTxnId: `cash-cod:${order.order_id}:${posted}:${delta}`,
-        }, db);
-      }
-    } else if (
-      (await this.repo.isPositive(riderAmount, db)) &&
-      !(await this.repo.isPositive(plannedCash, db)) &&
-      !(await this.repo.hasWalletEarningForOrder(
-        finance.wallet.wallet_account_id,
-        order.order_id,
-        db,
-      )) &&
-      !(await this.repo.hasDigitalEarningSettlement(
-        finance.cod.cod_account_id,
-        `earning:${snapshot.finance_snapshot_id}`,
-        db,
-      ))
-    ) {
-      try {
-        await this.applyInflow(db, {
-          riderProfileId: order.rider_profile_id,
-          amount: riderAmount,
-          walletEntryType: 'EARNING',
-          codSource: 'DIGITAL_EARNING_SETTLEMENT',
-          sourceTxnId: `earning:${snapshot.finance_snapshot_id}`,
-          actorType: 'SYSTEM',
-          actorProfileId: null,
-          allowWalletCredit: true,
-          relatedOrderId: order.order_id,
-          locked: finance,
-        });
-      } catch (err) {
-        if (!isUniqueViolation(err, 'cod_ledger_source_txn_unique')) {
-          throw err;
+    // COD company share and digital rider earnings require the locked order to
+    // be DELIVERED. Operational-status sync/notifications still run below.
+    if (lockedOrder.canonical_status === 'DELIVERED') {
+      if (await this.repo.isPositive(cash, db)) {
+        const targetDue = await this.repo.companyDueFromCash(cash, riderAmount, db);
+        const posted = await this.repo.postedCashCompanyShare(
+          finance.cod.cod_account_id,
+          order.order_id,
+          db,
+        );
+        if (await this.repo.exceeds(targetDue, posted, db)) {
+          const delta = await this.repo.subtract(targetDue, posted, db);
+          await this.postCodIncrease(finance, {
+            amount: delta,
+            source: 'CASH_COMPANY_SHARE',
+            relatedOrderId: order.order_id,
+            sourceTxnId: `cash-cod:${order.order_id}:${posted}:${delta}`,
+          }, db);
         }
+      } else if (await this.digitalEarningReady(plan, riderAmount, order.order_id, db)) {
+        const alreadyPosted =
+          (await this.repo.hasWalletEarningForOrder(
+            finance.wallet.wallet_account_id,
+            order.order_id,
+            db,
+          )) ||
+          (await this.repo.hasDigitalEarningSettlement(
+            finance.cod.cod_account_id,
+            `earning:${snapshot.finance_snapshot_id}`,
+            db,
+          ));
+        if (!alreadyPosted) {
+          try {
+            await this.applyInflow(db, {
+              riderProfileId: lockedOrder.rider_profile_id,
+              amount: riderAmount,
+              walletEntryType: 'EARNING',
+              codSource: 'DIGITAL_EARNING_SETTLEMENT',
+              sourceTxnId: `earning:${snapshot.finance_snapshot_id}`,
+              actorType: 'SYSTEM',
+              actorProfileId: null,
+              allowWalletCredit: true,
+              relatedOrderId: order.order_id,
+              locked: finance,
+            });
+          } catch (err) {
+            if (!isUniqueViolation(err, 'cod_ledger_source_txn_unique')) {
+              throw err;
+            }
+          }
+        }
+      } else if (
+        this.planIsFullyDigital(plan) &&
+        (await this.repo.isPositive(riderAmount, db))
+      ) {
+        this.logger.info('digital_earning_deferred', {
+          order_id: order.order_id,
+          reason: 'online_booking_not_verified_paid',
+        });
+      } else if (!plan && (await this.repo.isPositive(riderAmount, db))) {
+        this.logger.info('digital_earning_deferred', {
+          order_id: order.order_id,
+          reason: 'payment_plan_missing',
+        });
       }
     }
 
@@ -1036,6 +1061,38 @@ export class WalletCodService {
       },
       db,
     );
+  }
+
+  private planIsFullyDigital(
+    plan: { planned_online: string; planned_cash: string } | null,
+  ): boolean {
+    if (!plan) {
+      return false;
+    }
+    return (
+      formatInr(plan.planned_cash) === '0.00' &&
+      formatInr(plan.planned_online) !== '0.00'
+    );
+  }
+
+  /**
+   * Digital earning waits until the verified paid booking total equals the
+   * planned online total. PENDING, FAILED, missing, and partial charges defer.
+   */
+  private async digitalEarningReady(
+    plan: { planned_online: string; planned_cash: string } | null,
+    riderAmount: string,
+    orderId: string,
+    db: Queryable,
+  ): Promise<boolean> {
+    if (!this.planIsFullyDigital(plan) || !plan) {
+      return false;
+    }
+    if (!(await this.repo.isPositive(riderAmount, db))) {
+      return false;
+    }
+    const verified = await this.repo.verifiedOnlineBookingPaid(orderId, db);
+    return formatInr(verified) === formatInr(plan.planned_online);
   }
 
   async assertNotSuspended(riderProfileId: string, db: Queryable): Promise<void> {

@@ -11,6 +11,8 @@ export type PushMessage = {
   title: string;
   body: string;
   orderId: string | null;
+  /** Extra string fields merged into the FCM data payload. */
+  data?: Record<string, string>;
 };
 
 export type PushSendResult =

@@ -23,7 +23,7 @@ export type FcmMulticastResult = {
 export type FcmMessaging = {
   sendEachForMulticast(message: {
     tokens: string[];
-    notification: { title: string; body: string };
+    notification?: { title: string; body: string };
     data: Record<string, string>;
     android: { priority: 'high' };
   }): Promise<FcmMulticastResult>;

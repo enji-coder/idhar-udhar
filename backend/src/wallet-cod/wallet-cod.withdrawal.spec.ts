@@ -136,6 +136,7 @@ describe('WalletCodService withdrawal lifecycle', () => {
       walletNotifications as never,
       cashfree as never,
       config as never,
+      { lockById: jest.fn(async () => null) } as never,
       { warn: jest.fn(), info: jest.fn() } as never,
     );
     return { service, repo, cashfree, events, withdrawal };

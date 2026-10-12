@@ -87,6 +87,8 @@ class RiderOrder {
     required this.estimatedMinutes,
     required this.customerMaskedName,
     required this.customerMaskedPhone,
+    this.senderName = '',
+    this.senderPhone = '',
     this.receiverName = '',
     this.receiverPhone = '',
     this.offerId,
@@ -129,6 +131,8 @@ class RiderOrder {
   final RiderOrderPaymentMethod paymentMethod;
   final String customerMaskedName;
   final String customerMaskedPhone;
+  final String senderName;
+  final String senderPhone;
   final String receiverName;
   final String receiverPhone;
   final int decisionSeconds;
@@ -156,8 +160,20 @@ class RiderOrder {
 
   String get distanceLabel => formatTripDistanceKm(distanceKm);
 
-  String get etaLabel =>
-      estimatedMinutes <= 0 ? '—' : '$estimatedMinutes min';
+  String get etaLabel {
+    if (estimatedMinutes <= 0) {
+      return '—';
+    }
+    if (estimatedMinutes < 60) {
+      return '$estimatedMinutes min';
+    }
+    final int hours = estimatedMinutes ~/ 60;
+    final int minutes = estimatedMinutes % 60;
+    if (minutes == 0) {
+      return '$hours hr';
+    }
+    return '$hours hr $minutes min';
+  }
 
   bool get hasPickupCoords =>
       pickupLatitude != null && pickupLongitude != null;
@@ -165,6 +181,56 @@ class RiderOrder {
   bool get hasDropCoords => dropLatitude != null && dropLongitude != null;
 
   double get cashCollected => customerCash + receiverCash;
+
+  RiderOrder withPaymentAllocation({
+    required double customerResponsibility,
+    required double receiverResponsibility,
+    required double customerOnline,
+    required double customerCash,
+    required double receiverOnline,
+    required double receiverCash,
+  }) {
+    return RiderOrder(
+      id: id,
+      offerId: offerId,
+      backendOrderId: backendOrderId,
+      crn: crn,
+      pickup: pickup,
+      drop: drop,
+      distanceKm: distanceKm,
+      estimatedEarnings: estimatedEarnings,
+      estimatedMinutes: estimatedMinutes,
+      paymentMethod: paymentMethod,
+      customerMaskedName: customerMaskedName,
+      customerMaskedPhone: customerMaskedPhone,
+      senderName: senderName,
+      senderPhone: senderPhone,
+      receiverName: receiverName,
+      receiverPhone: receiverPhone,
+      decisionSeconds: decisionSeconds,
+      expiresAt: expiresAt,
+      vehicleName: vehicleName,
+      packageLabel: packageLabel,
+      tripAmount: tripAmount,
+      riderAmount: riderAmount,
+      companyShare: companyShare,
+      officeDistanceKm: officeDistanceKm,
+      officeCompensation: officeCompensation,
+      customerResponsibility: customerResponsibility,
+      receiverResponsibility: receiverResponsibility,
+      customerPaid: customerPaid,
+      receiverPaid: receiverPaid,
+      customerOnline: customerOnline,
+      customerCash: customerCash,
+      receiverOnline: receiverOnline,
+      receiverCash: receiverCash,
+      paymentStatusLabel: paymentStatusLabel,
+      pickupLatitude: pickupLatitude,
+      pickupLongitude: pickupLongitude,
+      dropLatitude: dropLatitude,
+      dropLongitude: dropLongitude,
+    );
+  }
 
   String get paymentLabel {
     final List<String> parts = <String>[];

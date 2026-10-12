@@ -7,6 +7,7 @@ import '../screens/earnings/rider_income_screen.dart';
 import '../screens/notifications/rider_notifications_screen.dart';
 import '../screens/onboarding/rider_terms_screen.dart';
 import '../screens/orders/active_delivery_screen.dart';
+import '../screens/orders/delivery_complete_screen.dart';
 import '../screens/orders/incoming_order_screen.dart';
 import '../screens/orders/order_details_screen.dart';
 import '../screens/orders/rider_history_screen.dart';
@@ -37,6 +38,20 @@ CustomTransitionPage<void> _fadePage({
 }) {
   return CustomTransitionPage<void>(
     key: state.pageKey,
+    child: child,
+    transitionsBuilder: (context, animation, secondary, child) {
+      return FadeTransition(opacity: animation, child: child);
+    },
+  );
+}
+
+CustomTransitionPage<void> _incomingOfferPage({
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    fullscreenDialog: true,
     child: child,
     transitionsBuilder: (context, animation, secondary, child) {
       return FadeTransition(opacity: animation, child: child);
@@ -210,7 +225,7 @@ abstract final class RiderRouter {
       GoRoute(
         path: RiderRoutes.incomingOrder,
         name: 'riderIncomingOrder',
-        pageBuilder: (context, state) => _fadePage(
+        pageBuilder: (context, state) => _incomingOfferPage(
           state: state,
           child: const IncomingOrderScreen(),
         ),
@@ -237,6 +252,14 @@ abstract final class RiderRouter {
         pageBuilder: (context, state) => _fadePage(
           state: state,
           child: const ActiveDeliveryScreen(),
+        ),
+      ),
+      GoRoute(
+        path: RiderRoutes.deliveryComplete,
+        name: 'riderDeliveryComplete',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const DeliveryCompleteScreen(),
         ),
       ),
       GoRoute(

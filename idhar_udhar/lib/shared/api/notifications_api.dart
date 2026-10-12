@@ -85,6 +85,14 @@ class NotificationsApi {
     return jsonInt(body['updated']);
   }
 
+  Future<void> dismiss(String id) async {
+    final String trimmed = id.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError('Notification id is required');
+    }
+    await _client.post('/v1/notifications/$trimmed/dismiss');
+  }
+
   Future<NotificationPreferences> getPreferences() async {
     return NotificationPreferences.fromJson(
       await _client.get('/v1/notification-preferences'),

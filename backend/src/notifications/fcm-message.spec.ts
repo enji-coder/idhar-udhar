@@ -34,4 +34,33 @@ describe('FCM message mapping', () => {
   it('uses an empty order_id string when the inbox row has none', () => {
     expect(buildFcmData({ ...message, orderId: null }).order_id).toBe('');
   });
+
+  it('sends rider offers as data-only messages with fare and route fields', () => {
+    const built = buildFcmMulticastMessage(
+      {
+        ...message,
+        profileType: 'RIDER',
+        type: 'OFFER_NEW',
+        title: 'New delivery request',
+        body: 'You have a new delivery request.',
+        data: {
+          offer_id: '55555555-5555-4555-8555-555555555555',
+          trip_fare: '500.00',
+          distance_km: '12.4',
+          estimated_duration_seconds: '1488',
+          pickup_address: 'CG Road',
+          drop_address: 'Navrangpura',
+          expires_at: '2026-10-09T12:00:30.000Z',
+        },
+      },
+      ['token-a'],
+    );
+    expect(built.notification).toBeUndefined();
+    expect(built.data.type).toBe('OFFER_NEW');
+    expect(built.data.title).toBe('New delivery request');
+    expect(built.data.trip_fare).toBe('500.00');
+    expect(built.data.distance_km).toBe('12.4');
+    expect(built.data.offer_id).toBe('55555555-5555-4555-8555-555555555555');
+    expect(built.android.priority).toBe('high');
+  });
 });
