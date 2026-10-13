@@ -16,6 +16,7 @@ import 'package:intl/intl.dart';
 import '../data/dummy/dummy_rider_repository.dart';
 import '../data/dummy/rider_finance.dart';
 import '../data/local/rider_prefs.dart';
+import '../data/location/rider_online_presence.dart';
 import '../data/models/recent_activity.dart';
 import '../data/models/rider_bank_details.dart';
 import '../data/models/rider_earnings.dart';
@@ -199,6 +200,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     await _auth.logout();
     await RiderPrefs.setOnline(false);
     await RiderPrefs.clearLoggedIn();
+    await RiderOnlinePresence.stop();
     _ref.read(riderProfileStateProvider.notifier).state = RiderProfile.empty;
     _ref.read(riderVehicleProvider.notifier).state = VehicleInfo.empty;
     _ref.read(riderBankProvider.notifier).state = RiderBankDetails.empty;
@@ -226,6 +228,11 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     _ref.read(riderOnlineProvider.notifier).state =
         result.onlineStatus == 'ONLINE';
     await RiderPrefs.setOnline(result.onlineStatus == 'ONLINE');
+    // Presence FGS is started/stopped by RiderLocationPublisher on the
+    // dashboard; stop here too so toggling Offline from any screen ends it.
+    if (result.onlineStatus != 'ONLINE') {
+      await RiderOnlinePresence.stop();
+    }
   }
 
   Future<void> updateProfile({

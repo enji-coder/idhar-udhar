@@ -667,6 +667,31 @@ export class IdentityRepository {
     );
   }
 
+  /**
+   * Persist Offline for riders whose last_seen is past the presence window.
+   * Admin display already treats them Offline; this keeps DB + dispatch aligned
+   * so permanently disconnected sessions do not stay ONLINE forever.
+   */
+  async expireStaleOnlineRiders(
+    staleMs: number,
+    db: Queryable = this.postgres,
+  ): Promise<number> {
+    const result = await db.query<{ rider_profile_id: string }>(
+      `
+      UPDATE rider_profiles
+      SET online_status = 'OFFLINE'
+      WHERE online_status = 'ONLINE'
+        AND (
+          last_seen_at IS NULL
+          OR last_seen_at < now() - ($1::bigint * interval '1 millisecond')
+        )
+      RETURNING rider_profile_id
+      `,
+      [staleMs],
+    );
+    return result.rows.length;
+  }
+
   async updateRiderLanguage(
     riderProfileId: string,
     preferredLanguage: string,

@@ -171,15 +171,16 @@ String? offerAlertSkipReason({
   return null;
 }
 
-/// A launch we start ourselves must not also ask Android to launch the activity.
-/// The notification still plays; this only suppresses the second full-screen launch.
+/// Prefer full-screen intent whenever the platform allows it.
+///
+/// Overlay-gated activity bring-forward can still fail (OEM background-start
+/// limits, process importance quirks). Keeping FSI enabled is a parallel path
+/// to the in-app offer UI — not a floating SYSTEM_ALERT_WINDOW overlay.
+/// [willBringActivityForward] is retained for callers/logging only.
 bool riderOfferPostsFullScreenIntent({
   required bool willBringActivityForward,
   required bool platformAllowsFullScreenIntent,
 }) {
-  if (willBringActivityForward) {
-    return false;
-  }
   return platformAllowsFullScreenIntent;
 }
 

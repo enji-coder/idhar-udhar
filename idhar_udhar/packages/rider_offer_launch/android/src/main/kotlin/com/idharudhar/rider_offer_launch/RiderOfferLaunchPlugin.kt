@@ -1,7 +1,5 @@
 package com.idharudhar.rider_offer_launch
 
-import android.app.ActivityManager
-import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -50,10 +48,10 @@ class RiderOfferLaunchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.i(TAG, "offer_activity_skipped_overlay_not_granted")
             return false
         }
-        if (riderUiIsOpen(context)) {
-            Log.i(TAG, "offer_activity_skipped_already_open")
-            return false
-        }
+        // Always deliver iu_offer_id via startActivity. Skipping when the
+        // process looked "foreground" dropped the offer id and, with FSI off,
+        // left only a heads-up — no dialog. singleTop + onNewIntent handles
+        // an already-visible MainActivity.
         return try {
             val launch = Intent().apply {
                 setClassName(context.packageName, MAIN_ACTIVITY)
@@ -68,7 +66,7 @@ class RiderOfferLaunchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             Log.i(TAG, "offer_activity_started")
             true
         } catch (error: RuntimeException) {
-            Log.w(TAG, "offer_activity_not_started")
+            Log.w(TAG, "offer_activity_not_started", error)
             false
         }
     }
@@ -78,21 +76,6 @@ class RiderOfferLaunchPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return true
         }
         return Settings.canDrawOverlays(context)
-    }
-
-    private fun riderUiIsOpen(context: Context): Boolean {
-        val keyguard = context.getSystemService(KeyguardManager::class.java)
-        if (keyguard?.isKeyguardLocked == true) {
-            return false
-        }
-        val activityManager = context.getSystemService(ActivityManager::class.java)
-            ?: return false
-        val processes = activityManager.runningAppProcesses ?: return false
-        val packageName = context.packageName
-        return processes.any { process ->
-            process.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND &&
-                process.processName == packageName
-        }
     }
 
     private companion object {

@@ -48,6 +48,7 @@ describe('OrdersService.getAssignedRiderLocation', () => {
       {} as never,
       { captureOnDelivered: jest.fn() } as never,
       locations as never,
+      { kick: jest.fn() } as never,
     );
     return { service, locations };
   }

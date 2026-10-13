@@ -242,6 +242,7 @@ function build() {
     } as never,
     { captureOnDelivered: jest.fn(async () => undefined) } as never,
     { getRiderLocationForConsumer: jest.fn() } as never,
+    { kick: jest.fn() } as never,
   );
   return { service, orders, catalog, fares, routing };
 }

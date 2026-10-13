@@ -86,7 +86,13 @@ describe('dispatch after confirm', () => {
       {} as never,
       { find: jest.fn(async () => null), insert: jest.fn(async () => undefined) } as never,
       new OrderStateMachine(),
-      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 30 })) } as never,
+      {
+        getOrThrow: jest.fn((key: string) =>
+          key === 'location'
+            ? { store: 'memory', presenceStaleMs: 180_000 }
+            : { offerTtlSeconds: 30 },
+        ),
+      } as never,
       walletCod as never,
       notifications as never,
       {} as never,
@@ -97,6 +103,7 @@ describe('dispatch after confirm', () => {
           location: { latitude: 23.0225, longitude: 72.5714 },
         })),
       } as never,
+      { kick: jest.fn() } as never,
     );
 
     const result = await service.dispatchOffersForSearchingOrder(ORDER);
@@ -281,6 +288,8 @@ describe('dispatch after confirm', () => {
     expect(query).toContain("r.online_status = 'ONLINE'");
     expect(query).toContain("r.approval_status = 'APPROVED'");
     expect(query).toContain('r.deactivated_at IS NULL');
+    expect(query).toContain('r.last_seen_at IS NOT NULL');
+    expect(query).toContain('r.last_seen_at > now()');
     expect(query).toContain('v.active = TRUE');
     expect(query).toContain('v.vehicle_category_id = $1');
     expect(query).toContain('length(trim(d.name)) >= 2');
@@ -491,13 +500,21 @@ function buildService(input: {
     {} as never,
     { find: jest.fn(async () => null), insert: jest.fn(async () => undefined) } as never,
     new OrderStateMachine(),
-    { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 30 })) } as never,
+    {
+      getOrThrow: jest.fn((key: string) =>
+        key === 'location'
+          ? { store: 'memory', presenceStaleMs: 180_000 }
+          : { offerTtlSeconds: 30 },
+      ),
+    } as never,
     { assertNotSuspended: jest.fn(async () => undefined) } as never,
     notifications as never,
     (input.settlement ?? {}) as never,
     { captureOnDelivered: jest.fn(async () => undefined) } as never,
     {
       getRiderLocationForConsumer: jest.fn((id: string) => input.locationFor(id)),
+      touchRiderPresence: jest.fn(async () => undefined),
     } as never,
+    { kick: jest.fn() } as never,
   );
 }

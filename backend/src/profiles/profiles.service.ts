@@ -1,18 +1,26 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { isUniqueViolation } from '../common/pg-error';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository, PROVISIONAL_CUSTOMER_DISPLAY_NAME } from '../auth/identity/identity.repository';
+import { AppConfig } from '../config/configuration';
 import { riderMayGoOnline } from '../files/rider-verification';
+import { effectiveRiderOnlineStatus } from './rider-presence';
 import { riderProfileGaps } from './rider-profile-completion';
-
-/** Admin must not show ONLINE forever after app kill / network loss. */
-const RIDER_ONLINE_STALE_MS = 2 * 60 * 1000;
 
 @Injectable()
 export class ProfilesService {
-  constructor(private readonly identities: IdentityRepository) {}
+  constructor(
+    private readonly identities: IdentityRepository,
+    private readonly configService: ConfigService,
+  ) {}
+
+  private presenceStaleMs(): number {
+    return this.configService.getOrThrow<AppConfig['location']>('location')
+      .presenceStaleMs;
+  }
 
   async customer(auth: AuthContext) {
     if (auth.role !== 'CUSTOMER') {
@@ -374,21 +382,12 @@ export class ProfilesService {
     onlineStatus: string,
     lastSeenAt: Date | string | null | undefined,
   ): string {
-    if (onlineStatus !== 'ONLINE') {
-      return onlineStatus;
-    }
-    if (!lastSeenAt) {
-      return 'OFFLINE';
-    }
-    const seen =
-      lastSeenAt instanceof Date ? lastSeenAt : new Date(lastSeenAt);
-    if (Number.isNaN(seen.getTime())) {
-      return 'OFFLINE';
-    }
-    if (Date.now() - seen.getTime() > RIDER_ONLINE_STALE_MS) {
-      return 'OFFLINE';
-    }
-    return 'ONLINE';
+    return effectiveRiderOnlineStatus(
+      onlineStatus,
+      lastSeenAt,
+      Date.now(),
+      this.presenceStaleMs(),
+    );
   }
 
   private serializeRiderDirectory(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -135,7 +137,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen> {
       _publisher = RiderLocationPublisher(
         location: ref.read(deviceLocationServiceProvider),
         api: ref.read(riderApiProvider),
-      )..start();
+        tokens: ref.read(tokenStoreProvider),
+      );
+      unawaited(_publisher!.start());
     });
   }
 

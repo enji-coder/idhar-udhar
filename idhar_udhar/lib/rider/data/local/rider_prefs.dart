@@ -27,8 +27,16 @@ abstract final class RiderPrefs {
     await prefs.setBool(_termsKey, true);
   }
 
+  /// Reloads disk state. Required in the FCM background isolate so online /
+  /// login flags written by the UI isolate are visible before launch gates.
+  static Future<SharedPreferences> _prefs() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    return prefs;
+  }
+
   static Future<bool> isLoggedIn() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs();
     return prefs.getBool(loggedInKey) ?? false;
   }
 
@@ -40,7 +48,7 @@ abstract final class RiderPrefs {
   /// Last online value stored from the server profile or availability call.
   /// Missing or false means the background offer launch must not run.
   static Future<bool> isOnline() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _prefs();
     return prefs.getBool(_onlineKey) ?? false;
   }
 

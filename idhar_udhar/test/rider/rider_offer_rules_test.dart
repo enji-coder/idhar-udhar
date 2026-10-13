@@ -89,13 +89,13 @@ void main() {
     );
   });
 
-  test('bringing the activity forward does not also request a full-screen launch', () {
+  test('full-screen intent stays enabled even when also bringing the activity forward', () {
     expect(
       riderOfferPostsFullScreenIntent(
         willBringActivityForward: true,
         platformAllowsFullScreenIntent: true,
       ),
-      isFalse,
+      isTrue,
     );
     expect(
       riderOfferPostsFullScreenIntent(
@@ -103,6 +103,13 @@ void main() {
         platformAllowsFullScreenIntent: true,
       ),
       isTrue,
+    );
+    expect(
+      riderOfferPostsFullScreenIntent(
+        willBringActivityForward: true,
+        platformAllowsFullScreenIntent: false,
+      ),
+      isFalse,
     );
     expect(
       riderOfferPostsFullScreenIntent(

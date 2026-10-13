@@ -1,8 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository } from '../auth/identity/identity.repository';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
+import { AppConfig } from '../config/configuration';
+import { isRiderPresenceFresh } from '../profiles/rider-presence';
 import { assertLatLng, CoordinateError } from '../routing/coordinates';
 import { UpdateRiderLocationDto } from './dto/update-rider-location.dto';
 import { LOCATION_STORE, LocationStore, RiderLocationFix } from './location-store';
@@ -12,7 +15,13 @@ export class LocationService {
   constructor(
     @Inject(LOCATION_STORE) private readonly store: LocationStore,
     private readonly identities: IdentityRepository,
+    private readonly configService: ConfigService,
   ) {}
+
+  private presenceStaleMs(): number {
+    return this.configService.getOrThrow<AppConfig['location']>('location')
+      .presenceStaleMs;
+  }
 
   async updateRiderLocation(auth: AuthContext, body: UpdateRiderLocationDto) {
     if (auth.role !== 'RIDER') {
@@ -62,8 +71,49 @@ export class LocationService {
   }
 
   /**
+   * Presence heartbeat for Admin online/offline. Touches last_seen without
+   * inventing a GPS fix so a rider who is Online stays present while the
+   * foreground service / offer poll is alive even if one GPS read fails.
+   */
+  async touchRiderPresence(riderProfileId: string): Promise<void> {
+    await this.identities.touchRiderLastSeen(riderProfileId);
+  }
+
+  /**
+   * Authenticated heartbeat used by the Rider foreground service when GPS is
+   * temporarily unavailable. Does not invent coordinates; dispatch still needs
+   * a fresh location fix within the same presence window.
+   */
+  async heartbeat(auth: AuthContext) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider role required', 403);
+    }
+    const riderProfileId = await this.riderProfileId(auth);
+    const profile = await this.identities.findRiderGate(riderProfileId);
+    if (!profile || profile.deactivated_at) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    if (profile.online_status !== 'ONLINE') {
+      return {
+        online_status: profile.online_status,
+        presence_fresh: false,
+        last_seen_at: null,
+      };
+    }
+    await this.identities.touchRiderLastSeen(riderProfileId);
+    const now = Date.now();
+    return {
+      online_status: 'ONLINE',
+      presence_fresh: true,
+      last_seen_at: new Date(now).toISOString(),
+      presence_stale_ms: this.presenceStaleMs(),
+    };
+  }
+
+  /**
    * Read a rider fix for an authorized consumer (order owner / admin).
    * Caller must already enforce ownership and assignment.
+   * GPS freshness uses the same window as Admin Online presence.
    */
   async getRiderLocationForConsumer(riderProfileId: string) {
     const fix = await this.store.get(riderProfileId);
@@ -75,12 +125,16 @@ export class LocationService {
         stale: true,
       };
     }
-    const ageMs = Date.now() - fix.receivedAt.getTime();
+    const stale = !isRiderPresenceFresh(
+      fix.receivedAt,
+      Date.now(),
+      this.presenceStaleMs(),
+    );
     return {
       store: this.store.backend,
       durable: this.store.durable,
       location: this.serializeFix(fix),
-      stale: ageMs > 120_000,
+      stale,
     };
   }
 

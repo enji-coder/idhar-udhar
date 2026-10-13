@@ -56,12 +56,19 @@ describe('rider offer payload', () => {
       {} as never,
       { find: jest.fn(), insert: jest.fn() } as never,
       new OrderStateMachine(),
-      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 30 })) } as never,
+      {
+        getOrThrow: jest.fn((key: string) =>
+          key === 'location'
+            ? { store: 'memory', presenceStaleMs: 180_000 }
+            : { offerTtlSeconds: 30 },
+        ),
+      } as never,
       { assertNotSuspended: jest.fn() } as never,
       { onNewOffer: jest.fn(), onOffersUnavailable: jest.fn(), onStatusChange: jest.fn() } as never,
       {} as never,
       { captureOnDelivered: jest.fn() } as never,
-      {} as never,
+      { touchRiderPresence: jest.fn(async () => undefined) } as never,
+      { kick: jest.fn() } as never,
     );
 
     const body = await service.listRiderOffers({

@@ -65,10 +65,20 @@ class _RiderProfileSetupScreenState
     );
     _language = profile.language.trim().isEmpty ? null : profile.language;
     _photoPath = profile.photoUrl;
+    _name.addListener(_onProfileFieldsChanged);
+    _email.addListener(_onProfileFieldsChanged);
+    _dob.addListener(_onProfileFieldsChanged);
+  }
+
+  void _onProfileFieldsChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _name.removeListener(_onProfileFieldsChanged);
+    _email.removeListener(_onProfileFieldsChanged);
+    _dob.removeListener(_onProfileFieldsChanged);
     _name.dispose();
     _mobile.dispose();
     _email.dispose();
@@ -210,8 +220,32 @@ class _RiderProfileSetupScreenState
     }
   }
 
+  /// Profile-step gaps only. Vehicle / licence keys belong on later screens.
+  /// Local form values win so completed fields are not listed as still needed.
+  List<String> _profileStepStillNeeded() {
+    final Set<String> serverGaps =
+        ref.watch(riderSessionProvider).missingFields.toSet();
+    final List<String> needed = <String>[];
+    final String name = _name.text.trim();
+    final String email = _email.text.trim();
+    final bool nameOk = name.length >= 2;
+    final bool emailOk = email.contains('@') && email.contains('.');
+    final bool dobOk = _dob.text.trim().isNotEmpty || _dobDate != null;
+    if (!nameOk && serverGaps.contains('name')) {
+      needed.add('full name');
+    }
+    if (!emailOk && serverGaps.contains('email')) {
+      needed.add('email');
+    }
+    if (!dobOk && serverGaps.contains('date_of_birth')) {
+      needed.add('date of birth');
+    }
+    return needed;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final List<String> stillNeeded = _profileStepStillNeeded();
     return RiderScaffold(
       appBar: AppBar(
         title: const Text('Rider profile'),
@@ -227,9 +261,9 @@ class _RiderProfileSetupScreenState
       body: SingleChildScrollView(
         child: Column(
           children: [
-            if (ref.watch(riderSessionProvider).missingFields.isNotEmpty) ...[
+            if (stillNeeded.isNotEmpty) ...[
               Text(
-                'Still needed: ${ref.watch(riderSessionProvider).missingFields.join(', ')}',
+                'Still needed: ${stillNeeded.join(', ')}',
                 style: RiderTextStyles.caption,
               ),
               const SizedBox(height: RiderSpacing.md),

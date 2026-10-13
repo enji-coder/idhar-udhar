@@ -30,6 +30,9 @@ describe('NotificationWorkerService FCM retry semantics', () => {
       if (key === 'dispatch') {
         return { offerTtlSeconds: 30 };
       }
+      if (key === 'location') {
+        return { store: 'memory', presenceStaleMs: 180_000 };
+      }
       return {
         workerEnabled: false,
         pollMs: 5000,
@@ -40,12 +43,16 @@ describe('NotificationWorkerService FCM retry semantics', () => {
       };
     },
   };
+  const identities = {
+    expireStaleOnlineRiders: jest.fn(async () => 0),
+  };
 
   const worker = new NotificationWorkerService(
     postgres as unknown as PostgresService,
     repo as unknown as NotificationsRepository,
     logger,
     config as unknown as ConfigService,
+    identities as never,
     push,
   );
 
@@ -175,7 +182,7 @@ describe('NotificationWorkerService FCM retry semantics', () => {
     });
     repo.findPendingOfferPushFacts.mockResolvedValue({
       offer_id: 'offer-1',
-      expires_at: '2026-10-13T07:00:30.000Z',
+      expires_at: new Date(Date.now() + 30_000).toISOString(),
       trip_fare: '500.00',
       pickup_address: 'CG Road',
       drop_address: 'Navrangpura',

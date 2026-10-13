@@ -84,7 +84,8 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
       unawaited(ref.read(riderSessionProvider.notifier).refreshWallet());
       unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       unawaited(ref.read(riderSessionProvider.notifier).refreshNotices());
-      _offerPoll = Timer.periodic(const Duration(seconds: 8), (_) {
+      // Secondary path when FCM is delayed; keep under the 30s offer window.
+      _offerPoll = Timer.periodic(const Duration(seconds: 4), (_) {
         final session = ref.read(riderSessionProvider);
         if (!session.isAuthenticated || !session.isApproved) {
           return;
@@ -112,7 +113,9 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
     _locationPublisher ??= RiderLocationPublisher(
       location: ref.read(deviceLocationServiceProvider),
       api: ref.read(riderApiProvider),
-    )..start();
+      tokens: ref.read(tokenStoreProvider),
+    );
+    unawaited(_locationPublisher!.start());
   }
 
   @override

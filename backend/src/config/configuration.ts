@@ -125,6 +125,13 @@ export type AppConfig = {
      * redis requires REDIS_ENABLED=true and REDIS_HOST and never falls back to memory.
      */
     store: 'memory' | 'redis';
+    /**
+     * Shared Online presence + GPS freshness window for Admin and dispatch.
+     * Heartbeats while Online (foreground service / location posts) must land
+     * within this window or the rider becomes Offline / not offer-eligible.
+     * Default 180s tolerates brief OEM Doze gaps with a ~30s client cadence.
+     */
+    presenceStaleMs: number;
   };
   redis: {
     enabled: boolean;
@@ -485,7 +492,8 @@ export function loadAppConfig(): AppConfig {
     },
     notifications: {
       workerEnabled,
-      pollMs: integer('NOTIFICATION_WORKER_POLL_MS', 5000),
+      // Keep default low so OFFER_NEW reaches FCM within the 30s offer window.
+      pollMs: integer('NOTIFICATION_WORKER_POLL_MS', 1000),
       batchSize: integer('NOTIFICATION_WORKER_BATCH_SIZE', 20),
       maxAttempts: integer('NOTIFICATION_MAX_ATTEMPTS', 5),
       retryBackoffSeconds: integer('NOTIFICATION_RETRY_BACKOFF_SECONDS', 2),
@@ -523,6 +531,7 @@ export function loadAppConfig(): AppConfig {
     },
     location: {
       store: locationStore,
+      presenceStaleMs: integer('RIDER_PRESENCE_STALE_MS', 180_000),
     },
     redis: {
       enabled: redisEnabled,

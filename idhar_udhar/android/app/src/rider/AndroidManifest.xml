@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Release Rider builds do not merge debug/profile manifests. Maps + API need INTERNET. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Online presence FGS: location posts while minimized. Shows an ongoing notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <!-- Rider launcher: both icon and roundIcon must be the NEW Rider artwork.
          Many Android launchers display roundIcon on the home screen, while the
@@ -21,6 +24,10 @@
             android:name=".MainActivity"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+        <service
+            android:name=".RiderOnlineService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="rider_incoming_offers_v1" />

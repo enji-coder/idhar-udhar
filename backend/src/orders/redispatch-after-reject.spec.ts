@@ -93,7 +93,13 @@ describe('redispatch after last reject', () => {
       {} as never,
       { find: jest.fn(async () => null), insert: jest.fn(async () => undefined) } as never,
       new OrderStateMachine(),
-      { getOrThrow: jest.fn(() => ({ offerTtlSeconds: 30 })) } as never,
+      {
+        getOrThrow: jest.fn((key: string) =>
+          key === 'location'
+            ? { store: 'memory', presenceStaleMs: 180_000 }
+            : { offerTtlSeconds: 30 },
+        ),
+      } as never,
       { assertNotSuspended: jest.fn(async () => undefined) } as never,
       notifications as never,
       {} as never,
@@ -103,7 +109,9 @@ describe('redispatch after last reject', () => {
           stale: false,
           location: { latitude: 23.04, longitude: 72.58 },
         })),
+        touchRiderPresence: jest.fn(async () => undefined),
       } as never,
+      { kick: jest.fn() } as never,
     );
 
     const result = await service.rejectOffer(

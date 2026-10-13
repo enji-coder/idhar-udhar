@@ -130,7 +130,10 @@ function build() {
     transaction: async (fn: (tx: object) => Promise<unknown>) => fn({}),
   };
   const configService = {
-    getOrThrow: () => ({ offerTtlSeconds: 30 }),
+    getOrThrow: (key: string) =>
+      key === 'location'
+        ? { store: 'memory', presenceStaleMs: 180_000 }
+        : { offerTtlSeconds: 30 },
   } as unknown as ConfigService;
   const service = new OrdersService(
     postgres as never,
@@ -147,6 +150,7 @@ function build() {
     {} as never,
     {} as never,
     {} as never,
+    { kick: jest.fn() } as never,
   );
   return { service, orders, catalog, idempotency };
 }

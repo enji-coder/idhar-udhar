@@ -12,6 +12,7 @@ import { SettlementService } from '../settlement/settlement.service';
 import { FinanceService } from '../payments/finance.service';
 import { LocationService } from '../location/location.service';
 import { WalletCodService } from '../wallet-cod/wallet-cod.service';
+import { NotificationWorkerService } from '../notifications/notification.worker';
 import { OrderNotificationDispatcher } from '../notifications/order-notification.dispatcher';
 import {
   FareRepository,
@@ -71,6 +72,7 @@ export class OrdersService {
     @Inject(forwardRef(() => FinanceService))
     private readonly finance: FinanceService,
     private readonly locations: LocationService,
+    private readonly notificationWorker: NotificationWorkerService,
     @Optional() @Inject(OBJECT_STORAGE) private readonly storage?: ObjectStorage,
   ) {}
 
@@ -632,7 +634,8 @@ export class OrdersService {
    * Skip reasons are logged. Eligibility rules are not relaxed.
    */
   async dispatchOffersForSearchingOrder(orderId: string) {
-    return this.postgres.transaction(async (tx) => {
+    const dispatchStartedAt = Date.now();
+    const result = await this.postgres.transaction(async (tx) => {
       const order = await this.orders.lockById(orderId, tx);
       if (!order || order.canonical_status !== 'SEARCHING') {
         this.dispatchLog.info('dispatch_skipped', {
@@ -640,6 +643,7 @@ export class OrdersService {
           skip_reason: order ? 'order_not_searching' : 'order_not_found',
           order_status: order?.canonical_status ?? null,
           offer_created: false,
+          dispatch_elapsed_ms: Date.now() - dispatchStartedAt,
         });
         return { offered: 0 };
       }
@@ -669,9 +673,14 @@ export class OrdersService {
       const alreadyOffered = new Set(
         await this.orders.listRiderIdsWithOffers(order.order_id, tx),
       );
+      const presenceStaleMs =
+        this.configService.getOrThrow<AppConfig['location']>('location')
+          .presenceStaleMs;
       const candidates = await this.catalog.listEligibleOnlineRidersForCategory(
         order.vehicle_category_id,
         tx,
+        200,
+        presenceStaleMs,
       );
       const skips: Array<Record<string, unknown>> = [];
       const ranked: Array<{ riderProfileId: string; meters: number }> = [];
@@ -751,6 +760,9 @@ export class OrdersService {
             offer_created: true,
             distance_to_pickup_meters: Math.round(candidate.meters),
             skipped_count: skips.length,
+            offer_ttl_seconds: this.offerTtlMs() / 1000,
+            dispatch_elapsed_ms: Date.now() - dispatchStartedAt,
+            dispatched_at: new Date().toISOString(),
           });
           for (const skip of skips) {
             this.dispatchLog.info('dispatch_rider_skipped', skip);
@@ -782,12 +794,18 @@ export class OrdersService {
         skipped_count: skips.length,
         offer_created: false,
         skip_reason: candidates.length === 0 ? 'no_eligible_riders' : 'all_candidates_skipped',
+        dispatch_elapsed_ms: Date.now() - dispatchStartedAt,
       });
       for (const skip of skips) {
         this.dispatchLog.info('dispatch_rider_skipped', skip);
       }
       return { offered: 0 };
     });
+    // Push after commit so the worker can claim the PENDING delivery row.
+    if (result.offered > 0) {
+      this.notificationWorker.kick('offer_dispatched');
+    }
+    return result;
   }
 
   private async createOfferInTx(input: {
@@ -917,6 +935,9 @@ export class OrdersService {
     }
     await this.releaseExpiredOffers();
     if (rider.online_status === 'ONLINE' && !rider.deactivated_at) {
+      // Keep Admin presence aligned with an active Rider session even when GPS
+      // posts fail; dispatch still requires a fresh location separately.
+      await this.locations.touchRiderPresence(riderProfileId);
       const searching = await this.orders.listSearchingOrderIdsForRider(
         riderProfileId,
       );

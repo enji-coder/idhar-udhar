@@ -97,28 +97,23 @@ class RiderVehicleOptionCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  label,
-                                  style: RiderTextStyles.title.copyWith(
-                                    fontSize: 17,
-                                  ),
-                                ),
-                              ),
-                              if (recommended) ...[
-                                const SizedBox(width: RiderSpacing.sm),
-                                const RiderStatusChip(
-                                  label: 'Recommended',
-                                  tone: RiderChipTone.success,
-                                ),
-                              ],
-                            ],
+                          Text(
+                            label,
+                            style: RiderTextStyles.title.copyWith(
+                              fontSize: 17,
+                            ),
                           ),
-                          if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                          if (subtitle != null &&
+                              subtitle!.trim().isNotEmpty) ...[
                             const SizedBox(height: RiderSpacing.xs),
                             Text(subtitle!, style: RiderTextStyles.caption),
+                          ],
+                          if (recommended) ...[
+                            const SizedBox(height: RiderSpacing.xs),
+                            const RiderStatusChip(
+                              label: 'Recommended',
+                              tone: RiderChipTone.success,
+                            ),
                           ],
                         ],
                       ),

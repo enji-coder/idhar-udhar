@@ -134,6 +134,11 @@ export class CatalogRepository {
     vehicleCategoryId: string,
     db: Queryable = this.postgres,
     limit = 200,
+    /**
+     * Same presence window as Admin Online. Riders without a fresh last_seen
+     * are excluded even if online_status is still ONLINE in the row.
+     */
+    presenceStaleMs = 180_000,
   ): Promise<string[]> {
     const result = await db.query<{ rider_profile_id: string }>(
       `
@@ -148,6 +153,8 @@ export class CatalogRepository {
       WHERE r.online_status = 'ONLINE'
         AND r.approval_status = 'APPROVED'
         AND r.deactivated_at IS NULL
+        AND r.last_seen_at IS NOT NULL
+        AND r.last_seen_at > now() - ($3::bigint * interval '1 millisecond')
         AND length(trim(d.name)) >= 2
         AND d.date_of_birth IS NOT NULL
         AND i.email IS NOT NULL
@@ -161,7 +168,7 @@ export class CatalogRepository {
       ORDER BY r.rider_profile_id
       LIMIT $2
       `,
-      [vehicleCategoryId, limit],
+      [vehicleCategoryId, limit, presenceStaleMs],
     );
     return result.rows.map((row) => row.rider_profile_id);
   }

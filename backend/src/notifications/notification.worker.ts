@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { IdentityRepository } from '../auth/identity/identity.repository';
 import { AppLogger } from '../common/logger/app-logger';
 import { AppConfig } from '../config/configuration';
 import { Queryable } from '../database/queryable';
@@ -26,6 +27,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
     private readonly repo: NotificationsRepository,
     private readonly logger: AppLogger,
     private readonly configService: ConfigService,
+    private readonly identities: IdentityRepository,
     @Inject(PUSH_PROVIDER) private readonly push: PushProvider,
   ) {}
 
@@ -94,12 +96,25 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
     return stats;
   }
 
+  /**
+   * Run a worker cycle as soon as a delivery is queued (e.g. after offer
+   * dispatch commits). Does not wait for the next poll tick.
+   */
+  kick(reason = 'manual'): void {
+    this.logger.info('notification_worker_kick', {
+      reason,
+      kicked_at: new Date().toISOString(),
+    });
+    void this.safeCycle();
+  }
+
   private async safeCycle(): Promise<void> {
     if (this.running) {
       return;
     }
     this.running = true;
     try {
+      await this.expireStaleRiderPresence();
       await this.processBatch();
     } catch (err) {
       this.logger.error('notification_worker_cycle_failed', {
@@ -107,6 +122,21 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
       });
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Persist Offline when heartbeats stop (app killed / no FGS). */
+  private async expireStaleRiderPresence(): Promise<void> {
+    const staleMs =
+      this.configService.getOrThrow<AppConfig['location']>('location')
+        .presenceStaleMs;
+    const expired = await this.identities.expireStaleOnlineRiders(staleMs);
+    if (expired > 0) {
+      this.logger.info('rider_presence_expired', {
+        expired_count: expired,
+        presence_stale_ms: staleMs,
+        expired_at: new Date().toISOString(),
+      });
     }
   }
 
@@ -185,6 +215,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
               delivery_id: claimed.notification_delivery_id,
               notification_id: claimed.notification_id,
               reason: 'offer_not_pending',
+              claimed_at: new Date().toISOString(),
             });
             return this.failOrRetry(
               claimed.notification_delivery_id,
@@ -197,7 +228,33 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
               false,
             );
           }
+          const expiresAtMs = Date.parse(offerData.expires_at ?? '');
+          const remainingMs = Number.isFinite(expiresAtMs)
+            ? expiresAtMs - Date.now()
+            : Number.POSITIVE_INFINITY;
+          // Too late for a useful push; fail closed so expiry/redispatch can run.
+          if (remainingMs < 1500) {
+            this.logger.warn('offer_push_skipped_expired', {
+              delivery_id: claimed.notification_delivery_id,
+              notification_id: claimed.notification_id,
+              offer_id: offerData.offer_id,
+              expires_at: offerData.expires_at,
+              remaining_ms: remainingMs,
+              skipped_at: new Date().toISOString(),
+            });
+            return this.failOrRetry(
+              claimed.notification_delivery_id,
+              claimed.notification_id,
+              claimed.channel,
+              claimed.attempt_count,
+              'offer_nearly_expired',
+              worker.maxAttempts,
+              tx,
+              false,
+            );
+          }
         }
+        const pushStartedAt = Date.now();
         const pushResult = await this.push.send({
           deliveryId: claimed.notification_delivery_id,
           notificationId: claimed.notification_id,
@@ -226,6 +283,10 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
             attempt: claimed.attempt_count,
             result: 'SENT',
             offer_attached: Boolean(offerData?.offer_id),
+            offer_id: offerData?.offer_id ?? null,
+            expires_at: offerData?.expires_at ?? null,
+            push_elapsed_ms: Date.now() - pushStartedAt,
+            sent_at: new Date().toISOString(),
           });
           return 'sent';
         }

@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { ApiError } from '../common/errors/api-error';
 import { AuthContext } from '../auth/types/auth-context';
 import { IdentityRepository } from '../auth/identity/identity.repository';
@@ -14,6 +15,12 @@ function riderAuth(): AuthContext {
   };
 }
 
+function presenceConfig(): ConfigService {
+  return {
+    getOrThrow: () => ({ presenceStaleMs: 180_000, store: 'memory' }),
+  } as unknown as ConfigService;
+}
+
 describe('ProfilesService rider availability', () => {
   const identities = {
     findRiderProfile: jest.fn(async () => ({
@@ -26,7 +33,10 @@ describe('ProfilesService rider availability', () => {
     findAdminProfile: jest.fn(),
     deactivateRider: jest.fn(),
   };
-  const service = new ProfilesService(identities as unknown as IdentityRepository);
+  const service = new ProfilesService(
+    identities as unknown as IdentityRepository,
+    presenceConfig(),
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -180,5 +190,48 @@ describe('ProfilesService rider availability', () => {
       service.setRiderLanguage({ ...riderAuth(), role: 'CUSTOMER' }, 'en'),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(identities.updateRiderLanguage).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProfilesService Admin online presence', () => {
+  const service = new ProfilesService(
+    {} as unknown as IdentityRepository,
+    presenceConfig(),
+  );
+
+  function serialize(row: Record<string, unknown>) {
+    return (
+      service as unknown as {
+        serializeRiderDirectory: (input: Record<string, unknown>) => {
+          online_status: string;
+        };
+      }
+    ).serializeRiderDirectory(row);
+  }
+
+  it('reports ONLINE only while last_seen is fresh', () => {
+    const base = {
+      rider_profile_id: riderId,
+      identity_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      phone_normalized: '919999999999',
+      onboarding_kyc_status: 'PENDING',
+      approval_status: 'APPROVED',
+      online_status: 'ONLINE',
+      cod_operational_status: 'CLEAR',
+      home_city_id: null,
+      home_zone_id: null,
+      city_code: null,
+      zone_name: null,
+    };
+
+    expect(serialize({ ...base, last_seen_at: new Date() }).online_status).toBe(
+      'ONLINE',
+    );
+    expect(
+      serialize({
+        ...base,
+        last_seen_at: new Date(Date.now() - 180_000 - 1),
+      }).online_status,
+    ).toBe('OFFLINE');
   });
 });

@@ -24,4 +24,15 @@ export class RiderLocationController {
   getOwn(@CurrentAuth() auth: AuthContext) {
     return this.locations.getOwnLocation(auth);
   }
+
+  /**
+   * Lightweight Online presence pulse. Used when GPS cannot be read but the
+   * Rider session/foreground service is still alive. Does not mark Offline.
+   */
+  @Roles('RIDER')
+  @Post('presence/heartbeat')
+  @HttpCode(HttpStatus.OK)
+  heartbeat(@CurrentAuth() auth: AuthContext) {
+    return this.locations.heartbeat(auth);
+  }
 }

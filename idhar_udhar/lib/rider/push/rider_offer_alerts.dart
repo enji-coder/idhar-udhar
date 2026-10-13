@@ -230,13 +230,15 @@ Future<void> _postAlertThenBringForward(Map<String, String> data) async {
         online: online,
       ) ==
       null;
-  final bool willLaunch = sessionAllows && await _overlayGranted();
+  final bool overlayGranted = await _overlayGranted();
+  final bool willLaunch = sessionAllows && overlayGranted;
+  final bool fsiAllowed = await riderFullScreenOffersAllowed();
   if (!willLaunch) {
     riderOfferLog(
       'activity_launch_skipped',
       offerId: offerId,
       reason: sessionAllows
-          ? 'overlay_not_granted'
+          ? (overlayGranted ? 'not_eligible' : 'overlay_not_granted')
           : (riderOfferActivityLaunchSkipReason(
                 notificationPosted: true,
                 loggedIn: loggedIn,
@@ -245,16 +247,25 @@ Future<void> _postAlertThenBringForward(Map<String, String> data) async {
               'not_eligible'),
     );
   }
+  // Post notification with FSI whenever the OS allows it. Activity launch is
+  // a parallel path when overlay is granted — not a floating overlay window.
   final RiderOfferAlertOutcome outcome = await showRiderOfferAlert(
     data,
     postSystemNotification: true,
     fullScreenIntent: riderOfferPostsFullScreenIntent(
       willBringActivityForward: willLaunch,
-      platformAllowsFullScreenIntent:
-          willLaunch ? false : await riderFullScreenOffersAllowed(),
+      platformAllowsFullScreenIntent: fsiAllowed,
     ),
   );
-  if (outcome != RiderOfferAlertOutcome.posted || !willLaunch) {
+  if (outcome != RiderOfferAlertOutcome.posted) {
+    return;
+  }
+  if (!willLaunch) {
+    riderOfferLog(
+      'activity_launch_skipped',
+      offerId: offerId,
+      reason: 'notification_posted_fsi_only',
+    );
     return;
   }
   try {
@@ -264,6 +275,13 @@ Future<void> _postAlertThenBringForward(Map<String, String> data) async {
       offerId: offerId,
       reason: started ? 'started' : 'not_started',
     );
+    if (!started) {
+      riderOfferLog(
+        'activity_launch_fallback',
+        offerId: offerId,
+        reason: fsiAllowed ? 'rely_on_full_screen_intent' : 'heads_up_only',
+      );
+    }
   } on MissingPluginException {
     riderOfferLog(
       'activity_launch_skipped',
@@ -286,6 +304,8 @@ Future<bool> _overlayGranted() async {
   try {
     return await RiderOfferLaunch.canDrawOverlays();
   } on MissingPluginException {
+    // Background isolate without the plugin registered: do not invent grant.
+    riderOfferLog('overlay_check_failed', reason: 'channel_unavailable');
     return false;
   } catch (error) {
     riderOfferLog(

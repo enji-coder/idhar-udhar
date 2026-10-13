@@ -41,7 +41,9 @@ describe('ProfilesService rider profile', () => {
     updateRiderLanguage: jest.fn(),
     upsertRiderVehicle: jest.fn(),
   };
-  const service = new ProfilesService(identities as unknown as IdentityRepository);
+  const service = new ProfilesService(identities as unknown as IdentityRepository, {
+    getOrThrow: () => ({ presenceStaleMs: 180_000, store: 'memory' }),
+  } as never);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -184,7 +186,9 @@ describe('ProfilesService vehicle', () => {
       })),
       upsertRiderVehicle: jest.fn(async () => undefined),
     };
-    const service = new ProfilesService(identities as unknown as IdentityRepository);
+    const service = new ProfilesService(identities as unknown as IdentityRepository, {
+    getOrThrow: () => ({ presenceStaleMs: 180_000, store: 'memory' }),
+  } as never);
     const profile = await service.upsertRiderVehicle(riderAuth(), {
       vehicleCategoryId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
       registration: 'gj01tr1234',
@@ -209,7 +213,9 @@ describe('ProfilesService vehicle', () => {
         throw new Error('VEHICLE_CATEGORY_NOT_FOUND');
       }),
     };
-    const service = new ProfilesService(identities as unknown as IdentityRepository);
+    const service = new ProfilesService(identities as unknown as IdentityRepository, {
+    getOrThrow: () => ({ presenceStaleMs: 180_000, store: 'memory' }),
+  } as never);
     await expect(
       service.upsertRiderVehicle(riderAuth(), {
         vehicleCategoryId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',

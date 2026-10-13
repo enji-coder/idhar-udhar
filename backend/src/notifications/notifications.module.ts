@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AuthModule } from '../auth/auth.module';
 import { AppConfig } from '../config/configuration';
 import { CapturingPushProvider } from './capturing-push.provider';
 import { DeviceTokensController } from './device-tokens.controller';
@@ -20,6 +21,7 @@ import { UnconfiguredPushProvider } from './unconfigured-push.provider';
 import { WalletNotificationDispatcher } from './wallet-notification.dispatcher';
 
 @Module({
+  imports: [AuthModule],
   controllers: [
     NotificationsController,
     NotificationPreferencesController,

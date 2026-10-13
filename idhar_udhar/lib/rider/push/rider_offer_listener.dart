@@ -371,21 +371,25 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       _targetedOfferId = launched;
 
+      riderOfferLog('launch_offer_consumed', offerId: launched);
+
     }
+
+    final String? target = _targetedOfferId;
 
     await _refreshAndPresent(
 
-      fromNotification: false,
+      fromNotification: target != null && target.isNotEmpty,
 
-      offerId: _targetedOfferId,
+      offerId: target,
+
+      force: target != null && target.isNotEmpty,
 
     );
 
-    if (ref.read(riderSessionProvider).isAuthenticated) {
+    // Keep _targetedOfferId until the offer UI actually opens so a late
 
-      _targetedOfferId = null;
-
-    }
+    // session restore can still present it.
 
   }
 
@@ -411,6 +415,12 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       riderOfferLog('present_blocked', offerId: offerId, reason: 'not_authenticated');
 
+      if ((offerId ?? '').trim().isNotEmpty) {
+
+        _targetedOfferId = offerId!.trim();
+
+      }
+
       return;
 
     }
@@ -418,6 +428,12 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
     if (session.onlineStatus != 'ONLINE') {
 
       riderOfferLog('present_blocked', offerId: offerId, reason: 'not_online');
+
+      if ((offerId ?? '').trim().isNotEmpty) {
+
+        _targetedOfferId = offerId!.trim();
+
+      }
 
       return;
 
@@ -518,6 +534,14 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
       );
 
       return;
+
+    }
+
+    if ((offerId ?? '').trim().isNotEmpty &&
+
+        offer.offerId == (offerId ?? '').trim()) {
+
+      _targetedOfferId = null;
 
     }
 
@@ -913,29 +937,29 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       final String? targeted = _targetedOfferId;
 
-      if ((targeted ?? '').isNotEmpty && !_appInForeground()) {
-
-        return;
-
-      }
-
-      final RiderOffer? offer = (targeted ?? '').isNotEmpty
-
-          ? riderOfferById(next.offers, targeted)
-
-          : _pendingOffer(next.offers);
-
-      if ((targeted ?? '').isNotEmpty && offer == null) {
-
-        return;
-
-      }
-
       if ((targeted ?? '').isNotEmpty) {
 
-        _targetedOfferId = null;
+        // Session became ready after a background launch — present that offer.
+
+        unawaited(
+
+          _refreshAndPresent(
+
+            fromNotification: true,
+
+            offerId: targeted,
+
+            force: true,
+
+          ),
+
+        );
+
+        return;
 
       }
+
+      final RiderOffer? offer = _pendingOffer(next.offers);
 
       if (offer == null || _presented.contains(offer.offerId)) {
 

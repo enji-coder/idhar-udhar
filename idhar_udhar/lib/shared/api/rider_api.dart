@@ -198,6 +198,11 @@ class RiderApi {
     );
   }
 
+  /// Touches server last_seen while Online when GPS cannot be read.
+  Future<void> postPresenceHeartbeat() async {
+    await _client.post('/v1/rider/presence/heartbeat');
+  }
+
   Future<Map<String, Object?>> getLocation() {
     return _client.get('/v1/rider/location');
   }
