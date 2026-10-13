@@ -97,6 +97,11 @@ export class FcmPushProvider implements PushProvider {
             return;
           }
           transientFailures += 1;
+          this.logger.warn('fcm_send_response_failed', {
+            delivery_id: message.deliveryId,
+            notification_id: message.notificationId,
+            error_code: response.error?.code ?? 'unknown',
+          });
         });
       }
     } catch (err) {

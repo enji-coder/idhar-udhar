@@ -1,6 +1,7 @@
 import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
+import 'package:idhar_udhar/rider/push/rider_offer_rules.dart';
 
 import 'orders_api.dart';
 import 'rider_api.dart';
@@ -411,17 +412,21 @@ abstract final class OrderMapper {
       }
       return stop.sequence < first.sequence ? stop : first;
     });
-    final String receiverName = (dropStop?.contactName ?? '').trim();
-    final String receiverPhone = (dropStop?.contactPhone ?? '').trim();
+    final String receiverName = _optional(
+      dropStop?.contactName,
+      offer.receiverName,
+    );
+    final String receiverPhone = _optional(
+      dropStop?.contactPhone,
+      offer.receiverPhone,
+    );
     final double? distanceKm = offer.distanceKm ?? order?.distanceKm;
     final int minutes = offer.estimatedDurationSeconds != null &&
             offer.estimatedDurationSeconds! > 0
         ? (offer.estimatedDurationSeconds! / 60).ceil()
         : 0;
     final DateTime? expiresAt = offer.expiresAt;
-    final int remaining = expiresAt == null
-        ? 0
-        : expiresAt.difference(DateTime.now()).inSeconds.clamp(0, 86400);
+    final int? remaining = offerSecondsRemaining(expiresAt, DateTime.now());
     final double? packageKg = offer.packageWeightKg ?? order?.packageWeightKg;
     return RiderOrder(
       id: offer.displayId ?? mapped?.displayLabel ?? offer.orderId,
@@ -439,7 +444,7 @@ abstract final class OrderMapper {
       senderPhone: (order?.customerPhone ?? '').trim(),
       receiverName: receiverName,
       receiverPhone: receiverPhone,
-      decisionSeconds: remaining,
+      decisionSeconds: remaining ?? 0,
       expiresAt: expiresAt,
       vehicleName: _optional(
         offer.vehicleCategoryName,

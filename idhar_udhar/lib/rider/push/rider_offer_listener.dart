@@ -10,17 +10,29 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:idhar_udhar/shared/api/api_exception.dart';
+
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+
+import 'package:idhar_udhar/shared/api/order_mapper.dart';
+
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 
-import 'package:permission_handler/permission_handler.dart';
 
 
+import '../data/dummy/dummy_rider_repository.dart';
+
+import '../data/dummy/rider_finance.dart';
+
+import '../data/models/rider_order.dart';
 
 import '../routing/rider_router.dart';
 
 import '../routing/rider_routes.dart';
 
 import '../state/rider_session.dart';
+
+import '../widgets/rider_order_alert.dart';
 
 import 'rider_offer_alerts.dart';
 
@@ -62,7 +74,9 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
   final Set<String> _presented = <String>{};
 
-  bool _offeredNotificationSettings = false;
+  String? _openDialogOfferId;
+
+  String? _routeAfterDialog;
 
 
 
@@ -110,15 +124,15 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     if (!riderFirebaseReady) {
 
-      riderOfferLog('listener_init', reason: 'firebase_not_ready');
+    riderOfferLog('listener_init', reason: 'firebase_not_ready');
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
 
-        unawaited(_consumeLocalLaunch());
+      unawaited(_consumeLocalLaunch());
 
-      });
+    });
 
-      return;
+    return;
 
     }
 
@@ -160,13 +174,21 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       }
 
-    } catch (_) {}
+    } catch (error) {
+
+      riderOfferLog('initial_message_failed', reason: error.runtimeType.toString());
+
+    }
 
     try {
 
       await _consumeLocalLaunch();
 
-    } catch (_) {}
+    } catch (error) {
+
+      riderOfferLog('local_launch_failed', reason: error.runtimeType.toString());
+
+    }
 
   }
 
@@ -250,17 +272,29 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     final bool inForeground = _appInForeground();
 
+    final bool showDialog = riderOfferUsesForegroundDialog(
+
+      openedFromNotification: fromNotification,
+
+      appResumed: inForeground,
+
+    );
+
     riderOfferLog(
 
       fromNotification ? 'fcm_opened_app' : 'fcm_foreground_received',
 
       offerId: offerId.isEmpty ? null : offerId,
 
-      reason: inForeground ? 'app_resumed' : 'app_not_resumed',
+      reason:
+
+          '${message.notification == null ? 'data' : 'notification'}_${inForeground ? 'app_resumed' : 'app_not_resumed'}',
 
     );
 
-    if (!fromNotification) {
+    var alertPlayed = false;
+
+    if (showDialog) {
 
       final RiderOfferAlertOutcome outcome = await showRiderOfferAlert(
 
@@ -268,13 +302,13 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
         postSystemNotification: true,
 
-        requestPermissionIfNeeded: true,
-
       );
+
+      alertPlayed = outcome == RiderOfferAlertOutcome.posted;
 
       if (outcome == RiderOfferAlertOutcome.permissionDenied) {
 
-        await _openNotificationSettings();
+        riderOfferLog('notification_permission', reason: 'denied_offer_not_posted');
 
       }
 
@@ -282,57 +316,15 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     await _refreshAndPresent(
 
-      fromNotification: true,
+      fromNotification: !showDialog,
 
       offerId: offerId.isEmpty ? null : offerId,
 
-      force: true,
+      force: !showDialog,
+
+      playFallbackSound: showDialog && !alertPlayed,
 
     );
-
-  }
-
-
-
-  Future<void> _openNotificationSettings() async {
-
-    if (!mounted || _offeredNotificationSettings) {
-
-      riderOfferLog(
-
-        'notification_permission',
-
-        reason: _offeredNotificationSettings
-
-            ? 'settings_already_offered'
-
-            : 'settings_skipped_unmounted',
-
-      );
-
-      return;
-
-    }
-
-    _offeredNotificationSettings = true;
-
-    riderOfferLog('notification_permission', reason: 'opening_app_settings');
-
-    try {
-
-      final bool opened = await openAppSettings();
-
-      if (!opened) {
-
-        riderOfferLog('notification_permission', reason: 'settings_not_opened');
-
-      }
-
-    } catch (_) {
-
-      riderOfferLog('notification_permission', reason: 'settings_unavailable');
-
-    }
 
   }
 
@@ -371,6 +363,8 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
     bool force = false,
 
     int attempt = 0,
+
+    bool playFallbackSound = false,
 
   }) async {
 
@@ -450,6 +444,8 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
           attempt: attempt + 1,
 
+          playFallbackSound: playFallbackSound,
+
         );
 
       }
@@ -488,6 +484,20 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     }
 
+    if (!fromNotification && _appInForeground()) {
+
+      await _presentForegroundDialog(
+
+        offer,
+
+        playFallbackSound: playFallbackSound,
+
+      );
+
+      return;
+
+    }
+
     await _pushIncomingScreen(offer.offerId, force: force || fromNotification);
 
   }
@@ -495,6 +505,14 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
 
   Future<void> _pushIncomingScreen(String offerId, {required bool force}) async {
+
+    if (_openDialogOfferId == offerId) {
+
+      riderOfferLog('present_already_open', offerId: offerId);
+
+      return;
+
+    }
 
     final String path =
 
@@ -570,6 +588,254 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
 
 
+  Future<void> _presentForegroundDialog(
+
+    RiderOffer offer, {
+
+    bool playFallbackSound = false,
+
+  }) async {
+
+    if (!mounted) {
+
+      return;
+
+    }
+
+    if (_openDialogOfferId == offer.offerId || _presented.contains(offer.offerId)) {
+
+      riderOfferLog('dialog_skipped_duplicate', offerId: offer.offerId);
+
+      return;
+
+    }
+
+    final DateTime? expiresAt = offer.expiresAt;
+
+    if (offer.status != 'PENDING' ||
+
+        (expiresAt != null && !expiresAt.isAfter(DateTime.now()))) {
+
+      unawaited(cancelRiderOfferAlert(offer.offerId));
+
+      riderOfferLog('dialog_skipped', offerId: offer.offerId, reason: 'not_actionable');
+
+      return;
+
+    }
+
+    _presented.add(offer.offerId);
+
+    _openDialogOfferId = offer.offerId;
+
+    riderOfferLog('dialog_opening', offerId: offer.offerId);
+
+    final RiderOrder order = OrderMapper.toRiderOrder(offer: offer);
+
+    try {
+
+      await RiderOrderAlert.show(
+
+        context,
+
+        order: order,
+
+        playFallbackSound: playFallbackSound,
+
+        onExpired: () {
+
+          unawaited(cancelRiderOfferAlert(offer.offerId));
+
+          riderOfferLog('dialog_expired', offerId: offer.offerId);
+
+        },
+
+        onAccept: () => _acceptDialog(offer),
+
+        onReject: () => _rejectDialog(offer),
+
+      );
+
+    } catch (error) {
+
+      _presented.remove(offer.offerId);
+
+      riderOfferLog(
+
+        'dialog_failed',
+
+        offerId: offer.offerId,
+
+        reason: error.runtimeType.toString(),
+
+      );
+
+    } finally {
+
+      if (_openDialogOfferId == offer.offerId) {
+
+        _openDialogOfferId = null;
+
+      }
+
+      final String? route = _routeAfterDialog;
+
+      _routeAfterDialog = null;
+
+      if (route != null && mounted) {
+
+        RiderRouter.config.go(route);
+
+      }
+
+    }
+
+  }
+
+
+
+  Future<String?> _acceptDialog(RiderOffer offer) async {
+
+    final RiderSessionState session = ref.read(riderSessionProvider);
+
+    if (!session.isApproved) {
+
+      return 'Your profile must be approved before you can accept orders.';
+
+    }
+
+    if (riderIsSuspended(ref)) {
+
+      return 'Account suspended until COD Due is cleared.';
+
+    }
+
+    if (!ref.read(riderOnlineProvider)) {
+
+      return 'Go online to accept delivery requests.';
+
+    }
+
+    try {
+
+      final accepted = await ref.read(riderApiProvider).acceptOffer(offer.offerId);
+
+      if (!mounted) {
+
+        return null;
+
+      }
+
+      var details = accepted;
+
+      if (accepted.orderId.isNotEmpty) {
+
+        try {
+
+          details = await ref.read(riderApiProvider).getOrder(accepted.orderId);
+
+        } on ApiException catch (error) {
+
+          riderOfferLog(
+
+            'order_details_failed',
+
+            offerId: offer.offerId,
+
+            reason: error.code,
+
+          );
+
+        } catch (error) {
+
+          riderOfferLog(
+
+            'order_details_failed',
+
+            offerId: offer.offerId,
+
+            reason: error.runtimeType.toString(),
+
+          );
+
+        }
+
+      }
+
+      ref.read(activeOrderProvider.notifier).state = OrderMapper.toRiderOrder(
+
+        offer: acceptedOfferState(active: offer, order: details),
+
+        order: details,
+
+      );
+
+      ref.read(deliveryStatusProvider.notifier).state =
+
+          DeliveryLifecycleStatus.accepted;
+
+      unawaited(cancelRiderOfferAlert(offer.offerId));
+
+      _routeAfterDialog = RiderRoutes.orderDetails;
+
+      riderOfferLog('accept_result', offerId: offer.offerId, reason: 'ok');
+
+      return null;
+
+    } on ApiException catch (error) {
+
+      riderOfferLog('accept_result', offerId: offer.offerId, reason: error.code);
+
+      unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
+
+      return error.message;
+
+    }
+
+  }
+
+
+
+  Future<String?> _rejectDialog(RiderOffer offer) async {
+
+    try {
+
+      await ref.read(riderApiProvider).rejectOffer(offer.offerId);
+
+      unawaited(cancelRiderOfferAlert(offer.offerId));
+
+      riderOfferLog('reject_result', offerId: offer.offerId, reason: 'ok');
+
+      return null;
+
+    } on ApiException catch (error) {
+
+      riderOfferLog('reject_result', offerId: offer.offerId, reason: error.code);
+
+      unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
+
+      return error.message;
+
+    } catch (error) {
+
+      riderOfferLog(
+
+        'reject_result',
+
+        offerId: offer.offerId,
+
+        reason: error.runtimeType.toString(),
+
+      );
+
+      return 'Could not reject this request. Try again.';
+
+    }
+
+  }
+
+
+
   @override
 
   void dispose() {
@@ -628,7 +894,15 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       }
 
-      unawaited(_pushIncomingScreen(offer.offerId, force: false));
+      if (_appInForeground()) {
+
+        unawaited(_presentForegroundDialog(offer));
+
+      } else {
+
+        unawaited(_pushIncomingScreen(offer.offerId, force: false));
+
+      }
 
     });
 

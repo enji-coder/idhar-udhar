@@ -20,6 +20,8 @@ import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
+import '../../push/rider_offer_diag.dart';
+import '../../push/rider_offer_rules.dart';
 import '../../routing/rider_routes.dart';
 import '../../screens/earnings/rider_income_screen.dart';
 import '../../screens/orders/rider_history_screen.dart';
@@ -420,7 +422,19 @@ class _HomeTab extends ConsumerWidget {
                             details = await ref
                                 .read(riderApiProvider)
                                 .getOrder(accepted.orderId);
-                          } catch (_) {}
+                          } on ApiException catch (error) {
+                            riderOfferLog(
+                              'order_details_failed',
+                              offerId: offerId,
+                              reason: error.code,
+                            );
+                          } catch (error) {
+                            riderOfferLog(
+                              'order_details_failed',
+                              offerId: offerId,
+                              reason: error.runtimeType.toString(),
+                            );
+                          }
                         }
                         if (!context.mounted) return;
                         ref.read(activeOrderProvider.notifier).state =
@@ -856,7 +870,7 @@ class _DutyStatusCard extends StatelessWidget {
   }
 }
 
-class _IncomingOrderCard extends StatelessWidget {
+class _IncomingOrderCard extends StatefulWidget {
   const _IncomingOrderCard({
     required this.order,
     required this.currency,
@@ -870,7 +884,71 @@ class _IncomingOrderCard extends StatelessWidget {
   final VoidCallback onAccept;
 
   @override
+  State<_IncomingOrderCard> createState() => _IncomingOrderCardState();
+}
+
+class _IncomingOrderCardState extends State<_IncomingOrderCard> {
+  Timer? _timer;
+  int? _secondsLeft;
+
+  @override
+  void initState() {
+    super.initState();
+    _bind(widget.order.expiresAt);
+  }
+
+  @override
+  void didUpdateWidget(covariant _IncomingOrderCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.order.offerId != widget.order.offerId ||
+        oldWidget.order.expiresAt != widget.order.expiresAt) {
+      _bind(widget.order.expiresAt);
+    }
+  }
+
+  void _bind(DateTime? expiresAt) {
+    _timer?.cancel();
+    _secondsLeft = offerSecondsRemaining(expiresAt, DateTime.now());
+    if (expiresAt == null || _secondsLeft == 0) {
+      return;
+    }
+    final DateTime deadline = expiresAt;
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final int? left = offerSecondsRemaining(deadline, DateTime.now());
+      if (!mounted) {
+        return;
+      }
+      setState(() => _secondsLeft = left);
+      if (left == null || left <= 0) {
+        _timer?.cancel();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String? get _countdownLabel {
+    final int? left = _secondsLeft;
+    if (left == null) {
+      return null;
+    }
+    final String minutes = (left ~/ 60).toString().padLeft(2, '0');
+    final String seconds = (left % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final RiderOrder order = widget.order;
+    final NumberFormat currency = widget.currency;
+    final VoidCallback onReject = widget.onReject;
+    final VoidCallback onAccept = widget.onAccept;
+    final bool expired = _secondsLeft == 0;
+    final String? countdown = _countdownLabel;
     return Material(
       color: Colors.transparent,
       elevation: 8,
@@ -904,6 +982,17 @@ class _IncomingOrderCard extends StatelessWidget {
                       style: _d(RiderTextStyles.title).copyWith(fontSize: 15),
                     ),
                   ),
+                  if (countdown != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: RiderSpacing.sm),
+                      child: Text(
+                        countdown,
+                        style: _d(RiderTextStyles.title).copyWith(
+                          fontSize: 15,
+                          color: expired ? RiderColors.error : RiderColors.primary,
+                        ),
+                      ),
+                    ),
                   const RiderStatusChip(
                     label: 'NEW',
                     tone: RiderChipTone.warning,
@@ -918,6 +1007,14 @@ class _IncomingOrderCard extends StatelessWidget {
               _miniRow('Pickup', order.pickup, Icons.store_mall_directory_rounded),
               const SizedBox(height: RiderSpacing.sm),
               _miniRow('Drop', order.drop, Icons.location_on_rounded),
+              if (order.receiverName.trim().isNotEmpty) ...[
+                const SizedBox(height: RiderSpacing.sm),
+                _miniRow(
+                  'Receiver',
+                  order.receiverName.trim(),
+                  Icons.person_outline_rounded,
+                ),
+              ],
               const SizedBox(height: RiderSpacing.md),
               Row(
                 children: [
@@ -959,15 +1056,16 @@ class _IncomingOrderCard extends StatelessWidget {
                     child: RiderSecondaryButton(
                       label: 'Reject',
                       destructive: true,
-                      onPressed: onReject,
+                      onPressed: expired ? null : onReject,
                     ),
                   ),
                   const SizedBox(width: RiderSpacing.md),
                   Expanded(
                     flex: 2,
                     child: RiderPrimaryButton(
-                      label: 'Accept',
-                      onPressed: onAccept,
+                      label: expired ? 'Expired' : 'Accept',
+                      enabled: !expired,
+                      onPressed: expired ? null : onAccept,
                     ),
                   ),
                 ],

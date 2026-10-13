@@ -10,6 +10,7 @@ import 'package:idhar_udhar/shared/push/firebase_fcm_token_source.dart';
 import 'package:idhar_udhar/shared/push/push_token_sync.dart';
 
 import 'push/rider_offer_alerts.dart';
+import 'push/rider_offer_diag.dart';
 import 'push/rider_offer_listener.dart';
 import 'routing/rider_router.dart';
 import 'theme/rider_colors.dart';
@@ -27,7 +28,16 @@ Future<void> main() async {
   ApiConfig.useProductionDefault();
   final bool firebaseReady = await _initializeRiderFirebase();
   riderFirebaseReady = firebaseReady;
-  await ensureRiderOfferAlerts();
+  try {
+    await ensureRiderOfferAlerts();
+  } catch (error, stackTrace) {
+    riderOfferLog(
+      'local_notifications_init_failed',
+      reason: error.runtimeType.toString(),
+    );
+    debugPrint('RIDER_OFFER: local_notifications_init_failed $error');
+    debugPrint('$stackTrace');
+  }
   if (firebaseReady) {
     FirebaseMessaging.onBackgroundMessage(riderFirebaseBackgroundHandler);
   }
@@ -81,6 +91,10 @@ Future<bool> _initializeRiderFirebase() async {
     if (kDebugMode) {
       debugPrint('PUSH: Firebase initialization failed: $error');
     }
+    riderOfferLog(
+      'firebase_init_failed',
+      reason: error.runtimeType.toString(),
+    );
     return false;
   }
 }

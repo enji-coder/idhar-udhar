@@ -150,11 +150,24 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
         }
 
         let offerData: Record<string, string> | undefined;
-        if (
-          claimed.type === 'OFFER_NEW' &&
-          claimed.order_id &&
-          claimed.rider_profile_id
-        ) {
+        if (claimed.type === 'OFFER_NEW') {
+          if (!claimed.order_id || !claimed.rider_profile_id) {
+            this.logger.warn('offer_push_facts_missing', {
+              delivery_id: claimed.notification_delivery_id,
+              notification_id: claimed.notification_id,
+              reason: claimed.order_id ? 'missing_rider_profile' : 'missing_order_id',
+            });
+            return this.failOrRetry(
+              claimed.notification_delivery_id,
+              claimed.notification_id,
+              claimed.channel,
+              claimed.attempt_count,
+              'offer_facts_missing',
+              worker.maxAttempts,
+              tx,
+              false,
+            );
+          }
           const ttlMs =
             this.configService.getOrThrow<AppConfig['dispatch']>('dispatch')
               .offerTtlSeconds * 1000;
@@ -167,6 +180,23 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
               },
               tx,
             )) ?? undefined;
+          if (!offerData) {
+            this.logger.warn('offer_push_facts_missing', {
+              delivery_id: claimed.notification_delivery_id,
+              notification_id: claimed.notification_id,
+              reason: 'offer_not_pending',
+            });
+            return this.failOrRetry(
+              claimed.notification_delivery_id,
+              claimed.notification_id,
+              claimed.channel,
+              claimed.attempt_count,
+              'offer_facts_missing',
+              worker.maxAttempts,
+              tx,
+              false,
+            );
+          }
         }
         const pushResult = await this.push.send({
           deliveryId: claimed.notification_delivery_id,
@@ -195,6 +225,7 @@ export class NotificationWorkerService implements OnModuleInit, OnModuleDestroy 
             channel: claimed.channel,
             attempt: claimed.attempt_count,
             result: 'SENT',
+            offer_attached: Boolean(offerData?.offer_id),
           });
           return 'sent';
         }

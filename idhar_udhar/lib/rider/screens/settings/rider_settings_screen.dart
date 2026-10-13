@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../push/rider_offer_alerts.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 import '../../widgets/rider_glass_card.dart';
@@ -74,7 +75,7 @@ class _RiderSettingsScreenState extends State<RiderSettingsScreen>
       ),
       body: ListView(
         children: [
-          if (_isAndroid)
+          if (_isAndroid) ...[
             RiderGlassCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -99,8 +100,50 @@ class _RiderSettingsScreenState extends State<RiderSettingsScreen>
                   ),
                 ],
               ),
-            )
-          else
+            ),
+            const SizedBox(height: RiderSpacing.md),
+            RiderGlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const RiderSectionHeader(title: 'Incoming order alerts'),
+                  const SizedBox(height: RiderSpacing.sm),
+                  Text(
+                    'New delivery offers use the “Incoming delivery requests” notification. Android keeps that channel’s sound and vibration. This app cannot override a muted channel, Do Not Disturb, or silent mode. If an older install created the channel without sound, open its settings. Updating the app does not reset a channel you already changed.',
+                    style: RiderTextStyles.caption,
+                  ),
+                  const SizedBox(height: RiderSpacing.lg),
+                  RiderPrimaryButton(
+                    label: 'Allow notifications',
+                    onPressed: () async {
+                      try {
+                        await Permission.notification.request();
+                      } catch (_) {}
+                    },
+                  ),
+                  const SizedBox(height: RiderSpacing.sm),
+                  RiderPrimaryButton(
+                    label: 'Open alert sound settings',
+                    onPressed: () {
+                      openRiderOfferChannelSettings();
+                    },
+                  ),
+                  const SizedBox(height: RiderSpacing.lg),
+                  Text(
+                    'Full-screen offers appear over the lock screen only when Android grants that access. If it is off, the same offer stays a heads-up notification you can tap. This is not a phone-call or alarm permission.',
+                    style: RiderTextStyles.caption,
+                  ),
+                  const SizedBox(height: RiderSpacing.lg),
+                  RiderPrimaryButton(
+                    label: 'Open full-screen settings',
+                    onPressed: () {
+                      openRiderFullScreenOfferSettings();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ] else
             RiderGlassCard(
               child: Text(
                 'Display over other apps is Android-only and is not requested on this platform.',

@@ -7,9 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:idhar_udhar/shared/format/trip_distance.dart';
-
-import '../data/models/rider_order.dart';
 import 'rider_offer_diag.dart';
 import 'rider_offer_rules.dart';
 
@@ -92,13 +89,29 @@ Future<void> riderFirebaseBackgroundHandler(RemoteMessage message) async {
   );
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
-  if (Firebase.apps.isEmpty) {
-    await Firebase.initializeApp();
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp();
+    }
+  } catch (error) {
+    riderOfferLog(
+      'firebase_background_init_failed',
+      offerId: message.data['offer_id']?.toString(),
+      reason: error.runtimeType.toString(),
+    );
   }
-  await showRiderOfferAlert(
-    _stringData(message.data),
-    postSystemNotification: true,
-  );
+  try {
+    await showRiderOfferAlert(
+      _stringData(message.data),
+      postSystemNotification: true,
+    );
+  } catch (error) {
+    riderOfferLog(
+      'alert_failed',
+      offerId: message.data['offer_id']?.toString(),
+      reason: error.runtimeType.toString(),
+    );
+  }
 }
 
 @pragma('vm:entry-point')
@@ -114,7 +127,7 @@ Future<void> ensureRiderOfferAlerts() async {
     return;
   }
   const AndroidInitializationSettings android =
-      AndroidInitializationSettings('@mipmap/ic_launcher_rider');
+      AndroidInitializationSettings('@drawable/ic_stat_offer');
   await _plugin.initialize(
     const InitializationSettings(android: android),
     onDidReceiveNotificationResponse: riderOfferNotificationTap,
@@ -136,6 +149,13 @@ Future<void> ensureRiderOfferAlerts() async {
   );
   _ready = true;
   riderOfferLog('local_notifications_ready');
+}
+
+/// Asks for Android 13+ notification permission while the app is in the foreground.
+/// Background delivery cannot show the system dialog.
+Future<void> requestRiderOfferNotificationPermission() async {
+  await ensureRiderOfferAlerts();
+  await _notificationsAllowed(requestIfNeeded: true);
 }
 
 Future<bool> riderFullScreenOffersAllowed() async {
@@ -165,8 +185,13 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
   bool requestPermissionIfNeeded = false,
 }) async {
   final String offerId = (data['offer_id'] ?? '').trim();
-  if (offerId.isEmpty) {
-    riderOfferLog('alert_skipped', reason: 'missing_offer_id');
+  final String? skip = offerAlertSkipReason(
+    offerId: offerId,
+    expiresAtRaw: data['expires_at'],
+    now: DateTime.now(),
+  );
+  if (skip != null) {
+    riderOfferLog('alert_skipped', offerId: offerId, reason: skip);
     return RiderOfferAlertOutcome.skipped;
   }
   if (_alertedOfferIds.contains(offerId)) {
@@ -176,10 +201,6 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
   final DateTime? expiresAt = DateTime.tryParse((data['expires_at'] ?? '').trim());
   final OfferNotificationWindow window =
       offerNotificationWindow(expiresAt, DateTime.now());
-  if (window.expired) {
-    riderOfferLog('alert_skipped', offerId: offerId, reason: 'already_expired');
-    return RiderOfferAlertOutcome.skipped;
-  }
   if (!postSystemNotification) {
     riderOfferLog('alert_in_app_only', offerId: offerId);
     return RiderOfferAlertOutcome.skipped;
@@ -226,7 +247,7 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
         visibility: NotificationVisibility.public,
         // The OS shows the activity only when full-screen access is allowed.
         // Otherwise this stays a high-importance heads-up notification.
-        fullScreenIntent: true,
+        fullScreenIntent: fsiAllowed,
         timeoutAfter: window.timeoutAfterMs,
         playSound: true,
         enableVibration: true,
@@ -323,49 +344,18 @@ Map<String, String> _stringData(Map<String, dynamic> raw) {
   return data;
 }
 
-String _alertBody(Map<String, String> data) {
-  final String pickup = (data['pickup_address'] ?? '').trim();
-  final String drop = (data['drop_address'] ?? '').trim();
-  final double? km = double.tryParse(data['distance_km'] ?? '');
-  final int seconds =
-      int.tryParse(data['estimated_duration_seconds'] ?? '') ?? 0;
-  final String? fare = _fareLabel(data['trip_fare']);
-  final List<String> lines = <String>[
-    if (pickup.isNotEmpty) 'Pickup: $pickup',
-    if (drop.isNotEmpty) 'Drop: $drop',
-    if (km != null) 'Distance: ${formatTripDistanceKm(km)}',
-    if (seconds > 0) 'Time: ${_minutesLabel(seconds)}',
-    if (fare != null) 'Trip fare: $fare',
-  ];
-  if (lines.isEmpty) {
-    return (data['body'] ?? '').trim().isEmpty
-        ? 'A new delivery request is waiting.'
-        : data['body']!.trim();
-  }
-  return lines.join('\n');
-}
+String _alertBody(Map<String, String> data) => riderOfferNotificationBody(data);
 
-String? _fareLabel(String? raw) {
-  final double? amount = double.tryParse((raw ?? '').trim());
-  if (amount == null || amount <= 0) {
-    return null;
+Future<void> openRiderOfferChannelSettings() async {
+  await ensureRiderOfferAlerts();
+  try {
+    await _offerChannel.invokeMethod<void>('openOfferChannelSettings');
+  } catch (error) {
+    riderOfferLog(
+      'channel_settings_failed',
+      reason: error.runtimeType.toString(),
+    );
   }
-  return '₹${amount.toStringAsFixed(0)}';
-}
-
-String _minutesLabel(int seconds) {
-  final int minutes = (seconds / 60).ceil();
-  final RiderOrder probe = RiderOrder(
-    id: '',
-    pickup: '',
-    drop: '',
-    distanceKm: 0,
-    estimatedEarnings: 0,
-    estimatedMinutes: minutes,
-    customerMaskedName: '',
-    customerMaskedPhone: '',
-  );
-  return probe.etaLabel;
 }
 
 int _notificationId(String offerId) => offerId.hashCode & 0x7fffffff;

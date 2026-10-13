@@ -982,7 +982,7 @@ export class OrdersService {
         if (offer.status === 'ACCEPTED' && order.rider_profile_id === riderProfileId) {
           const payload = {
             ...this.serializeOffer(offer),
-            order: this.serializeOrder(order),
+            order: await this.serializeRiderReadableOrder(order, tx),
           };
           return payload;
         }
@@ -1088,7 +1088,7 @@ export class OrdersService {
         );
         const acceptedPayload = {
           ...this.serializeOffer(accepted),
-          order: this.serializeOrder(updated),
+          order: await this.serializeRiderReadableOrder(updated, tx),
         };
         await this.idempotency.insert(
           {
@@ -1636,6 +1636,26 @@ export class OrdersService {
     );
   }
 
+  /**
+   * Assigned-rider read model: drop contacts plus the sender, only after
+   * this rider is the assigned rider. Offer lists do not include the sender.
+   */
+  private async serializeRiderReadableOrder(order: OrderRow, db: Queryable) {
+    const stops = await this.orders.listStops(order.order_id, db);
+    const sender = order.rider_profile_id
+      ? await this.orders.findCustomerContact(order.customer_profile_id, db)
+      : null;
+    return {
+      ...this.serializeOrder(order, stops),
+      ...(sender
+        ? {
+            customer_name: sender.display_name,
+            customer_phone: sender.phone,
+          }
+        : {}),
+    };
+  }
+
   private serializeOrder(order: OrderRow, stops?: OrderStopRow[]) {
     return {
       order_id: order.order_id,
@@ -1862,6 +1882,8 @@ export class OrdersService {
       drop_address: row.drop_address,
       drop_latitude: row.drop_latitude,
       drop_longitude: row.drop_longitude,
+      receiver_name: row.receiver_name,
+      receiver_phone: row.receiver_phone,
     };
   }
 

@@ -55,6 +55,8 @@ class RiderOffer {
     this.pickupLongitude,
     this.dropLatitude,
     this.dropLongitude,
+    this.receiverName,
+    this.receiverPhone,
   });
 
   final String offerId;
@@ -77,6 +79,8 @@ class RiderOffer {
   final double? pickupLongitude;
   final double? dropLatitude;
   final double? dropLongitude;
+  final String? receiverName;
+  final String? receiverPhone;
 
   factory RiderOffer.fromJson(Map<String, Object?> json) {
     return RiderOffer(
@@ -115,6 +119,8 @@ class RiderOffer {
       dropLongitude: json['drop_longitude'] == null
           ? null
           : jsonDouble(json['drop_longitude']),
+      receiverName: jsonString(json['receiver_name']),
+      receiverPhone: jsonString(json['receiver_phone']),
     );
   }
 }

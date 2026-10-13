@@ -86,6 +86,27 @@ function build() {
     ),
     insertStatusEvent: jest.fn(async () => undefined),
     countPendingOffers: jest.fn(async () => 0),
+    listStops: jest.fn(async () => [
+      {
+        order_stop_id: '88888888-8888-4888-8888-888888888888',
+        order_id: orderId,
+        sequence: 1,
+        stop_type: 'DROP',
+        address_text: 'Navrangpura',
+        latitude: '23.036000',
+        longitude: '72.561000',
+        zone_id: null,
+        contact_name: 'Asha',
+        contact_phone: '9876543210',
+        arrived_at: null,
+        completed_at: null,
+        proof_file_id: null,
+      },
+    ]),
+    findCustomerContact: jest.fn(async () => ({
+      display_name: 'Sender',
+      phone: '9123456780',
+    })),
   };
   const catalog = {
     findRider: jest.fn(async () => ({
@@ -109,7 +130,7 @@ function build() {
     transaction: async (fn: (tx: object) => Promise<unknown>) => fn({}),
   };
   const configService = {
-    getOrThrow: () => ({ offerTtlSeconds: 60 }),
+    getOrThrow: () => ({ offerTtlSeconds: 30 }),
   } as unknown as ConfigService;
   const service = new OrdersService(
     postgres as never,
@@ -140,6 +161,15 @@ describe('OrdersService.acceptOffer', () => {
         canonical_status: 'ASSIGNED',
         rider_profile_id: riderId,
         crn,
+        customer_name: 'Sender',
+        customer_phone: '9123456780',
+        stops: [
+          {
+            contact_name: 'Asha',
+            contact_phone: '9876543210',
+            stop_type: 'DROP',
+          },
+        ],
       },
     });
     expect(orders.compareAndSetStatus).toHaveBeenCalledWith(
@@ -154,7 +184,7 @@ describe('OrdersService.acceptOffer', () => {
   it('rejects an expired offer', async () => {
     const { service, orders } = build();
     orders.lockOffer.mockResolvedValue(
-      offer({ created_at: new Date(Date.now() - 5 * 60 * 1000) }),
+      offer({ created_at: new Date(Date.now() - 31 * 1000) }),
     );
     orders.countPendingOffers.mockResolvedValue(1);
     await expect(service.acceptOffer(auth(), offerId)).rejects.toBeInstanceOf(ApiError);

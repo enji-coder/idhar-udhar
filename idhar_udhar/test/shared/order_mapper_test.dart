@@ -346,6 +346,90 @@ void main() {
     expect(order.dropLongitude, 72.561);
   });
 
+  test('receiver comes from the offer when order details are missing', () {
+    final RiderOrder order = OrderMapper.toRiderOrder(
+      offer: RiderOffer(
+        offerId: '66666666-6666-4666-8666-666666666666',
+        orderId: '55555555-5555-4555-8555-555555555555',
+        status: 'PENDING',
+        createdAt: DateTime.utc(2026, 10, 8, 6),
+        receiverName: 'Asha',
+        receiverPhone: '9876543210',
+      ),
+    );
+    expect(order.receiverName, 'Asha');
+    expect(order.receiverPhone, '9876543210');
+    expect(order.decisionSeconds, 0);
+    expect(order.expiresAt, isNull);
+  });
+
+  test('a 30 second server expiry is the countdown, and a past one is zero', () {
+    final DateTime expiresAt = DateTime.now().add(const Duration(seconds: 30));
+    final RiderOrder fresh = OrderMapper.toRiderOrder(
+      offer: RiderOffer(
+        offerId: '66666666-6666-4666-8666-666666666666',
+        orderId: '55555555-5555-4555-8555-555555555555',
+        status: 'PENDING',
+        createdAt: DateTime.now(),
+        expiresAt: expiresAt,
+      ),
+    );
+    expect(fresh.decisionSeconds, inInclusiveRange(29, 30));
+    final RiderOrder expired = OrderMapper.toRiderOrder(
+      offer: RiderOffer(
+        offerId: '66666666-6666-4666-8666-666666666666',
+        orderId: '55555555-5555-4555-8555-555555555555',
+        status: 'PENDING',
+        createdAt: DateTime.now().subtract(const Duration(seconds: 40)),
+        expiresAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      ),
+    );
+    expect(expired.decisionSeconds, 0);
+  });
+
+  test('drop-stop contact wins over the offer, and blanks stay blank', () {
+    final RiderOrder order = OrderMapper.toRiderOrder(
+      offer: RiderOffer(
+        offerId: '66666666-6666-4666-8666-666666666666',
+        orderId: '55555555-5555-4555-8555-555555555555',
+        status: 'PENDING',
+        createdAt: DateTime.utc(2026, 10, 8, 6),
+        receiverName: 'Offer Name',
+        receiverPhone: '9000000000',
+      ),
+      order: ApiOrder(
+        orderId: '55555555-5555-4555-8555-555555555555',
+        displayId: 'IU-AMD-1',
+        canonicalStatus: 'ASSIGNED',
+        createdAt: DateTime.utc(2026, 10, 8, 6),
+        stops: const <ApiStop>[
+          ApiStop(
+            sequence: 1,
+            stopType: 'DROP',
+            addressText: 'Navrangpura',
+            latitude: 23.03,
+            longitude: 72.56,
+            contactName: 'Asha',
+            contactPhone: '9876543210',
+          ),
+        ],
+      ),
+    );
+    expect(order.receiverName, 'Asha');
+    expect(order.receiverPhone, '9876543210');
+
+    final RiderOrder missing = OrderMapper.toRiderOrder(
+      offer: RiderOffer(
+        offerId: '66666666-6666-4666-8666-666666666666',
+        orderId: '55555555-5555-4555-8555-555555555555',
+        status: 'PENDING',
+        createdAt: DateTime.utc(2026, 10, 8, 6),
+      ),
+    );
+    expect(missing.receiverName, isEmpty);
+    expect(missing.receiverPhone, isEmpty);
+  });
+
   test('offer duration is not invented when the server omits it', () {
     final RiderOrder order = OrderMapper.toRiderOrder(
       offer: RiderOffer(

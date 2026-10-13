@@ -59,7 +59,7 @@ process.env.OTP_MAX_REQUESTS_PER_HOUR = '100';
 process.env.OTP_HASH_PEPPER ??=
   'test-otp-hash-pepper-min-32-characters!';
 process.env.FARE_QUOTE_TTL_SECONDS ??= '900';
-process.env.OFFER_TTL_SECONDS ??= '300';
+process.env.OFFER_TTL_SECONDS ??= '30';
 process.env.PUSH_PROVIDER = 'capture';
 process.env.NOTIFICATION_WORKER_ENABLED = 'false';
 process.env.NOTIFICATION_MAX_ATTEMPTS ??= '3';

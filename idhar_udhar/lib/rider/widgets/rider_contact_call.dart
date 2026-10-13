@@ -20,7 +20,7 @@ class RiderContactCall extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String shown = name.trim().isEmpty ? '—' : name.trim();
+    final String shown = name.trim().isEmpty ? 'Not provided' : name.trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

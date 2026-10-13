@@ -64,6 +64,8 @@ export type RiderOfferListRow = OrderOfferRow & {
   drop_address: string | null;
   drop_latitude: string | null;
   drop_longitude: string | null;
+  receiver_name: string | null;
+  receiver_phone: string | null;
 };
 
 export type InsertStopInput = {
@@ -755,7 +757,9 @@ export class OrdersRepository {
         pickup.longitude::text AS pickup_longitude,
         dropoff.address_text AS drop_address,
         dropoff.latitude::text AS drop_latitude,
-        dropoff.longitude::text AS drop_longitude
+        dropoff.longitude::text AS drop_longitude,
+        dropoff.contact_name AS receiver_name,
+        dropoff.contact_phone AS receiver_phone
       FROM order_offers off
       JOIN orders o ON o.order_id = off.order_id
       LEFT JOIN order_fare_snapshots snap ON snap.order_id = o.order_id
@@ -768,7 +772,7 @@ export class OrdersRepository {
         LIMIT 1
       ) pickup ON TRUE
       LEFT JOIN LATERAL (
-        SELECT address_text, latitude, longitude
+        SELECT address_text, latitude, longitude, contact_name, contact_phone
         FROM order_stops
         WHERE order_id = o.order_id
           AND stop_type = 'DROP'

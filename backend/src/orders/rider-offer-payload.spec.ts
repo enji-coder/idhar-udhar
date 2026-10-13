@@ -34,6 +34,8 @@ describe('rider offer payload', () => {
           drop_address: 'Navrangpura, Ahmedabad',
           drop_latitude: '23.036000',
           drop_longitude: '72.561000',
+          receiver_name: 'Asha',
+          receiver_phone: '9876543210',
         },
       ]),
     };
@@ -83,5 +85,7 @@ describe('rider offer payload', () => {
     expect(offer.estimated_duration_seconds).toBe(plannedTripDurationSeconds(1.3));
     expect(offer.expires_at).toBe(new Date(createdAt.getTime() + 30_000).toISOString());
     expect(offer.offer_ttl_seconds).toBe(30);
+    expect(offer.receiver_name).toBe('Asha');
+    expect(offer.receiver_phone).toBe('9876543210');
   });
 });
