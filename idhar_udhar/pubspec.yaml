@@ -59,6 +59,8 @@
     firebase_messaging: ^16.7.0
 
     flutter_local_notifications: ^19.4.0
+    rider_offer_launch:
+      path: packages/rider_offer_launch
 
 
     url_launcher: ^6.3.1

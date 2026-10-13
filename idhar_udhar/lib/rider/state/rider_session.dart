@@ -197,6 +197,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       await _ref.read(pushTokenSyncProvider).unregisterOnLogout();
     } catch (_) {}
     await _auth.logout();
+    await RiderPrefs.setOnline(false);
     await RiderPrefs.clearLoggedIn();
     _ref.read(riderProfileStateProvider.notifier).state = RiderProfile.empty;
     _ref.read(riderVehicleProvider.notifier).state = VehicleInfo.empty;
@@ -224,6 +225,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     state = state.copyWith(onlineStatus: result.onlineStatus);
     _ref.read(riderOnlineProvider.notifier).state =
         result.onlineStatus == 'ONLINE';
+    await RiderPrefs.setOnline(result.onlineStatus == 'ONLINE');
   }
 
   Future<void> updateProfile({
@@ -370,6 +372,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
     );
     _ref.read(riderOnlineProvider.notifier).state =
         profile.onlineStatus == 'ONLINE';
+    await RiderPrefs.setOnline(profile.onlineStatus == 'ONLINE');
     final String formatted = formatRiderPhone(state.phone);
     final String languageLabel = _languageLabel(profile.preferredLanguage);
     final RiderProfile current = _ref.read(riderProfileStateProvider);

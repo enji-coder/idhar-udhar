@@ -1,0 +1,19 @@
+name: rider_offer_launch
+description: Brings the existing Rider activity forward after an offer notification is posted.
+publish_to: "none"
+version: 0.0.1
+
+environment:
+  sdk: ">=3.2.6 <4.0.0"
+  flutter: ">=3.16.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.idharudhar.rider_offer_launch
+        pluginClass: RiderOfferLaunchPlugin

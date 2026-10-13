@@ -7,6 +7,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:rider_offer_launch/rider_offer_launch.dart';
+
+import '../data/local/rider_prefs.dart';
 import 'rider_offer_diag.dart';
 import 'rider_offer_rules.dart';
 
@@ -100,11 +103,9 @@ Future<void> riderFirebaseBackgroundHandler(RemoteMessage message) async {
       reason: error.runtimeType.toString(),
     );
   }
+  final Map<String, String> data = _stringData(message.data);
   try {
-    await showRiderOfferAlert(
-      _stringData(message.data),
-      postSystemNotification: true,
-    );
+    await _postAlertThenBringForward(data);
   } catch (error) {
     riderOfferLog(
       'alert_failed',
@@ -166,7 +167,131 @@ Future<bool> riderFullScreenOffersAllowed() async {
     final bool? allowed =
         await _offerChannel.invokeMethod<bool>('canUseFullScreenIntent');
     return allowed ?? false;
+  } on MissingPluginException {
+    // The FCM background isolate has no activity channel. Still request the
+    // full-screen intent; Android ignores it unless that access is granted.
+    riderOfferLog('full_screen_intent', reason: 'channel_unavailable_requesting');
+    return true;
   } catch (_) {
+    return false;
+  }
+}
+
+/// Reads and clears the offer id used to bring this activity forward.
+/// A normal resume has no id and must not invent one.
+Future<String?> consumeRiderOfferLaunchId() async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return null;
+  }
+  try {
+    final String? offerId =
+        await _offerChannel.invokeMethod<String>('consumeLaunchOfferId');
+    final String id = (offerId ?? '').trim();
+    return id.isEmpty ? null : id;
+  } on MissingPluginException {
+    return null;
+  } catch (error) {
+    riderOfferLog(
+      'launch_offer_unavailable',
+      reason: error.runtimeType.toString(),
+    );
+    return null;
+  }
+}
+
+Future<void> _postAlertThenBringForward(Map<String, String> data) async {
+  final String offerId = (data['offer_id'] ?? '').trim();
+  final String? displaySkip = offerAlertSkipReason(
+    offerId: offerId,
+    expiresAtRaw: data['expires_at'],
+    now: DateTime.now(),
+  );
+  if (displaySkip != null) {
+    await showRiderOfferAlert(data, postSystemNotification: true);
+    return;
+  }
+  final bool loggedIn;
+  final bool online;
+  try {
+    loggedIn = await RiderPrefs.isLoggedIn();
+    online = await RiderPrefs.isOnline();
+  } catch (error) {
+    riderOfferLog(
+      'activity_launch_skipped',
+      offerId: offerId,
+      reason: error.runtimeType.toString(),
+    );
+    await showRiderOfferAlert(data, postSystemNotification: true);
+    return;
+  }
+  final bool sessionAllows = riderOfferActivityLaunchSkipReason(
+        notificationPosted: true,
+        loggedIn: loggedIn,
+        online: online,
+      ) ==
+      null;
+  final bool willLaunch = sessionAllows && await _overlayGranted();
+  if (!willLaunch) {
+    riderOfferLog(
+      'activity_launch_skipped',
+      offerId: offerId,
+      reason: sessionAllows
+          ? 'overlay_not_granted'
+          : (riderOfferActivityLaunchSkipReason(
+                notificationPosted: true,
+                loggedIn: loggedIn,
+                online: online,
+              ) ??
+              'not_eligible'),
+    );
+  }
+  final RiderOfferAlertOutcome outcome = await showRiderOfferAlert(
+    data,
+    postSystemNotification: true,
+    fullScreenIntent: riderOfferPostsFullScreenIntent(
+      willBringActivityForward: willLaunch,
+      platformAllowsFullScreenIntent:
+          willLaunch ? false : await riderFullScreenOffersAllowed(),
+    ),
+  );
+  if (outcome != RiderOfferAlertOutcome.posted || !willLaunch) {
+    return;
+  }
+  try {
+    final bool started = await RiderOfferLaunch.presentOffer(offerId);
+    riderOfferLog(
+      'activity_launch',
+      offerId: offerId,
+      reason: started ? 'started' : 'not_started',
+    );
+  } on MissingPluginException {
+    riderOfferLog(
+      'activity_launch_skipped',
+      offerId: offerId,
+      reason: 'channel_unavailable',
+    );
+  } catch (error) {
+    riderOfferLog(
+      'activity_launch_skipped',
+      offerId: offerId,
+      reason: error.runtimeType.toString(),
+    );
+  }
+}
+
+Future<bool> _overlayGranted() async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return false;
+  }
+  try {
+    return await RiderOfferLaunch.canDrawOverlays();
+  } on MissingPluginException {
+    return false;
+  } catch (error) {
+    riderOfferLog(
+      'overlay_check_failed',
+      reason: error.runtimeType.toString(),
+    );
     return false;
   }
 }
@@ -183,6 +308,7 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
   Map<String, String> data, {
   bool postSystemNotification = true,
   bool requestPermissionIfNeeded = false,
+  bool? fullScreenIntent,
 }) async {
   final String offerId = (data['offer_id'] ?? '').trim();
   final String? skip = offerAlertSkipReason(
@@ -221,7 +347,8 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
         ? RiderOfferAlertOutcome.permissionDenied
         : RiderOfferAlertOutcome.failed;
   }
-  final bool fsiAllowed = await riderFullScreenOffersAllowed();
+  final bool fsiAllowed =
+      fullScreenIntent ?? await riderFullScreenOffersAllowed();
   riderOfferLog(
     'local_notification_posting',
     offerId: offerId,

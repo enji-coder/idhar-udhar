@@ -44,7 +44,7 @@ void main() {
       find.byWidgetPredicate(
         (widget) =>
             widget is Text &&
-            RegExp(r'^\d{2}:\d{2}$').hasMatch(widget.data ?? ''),
+            RegExp(r'^\d+s$').hasMatch(widget.data ?? ''),
       ),
       findsOneWidget,
     );

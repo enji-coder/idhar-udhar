@@ -2,6 +2,7 @@ import {
   CashfreePaymentService,
   cashfreeTransportErrorFields,
   defaultCashfreeHttp,
+  sanitizeCashfreeLogMessage,
 } from './cashfree-payment.service';
 
 describe('cashfreeTransportErrorFields', () => {
@@ -34,17 +35,74 @@ describe('cashfreeTransportErrorFields', () => {
   });
 });
 
+describe('sanitizeCashfreeLogMessage', () => {
+  it('redacts URL credentials, query strings, and secret assignments', () => {
+    const logged = sanitizeCashfreeLogMessage(
+      'fetch failed https://user:super_secret_value@payments.example/pg/orders?token=super_secret_value Authorization: Bearer super_secret_value x-client-secret=super_secret_value',
+    );
+    expect(logged).toBe(
+      'fetch failed https://***@payments.example/pg/orders Authorization=[redacted] x-client-secret=[redacted]',
+    );
+    expect(logged).not.toContain('super_secret_value');
+    expect(logged.length).toBeLessThanOrEqual(300);
+  });
+
+  it('redacts userinfo without a password, fragments, and bare queries', () => {
+    const logged = sanitizeCashfreeLogMessage(
+      'https://only_user@payments.example/path#access_fragment ?client_id=id_secret&token=query_secret',
+    );
+    expect(logged).toBe('https://***@payments.example/path ');
+    expect(logged).not.toContain('only_user');
+    expect(logged).not.toContain('access_fragment');
+    expect(logged).not.toContain('id_secret');
+    expect(logged).not.toContain('query_secret');
+  });
+
+  it('redacts quoted secrets, x-api-key, access tokens, and colon-form bearer/basic', () => {
+    const logged = sanitizeCashfreeLogMessage(
+      'failed "client_secret":"quoted_secret" x-api-key: api_secret access_token=token_secret Bearer: bearer_secret Basic: basic_secret',
+    );
+    expect(logged).not.toContain('quoted_secret');
+    expect(logged).not.toContain('api_secret');
+    expect(logged).not.toContain('token_secret');
+    expect(logged).not.toContain('bearer_secret');
+    expect(logged).not.toContain('basic_secret');
+    expect(logged).toContain('client_secret=[redacted]');
+    expect(logged).toContain('x-api-key=[redacted]');
+    expect(logged).toContain('access_token=[redacted]');
+    expect(logged).toContain('Bearer [redacted]');
+    expect(logged).toContain('Basic [redacted]');
+  });
+
+  it('redacts the same secret on a second call', () => {
+    const first = sanitizeCashfreeLogMessage('Bearer first_secret');
+    const second = sanitizeCashfreeLogMessage('Basic second_secret');
+    expect(first).toBe('Bearer [redacted]');
+    expect(second).toBe('Basic [redacted]');
+    expect(first + second).not.toContain('first_secret');
+    expect(second).not.toContain('second_secret');
+  });
+});
+
 describe('defaultCashfreeHttp', () => {
   it('logs allowlisted transport fields and preserves client ApiError', async () => {
     const warn = jest.fn();
     const fetchMock = jest
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(
-        Object.assign(new TypeError('fetch failed'), {
-          cause: Object.assign(new Error('connect ECONNREFUSED 1.2.3.4:443'), {
-            code: 'ECONNREFUSED',
-          }),
-        }),
+        Object.assign(
+          new TypeError(
+            'fetch failed https://user:super_secret_value@payments.example/pg/orders?token=super_secret_value',
+          ),
+          {
+            cause: Object.assign(
+              new Error(
+                'connect ECONNREFUSED 1.2.3.4:443 Authorization: Bearer super_secret_value',
+              ),
+              { code: 'ECONNREFUSED' },
+            ),
+          },
+        ),
       );
     try {
       await expect(
@@ -75,12 +133,15 @@ describe('defaultCashfreeHttp', () => {
         error_code: null,
         cause_name: 'Error',
         cause_code: 'ECONNREFUSED',
+        error_message: 'fetch failed https://***@payments.example/pg/orders',
+        cause_message:
+          'connect ECONNREFUSED 1.2.3.4:443 Authorization=[redacted]',
       });
       const logged = JSON.stringify(warn.mock.calls);
       expect(logged).not.toContain('super_secret_value');
       expect(logged).not.toContain('9876543210');
-      expect(logged).not.toContain('fetch failed');
-      expect(logged).not.toContain('1.2.3.4');
+      expect(logged).not.toContain('x-client-id');
+      expect(logged).not.toContain('customer_phone');
       expect(logged).not.toContain('api.cashfree.com');
     } finally {
       fetchMock.mockRestore();

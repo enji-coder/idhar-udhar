@@ -171,6 +171,38 @@ String? offerAlertSkipReason({
   return null;
 }
 
+/// A launch we start ourselves must not also ask Android to launch the activity.
+/// The notification still plays; this only suppresses the second full-screen launch.
+bool riderOfferPostsFullScreenIntent({
+  required bool willBringActivityForward,
+  required bool platformAllowsFullScreenIntent,
+}) {
+  if (willBringActivityForward) {
+    return false;
+  }
+  return platformAllowsFullScreenIntent;
+}
+
+/// Why a posted offer must not bring the Rider activity forward.
+/// Null means the notification was posted and the last saved session may show it.
+/// A missing login or availability flag fails closed.
+String? riderOfferActivityLaunchSkipReason({
+  required bool notificationPosted,
+  required bool loggedIn,
+  required bool online,
+}) {
+  if (!notificationPosted) {
+    return 'notification_not_posted';
+  }
+  if (!loggedIn) {
+    return 'signed_out';
+  }
+  if (!online) {
+    return 'not_online';
+  }
+  return null;
+}
+
 /// Foreground FCM opens the centered dialog. A notification tap, or a message
 /// handled while the app is not resumed, opens the incoming-order screen.
 bool riderOfferUsesForegroundDialog({

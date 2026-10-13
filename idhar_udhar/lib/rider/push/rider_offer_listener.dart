@@ -78,6 +78,9 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
   String? _routeAfterDialog;
 
+  /// Offer id from a background activity launch. While set, no other offer is opened.
+  String? _targetedOfferId;
+
 
 
   static const int _maxOfferFetchAttempts = 6;
@@ -104,11 +107,17 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       (RiderOfferPresentRequest request) {
 
+        if (request.action == 'open') {
+
+          _targetedOfferId = request.offerId;
+
+        }
+
         unawaited(
 
           _refreshAndPresent(
 
-            fromNotification: true,
+            fromNotification: request.action != 'open',
 
             offerId: request.offerId,
 
@@ -346,7 +355,35 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     if (state == AppLifecycleState.resumed) {
 
-      unawaited(_refreshAndPresent(fromNotification: false));
+      unawaited(_presentOnResume());
+
+    }
+
+  }
+
+
+
+  Future<void> _presentOnResume() async {
+
+    final String? launched = await consumeRiderOfferLaunchId();
+
+    if (launched != null) {
+
+      _targetedOfferId = launched;
+
+    }
+
+    await _refreshAndPresent(
+
+      fromNotification: false,
+
+      offerId: _targetedOfferId,
+
+    );
+
+    if (ref.read(riderSessionProvider).isAuthenticated) {
+
+      _targetedOfferId = null;
 
     }
 
@@ -874,7 +911,31 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       }
 
-      final RiderOffer? offer = _pendingOffer(next.offers);
+      final String? targeted = _targetedOfferId;
+
+      if ((targeted ?? '').isNotEmpty && !_appInForeground()) {
+
+        return;
+
+      }
+
+      final RiderOffer? offer = (targeted ?? '').isNotEmpty
+
+          ? riderOfferById(next.offers, targeted)
+
+          : _pendingOffer(next.offers);
+
+      if ((targeted ?? '').isNotEmpty && offer == null) {
+
+        return;
+
+      }
+
+      if ((targeted ?? '').isNotEmpty) {
+
+        _targetedOfferId = null;
+
+      }
 
       if (offer == null || _presented.contains(offer.offerId)) {
 

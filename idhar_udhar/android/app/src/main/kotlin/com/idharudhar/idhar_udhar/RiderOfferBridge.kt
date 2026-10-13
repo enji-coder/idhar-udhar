@@ -1,5 +1,6 @@
 package com.idharudhar.idhar_udhar
 
+import android.app.Activity
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -9,12 +10,13 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Full-screen intent check and a user-opened notification-channel screen.
- * Nothing here runs unless the rider taps a settings action.
+ * Full-screen intent check, the user-opened notification-channel screen,
+ * and the offer id from a background activity launch.
  */
 object RiderOfferBridge {
     private const val CHANNEL = "com.idharudhar.rider/offer_alerts"
     private const val OFFER_CHANNEL_ID = "rider_incoming_offers_v1"
+    const val OFFER_ID_EXTRA = "iu_offer_id"
 
     @JvmStatic
     fun register(engine: FlutterEngine, context: Context) {
@@ -22,6 +24,8 @@ object RiderOfferBridge {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "canUseFullScreenIntent" -> result.success(canUse(context))
+                    "consumeLaunchOfferId" ->
+                        result.success((context as? Activity)?.let(::consumeLaunchOfferId))
                     "openOfferChannelSettings" -> {
                         openChannelSettings(context)
                         result.success(true)
@@ -29,6 +33,15 @@ object RiderOfferBridge {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun consumeLaunchOfferId(activity: Activity): String? {
+        val id = activity.intent?.getStringExtra(OFFER_ID_EXTRA)?.trim().orEmpty()
+        if (id.isEmpty()) {
+            return null
+        }
+        activity.intent?.removeExtra(OFFER_ID_EXTRA)
+        return id
     }
 
     private fun canUse(context: Context): Boolean {

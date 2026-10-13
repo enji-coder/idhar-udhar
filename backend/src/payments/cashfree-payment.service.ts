@@ -33,6 +33,19 @@ type CashfreeTransportLogger = Pick<AppLogger, 'warn'>;
 
 const SAFE_ERROR_NAME = /^[A-Za-z][A-Za-z0-9._]{0,63}$/;
 const SAFE_ERROR_CODE = /^[A-Z0-9_]{1,64}$/;
+const CASHFREE_LOG_MESSAGE_MAX = 300;
+const URL_WITH_USERINFO =
+  /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi;
+const URL_QUERY_OR_FRAGMENT =
+  /\b([a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#][^\s]*/gi;
+const LOOSE_QUERY_OR_FRAGMENT = /[?#][^\s]*/g;
+const SECRET_VALUE = /(?:"[^"]*"|'[^']*'|\S+)/;
+const BEARER_OR_BASIC =
+  /\b(bearer|basic)\b(?:\s*[:=]\s*|\s+)(?:"[^"]*"|'[^']*'|\S+)/gi;
+const SECRET_ASSIGNMENT = new RegExp(
+  String.raw`\b((?:x-)?client[-_\s]?secret|(?:x-)?client[-_\s]?id|(?:x-)?api[-_\s]?key|(?:x-)?access[-_\s]?token|authorization)\b\s*["']?\s*[:=]\s*(?:(?:bearer|basic)\b\s+)?${SECRET_VALUE.source}`,
+  'gi',
+);
 
 /**
  * Allowlisted transport diagnostics only. Never includes message text, URLs,
@@ -67,6 +80,65 @@ export function cashfreeTransportErrorFields(err: unknown): {
     error_code: safeCode(err),
     cause_name: safeName(causeRaw),
     cause_code: safeCode(causeRaw),
+  };
+}
+
+function readErrorMessage(value: unknown): string | null {
+  if (value instanceof Error) {
+    return value.message;
+  }
+  return typeof value === 'string' ? value : null;
+}
+
+function redact(pattern: RegExp, value: string, replacement: string): string {
+  pattern.lastIndex = 0;
+  return value.replace(pattern, replacement);
+}
+
+/** Log text only. Strips URL credentials, queries, and secret assignments. */
+export function sanitizeCashfreeLogMessage(raw: string): string {
+  const text = redact(
+    SECRET_ASSIGNMENT,
+    redact(
+      BEARER_OR_BASIC,
+      redact(
+        LOOSE_QUERY_OR_FRAGMENT,
+        redact(
+          URL_QUERY_OR_FRAGMENT,
+          redact(URL_WITH_USERINFO, raw, '$1***@'),
+          '$1',
+        ),
+        '',
+      ),
+      '$1 [redacted]',
+    ),
+    '$1=[redacted]',
+  );
+  return text.length > CASHFREE_LOG_MESSAGE_MAX
+    ? text.slice(0, CASHFREE_LOG_MESSAGE_MAX)
+    : text;
+}
+
+function cashfreeTransportLogMessages(err: unknown): {
+  error_message: string | null;
+  cause_message: string | null;
+} {
+  const root = err instanceof Error ? err : null;
+  const cause =
+    root && 'cause' in root
+      ? (root as Error & { cause?: unknown }).cause
+      : undefined;
+  const message = readErrorMessage(root);
+  const causeMessage = readErrorMessage(cause);
+  return {
+    error_message:
+      message == null || message.length === 0
+        ? null
+        : sanitizeCashfreeLogMessage(message),
+    cause_message:
+      causeMessage == null || causeMessage.length === 0
+        ? null
+        : sanitizeCashfreeLogMessage(causeMessage),
   };
 }
 
@@ -111,6 +183,7 @@ export async function defaultCashfreeHttp(
       method: init.method,
       timeout_ms: init.timeoutMs,
       ...cashfreeTransportErrorFields(err),
+      ...cashfreeTransportLogMessages(err),
     });
     throw new ApiError(
       ErrorCodes.PAYMENT_GATEWAY_REJECTED,

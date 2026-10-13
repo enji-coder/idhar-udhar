@@ -89,6 +89,65 @@ void main() {
     );
   });
 
+  test('bringing the activity forward does not also request a full-screen launch', () {
+    expect(
+      riderOfferPostsFullScreenIntent(
+        willBringActivityForward: true,
+        platformAllowsFullScreenIntent: true,
+      ),
+      isFalse,
+    );
+    expect(
+      riderOfferPostsFullScreenIntent(
+        willBringActivityForward: false,
+        platformAllowsFullScreenIntent: true,
+      ),
+      isTrue,
+    );
+    expect(
+      riderOfferPostsFullScreenIntent(
+        willBringActivityForward: false,
+        platformAllowsFullScreenIntent: false,
+      ),
+      isFalse,
+    );
+  });
+
+  test('activity launch waits for a posted alert and a signed-in online rider', () {
+    expect(
+      riderOfferActivityLaunchSkipReason(
+        notificationPosted: false,
+        loggedIn: true,
+        online: true,
+      ),
+      'notification_not_posted',
+    );
+    expect(
+      riderOfferActivityLaunchSkipReason(
+        notificationPosted: true,
+        loggedIn: false,
+        online: true,
+      ),
+      'signed_out',
+    );
+    expect(
+      riderOfferActivityLaunchSkipReason(
+        notificationPosted: true,
+        loggedIn: true,
+        online: false,
+      ),
+      'not_online',
+    );
+    expect(
+      riderOfferActivityLaunchSkipReason(
+        notificationPosted: true,
+        loggedIn: true,
+        online: true,
+      ),
+      isNull,
+    );
+  });
+
   test('foreground FCM uses the dialog and a notification tap uses the screen', () {
     expect(
       riderOfferUsesForegroundDialog(

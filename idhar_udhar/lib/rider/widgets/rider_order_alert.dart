@@ -9,9 +9,6 @@ import '../push/rider_offer_rules.dart';
 import '../theme/rider_colors.dart';
 import '../theme/rider_spacing.dart';
 import '../theme/rider_text_styles.dart';
-import 'rider_glass_card.dart';
-import 'rider_primary_button.dart';
-import 'rider_secondary_button.dart';
 
 /// Centered incoming-offer dialog. It is only visible while the Rider app is
 /// in front. It does not draw over other apps.
@@ -151,9 +148,12 @@ class _RiderOfferDialogState extends State<_RiderOfferDialog> {
       return '—';
     }
     final int seconds = _secondsLeft!;
-    final String minutes = (seconds ~/ 60).toString().padLeft(2, '0');
-    final String remain = (seconds % 60).toString().padLeft(2, '0');
-    return '$minutes:$remain';
+    if (seconds >= 60) {
+      final String minutes = (seconds ~/ 60).toString().padLeft(2, '0');
+      final String remain = (seconds % 60).toString().padLeft(2, '0');
+      return '$minutes:$remain';
+    }
+    return '${seconds}s';
   }
 
   @override
@@ -162,90 +162,239 @@ class _RiderOfferDialogState extends State<_RiderOfferDialog> {
     final currency =
         NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     final bool actionsEnabled = !_expired && !_submitting;
+    final String fare = order.tripAmount > 0
+        ? currency.format(order.tripAmount)
+        : 'Not provided';
     return SafeArea(
       child: Center(
         child: Padding(
-          padding: const EdgeInsets.all(RiderSpacing.screenH),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Material(
             color: Colors.transparent,
-            child: RiderGlassCard(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.notifications_active_rounded,
-                        color: RiderColors.primary,
-                      ),
-                      const SizedBox(width: RiderSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          'New delivery request',
-                          style: RiderTextStyles.title,
-                        ),
-                      ),
-                      Text(
-                        _timerLabel,
-                        style: RiderTextStyles.title.copyWith(
-                          color: _expired
-                              ? RiderColors.error
-                              : RiderColors.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: RiderSpacing.lg),
-                  _line('Pickup', _shown(order.pickup)),
-                  const SizedBox(height: RiderSpacing.sm),
-                  _line('Drop', _shown(order.drop)),
-                  const SizedBox(height: RiderSpacing.sm),
-                  _line(
-                    'Trip fare',
-                    order.tripAmount > 0
-                        ? currency.format(order.tripAmount)
-                        : 'Not provided',
-                  ),
-                  const SizedBox(height: RiderSpacing.sm),
-                  _line('Distance', order.distanceLabel),
-                  const SizedBox(height: RiderSpacing.sm),
-                  _line('Time', order.etaLabel),
-                  if (_message != null) ...[
-                    const SizedBox(height: RiderSpacing.md),
-                    Text(
-                      _message!,
-                      style: RiderTextStyles.caption.copyWith(
-                        color: RiderColors.error,
-                      ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: RiderColors.textPrimary.withValues(alpha: 0.18),
+                      blurRadius: 28,
+                      offset: const Offset(0, 12),
                     ),
                   ],
-                  const SizedBox(height: RiderSpacing.xl),
-                  Row(
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: RiderSecondaryButton(
-                          label: 'Reject',
-                          destructive: true,
-                          onPressed: actionsEnabled
-                              ? () => unawaited(_run(widget.onReject))
-                              : null,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: RiderColors.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Icon(
+                                Icons.local_shipping_rounded,
+                                color: RiderColors.primary,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'IDHAR UDHAR Rider',
+                                  style: RiderTextStyles.title.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  'New Order Available!',
+                                  style: RiderTextStyles.bodyMedium.copyWith(
+                                    color: RiderColors.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: _expired
+                                  ? RiderColors.error
+                                  : RiderColors.primary,
+                              borderRadius: RiderRadius.pillAll,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              child: Text(
+                                _timerLabel,
+                                style: RiderTextStyles.caption.copyWith(
+                                  color: RiderColors.textOnPrimary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: RiderSpacing.md),
-                      Expanded(
-                        flex: 2,
-                        child: RiderPrimaryButton(
-                          label: _expired ? 'Expired' : 'Accept',
-                          onPressed: actionsEnabled
-                              ? () => unawaited(_run(widget.onAccept))
-                              : null,
+                      const SizedBox(height: 16),
+                      _stop(
+                        Icons.location_on_rounded,
+                        RiderColors.success,
+                        'Pickup',
+                        _shown(order.pickup),
+                      ),
+                      const SizedBox(height: 12),
+                      _stop(
+                        Icons.location_on_rounded,
+                        RiderColors.error,
+                        'Drop',
+                        _shown(order.drop),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 14),
+                        child: Divider(height: 1, color: RiderColors.border),
+                      ),
+                      Row(
+                        children: [
+                          _stat(Icons.route_rounded, order.distanceLabel, 'Distance'),
+                          _stat(Icons.schedule_rounded, order.etaLabel, 'Est. Time'),
+                          _stat(Icons.currency_rupee_rounded, fare, 'Trip Fare'),
+                        ],
+                      ),
+                      if (_message != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _message!,
+                          style: RiderTextStyles.caption.copyWith(
+                            color: RiderColors.error,
+                          ),
                         ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _actionButton(
+                              label: 'Reject',
+                              icon: Icons.close_rounded,
+                              color: RiderColors.error,
+                              onPressed: actionsEnabled
+                                  ? () => unawaited(_run(widget.onReject))
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _actionButton(
+                              label: _expired ? 'Expired' : 'Accept',
+                              icon: Icons.check_rounded,
+                              color: RiderColors.primary,
+                              onPressed: actionsEnabled
+                                  ? () => unawaited(_run(widget.onAccept))
+                                  : null,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _stop(IconData icon, Color color, String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: color, size: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: RiderTextStyles.caption),
+              Text(value, style: RiderTextStyles.bodyMedium),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static Widget _stat(IconData icon, String value, String label) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: RiderColors.primary, size: 18),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            textAlign: TextAlign.center,
+            style: RiderTextStyles.bodyMedium.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: RiderTextStyles.caption,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _actionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    final bool enabled = onPressed != null;
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: Material(
+        color: color,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            height: 48,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: RiderColors.textOnPrimary, size: 18),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: RiderTextStyles.bodyMedium.copyWith(
+                    color: RiderColors.textOnPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -258,13 +407,4 @@ class _RiderOfferDialogState extends State<_RiderOfferDialog> {
     return trimmed.isEmpty ? 'Not provided' : trimmed;
   }
 
-  static Widget _line(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: RiderTextStyles.caption),
-        Text(value, style: RiderTextStyles.bodyMedium),
-      ],
-    );
-  }
 }
