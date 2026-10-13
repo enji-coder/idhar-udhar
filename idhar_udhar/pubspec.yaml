@@ -57,7 +57,10 @@
     flutter_cashfree_pg_sdk: ^2.4.0+52
     firebase_core: ^4.15.0
     firebase_messaging: ^16.7.0
+
     flutter_local_notifications: ^19.4.0
+
+
     url_launcher: ^6.3.1
 
   dev_dependencies:

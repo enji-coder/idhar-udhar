@@ -4,8 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
-import '../../data/models/rider_order.dart';
 import '../../features/orders/external_navigation.dart';
+import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -232,6 +232,32 @@ class OrderDetailsScreen extends ConsumerWidget {
                   const SizedBox(height: RiderSpacing.lg),
                   Row(
                     children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                behavior: SnackBarBehavior.floating,
+                                backgroundColor: RiderColors.secondary,
+                                content: Text(
+                                  'Masked calling (demo)',
+                                  style: RiderTextStyles.bodyMedium.copyWith(
+                                    color: RiderColors.textOnPrimary,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.call_rounded),
+                          label: const Text('Call'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: RiderColors.primary,
+                            side: const BorderSide(color: RiderColors.primary),
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: RiderSpacing.md),
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () {
