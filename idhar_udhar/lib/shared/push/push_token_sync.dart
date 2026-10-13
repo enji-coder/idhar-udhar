@@ -256,7 +256,7 @@ class PushTokenSync {
   }
 
   void _debug(String message) {
-    if (kDebugMode) {
+    if (kDebugMode || requireFirebase) {
       debugPrint(message);
     }
   }

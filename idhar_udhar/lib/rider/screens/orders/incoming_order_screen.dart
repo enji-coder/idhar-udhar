@@ -100,7 +100,19 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       try {
         final details = await ref.read(riderApiProvider).getOrder(offer.orderId);
         mapped = OrderMapper.toRiderOrder(offer: offer, order: details);
-      } catch (_) {}
+      } on ApiException catch (error) {
+        riderOfferLog(
+          'order_details_failed',
+          offerId: offer.offerId,
+          reason: error.code,
+        );
+      } catch (error) {
+        riderOfferLog(
+          'order_details_failed',
+          offerId: offer.offerId,
+          reason: error.runtimeType.toString(),
+        );
+      }
       if (!mounted) {
         return;
       }
@@ -146,8 +158,8 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (!mounted) return;
-        final int left = expiresAt.difference(DateTime.now()).inSeconds.clamp(0, 86400);
-        if (left <= 0) {
+        final int? left = offerSecondsRemaining(expiresAt, DateTime.now());
+        if (left == null || left <= 0) {
           _timer?.cancel();
           setState(() {
             _secondsLeft = 0;
@@ -239,6 +251,9 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
   }
 
   String get _timerLabel {
+    if (_order?.expiresAt == null) {
+      return '—';
+    }
     final m = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
     final s = (_secondsLeft % 60).toString().padLeft(2, '0');
     return '$m:$s';
@@ -297,7 +312,19 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         try {
           details =
               await ref.read(riderApiProvider).getOrder(accepted.orderId);
-        } catch (_) {}
+        } on ApiException catch (error) {
+          riderOfferLog(
+            'order_details_failed',
+            offerId: offerId,
+            reason: error.code,
+          );
+        } catch (error) {
+          riderOfferLog(
+            'order_details_failed',
+            offerId: offerId,
+            reason: error.runtimeType.toString(),
+          );
+        }
       }
       if (!mounted) {
         return;
