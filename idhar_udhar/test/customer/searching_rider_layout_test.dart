@@ -44,7 +44,7 @@ void main() {
       await pumpAt(tester, size);
       expect(tester.takeException(), isNull);
       expect(find.text('Finding your rider'), findsOneWidget);
-      expect(find.text('Cancel Booking'), findsOneWidget);
+      expect(find.text('Cancel request'), findsOneWidget);
     });
   }
 }

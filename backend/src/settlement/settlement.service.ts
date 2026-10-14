@@ -4,6 +4,10 @@ import { ErrorCodes } from '../common/errors/error-codes';
 import { Queryable } from '../database/queryable';
 import { formatInr } from '../fare/money';
 import { OrderRow } from '../orders/orders.repository';
+import {
+  assessWaitingCharge,
+  elapsedSecondsBetween,
+} from './pickup-wait.math';
 import { SettlementRepository } from './settlement.repository';
 
 @Injectable()
@@ -145,6 +149,66 @@ export class SettlementService {
 
   async orderOutstanding(orderId: string, db: Queryable): Promise<string> {
     return this.repo.orderOutstanding(orderId, db);
+  }
+
+  /**
+   * Live pickup-wait view for the assigned rider.
+   * A persisted assessment wins. Otherwise the amount is a preview from
+   * server timestamps and the order fare snapshot. Nothing is inserted.
+   */
+  async previewPickupWait(orderId: string) {
+    const facts = await this.repo.loadPickupWaitFacts(orderId);
+    if (!facts) {
+      return null;
+    }
+    const serverNow = new Date(facts.server_now);
+    const arrivedAt = facts.arrived_at ? new Date(facts.arrived_at) : null;
+    const pickedUpAt = facts.picked_up_at ? new Date(facts.picked_up_at) : null;
+    const end = pickedUpAt ?? serverNow;
+    const elapsedSeconds =
+      arrivedAt == null ? null : elapsedSecondsBetween(arrivedAt, end);
+    const assessed = facts.assessed_amount != null;
+    const preview =
+      elapsedSeconds == null
+        ? null
+        : assessWaitingCharge({
+            elapsedSeconds,
+            initialWaitingMinutes: facts.initial_waiting_minutes,
+            perMinute: facts.waiting_charge_per_minute,
+          });
+    const initialWaitingMinutes = assessed
+      ? (facts.assessed_initial_waiting_minutes ?? facts.initial_waiting_minutes)
+      : facts.initial_waiting_minutes;
+    const perMinute = assessed
+      ? formatInr(
+          facts.assessed_waiting_charge_per_minute ??
+            facts.waiting_charge_per_minute,
+        )
+      : formatInr(facts.waiting_charge_per_minute);
+    return {
+      arrival_at: arrivedAt ? arrivedAt.toISOString() : null,
+      picked_up_at: pickedUpAt ? pickedUpAt.toISOString() : null,
+      server_now: serverNow.toISOString(),
+      timestamp_status: arrivedAt == null ? 'missing_arrival' : 'ok',
+      initial_waiting_minutes: initialWaitingMinutes,
+      waiting_charge_per_minute: perMinute,
+      elapsed_seconds: assessed
+        ? (facts.assessed_elapsed_minutes ?? 0) * 60
+        : elapsedSeconds,
+      elapsed_minutes: assessed
+        ? (facts.assessed_elapsed_minutes ?? 0)
+        : (preview?.elapsedMinutes ?? 0),
+      chargeable_minutes: assessed
+        ? (facts.assessed_chargeable_minutes ?? 0)
+        : (preview?.chargeableMinutes ?? 0),
+      amount: assessed
+        ? formatInr(facts.assessed_amount ?? '0')
+        : (preview?.amount ?? '0.00'),
+      amount_source: assessed ? 'assessed' : 'preview',
+      settlement_status: facts.assessed_settlement_status,
+      vehicle_category_name: facts.vehicle_category_name,
+      vehicle: facts.vehicle,
+    };
   }
 
   async waitingSummary(orderId: string, db: Queryable) {

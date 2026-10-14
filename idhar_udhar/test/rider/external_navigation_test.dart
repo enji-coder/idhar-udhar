@@ -93,7 +93,7 @@ void main() {
     );
   });
 
-  testWidgets('pickup navigation launches pickup coordinates and no status', (
+  testWidgets('pickup navigation stays in the app and sends no status', (
     tester,
   ) async {
     final _ScriptedRiderApi api = _ScriptedRiderApi();
@@ -103,21 +103,18 @@ void main() {
       status: DeliveryLifecycleStatus.goingToPickup,
     );
 
-    await tester.tap(find.text('Navigate to pickup'));
-    await tester.pumpAndSettle();
-
-    expect(launched, hasLength(1));
-    expect(launched.single.queryParameters['destination'], '23.0225,72.5714');
+    expect(find.text('ARRIVED AT PICKUP'), findsOneWidget);
+    expect(find.text('Head to the pickup location'), findsOneWidget);
+    expect(launched, isEmpty);
     expect(api.transitions, isEmpty);
     expect(api.gets, 0);
     expect(
       container.read(deliveryStatusProvider),
       DeliveryLifecycleStatus.goingToPickup,
     );
-    expect(find.text('Mark arrived at pickup'), findsOneWidget);
   });
 
-  testWidgets('drop navigation launches drop coordinates and no status', (
+  testWidgets('drop navigation stays in the app and sends no status', (
     tester,
   ) async {
     final _ScriptedRiderApi api = _ScriptedRiderApi();
@@ -125,13 +122,13 @@ void main() {
       tester,
       api: api,
       status: DeliveryLifecycleStatus.goingToDrop,
+      order: _order(vehicleName: 'Scooty'),
     );
 
-    await tester.tap(find.text('Navigate to drop'));
-    await tester.pumpAndSettle();
-
-    expect(launched, hasLength(1));
-    expect(launched.single.queryParameters['destination'], '23.036,72.561');
+    expect(find.text('ARRIVED AT DROP LOCATION'), findsOneWidget);
+    expect(find.text('Head to the drop location'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('vehicle-marker-scooter')), findsOneWidget);
+    expect(launched, isEmpty);
     expect(api.transitions, isEmpty);
     expect(api.gets, 0);
     expect(
@@ -148,22 +145,19 @@ void main() {
       status: DeliveryLifecycleStatus.goingToPickup,
       order: _order(pickupLatitude: null, pickupLongitude: null),
     );
-
-    await tester.tap(find.text('Navigate to pickup'));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(launched, isEmpty);
-    expect(find.text(externalNavigationCoordinatesMessage), findsOneWidget);
+    expect(
+      find.text('This stop does not have usable coordinates.'),
+      findsWidgets,
+    );
     expect(api.transitions, isEmpty);
   });
 
-  testWidgets('a failed map open shows an error and sends no status', (
+  testWidgets('package pickup keeps drop navigation inside the app', (
     tester,
   ) async {
-    externalMapLauncher = (Uri uri) async {
-      launched.add(uri);
-      return false;
-    };
     final _ScriptedRiderApi api = _ScriptedRiderApi();
     final ProviderContainer container = await _pumpActive(
       tester,
@@ -171,11 +165,8 @@ void main() {
       status: DeliveryLifecycleStatus.packagePickedUp,
     );
 
-    await tester.tap(find.text('Navigate to drop'));
-    await tester.pumpAndSettle();
-
-    expect(launched, hasLength(1));
-    expect(find.text(externalNavigationFailedMessage), findsOneWidget);
+    expect(find.text('START TRIP'), findsOneWidget);
+    expect(launched, isEmpty);
     expect(api.transitions, isEmpty);
     expect(
       container.read(deliveryStatusProvider),
@@ -192,8 +183,7 @@ void main() {
     await tester.tap(find.text('Start Delivery'));
     await tester.pumpAndSettle();
 
-    expect(launched, hasLength(1));
-    expect(launched.single.queryParameters['destination'], '23.0225,72.5714');
+    expect(launched, isEmpty);
     expect(find.text('Active delivery route'), findsOneWidget);
     expect(api.transitions, isEmpty);
     expect(api.gets, 0);
@@ -209,10 +199,8 @@ void main() {
     await tester.tap(find.text('Navigate'));
     await tester.pumpAndSettle();
 
-    expect(launched, hasLength(1));
-    expect(launched.single.queryParameters['destination'], '23.0225,72.5714');
-    expect(find.text('Start Delivery'), findsOneWidget);
-    expect(find.text('Active delivery route'), findsNothing);
+    expect(launched, isEmpty);
+    expect(find.text('Active delivery route'), findsOneWidget);
     expect(find.text('Navigation (demo)'), findsNothing);
     expect(api.transitions, isEmpty);
   });
@@ -322,6 +310,7 @@ RiderOrder _order({
   double? pickupLongitude = 72.5714,
   double? dropLatitude = 23.036,
   double? dropLongitude = 72.561,
+  String vehicleName = '',
 }) {
   return RiderOrder(
     id: 'IU-1',
@@ -333,6 +322,7 @@ RiderOrder _order({
     estimatedMinutes: 12,
     customerMaskedName: 'A.',
     customerMaskedPhone: '98XXXXXX10',
+    vehicleName: vehicleName,
     pickupLatitude: pickupLatitude,
     pickupLongitude: pickupLongitude,
     dropLatitude: dropLatitude,

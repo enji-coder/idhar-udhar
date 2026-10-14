@@ -72,6 +72,9 @@ abstract final class ApiErrorMapper {
   static const Set<String> _preferBackendMessage = <String>{
     'RIDER_NOT_ELIGIBLE',
     'PAYMENT_PROVIDER_UNAVAILABLE',
+    // Server text names the rejected status edge. Unsafe text still falls
+    // back to the generic sentence below.
+    'INVALID_TRANSITION',
   };
 
   static String userMessage(

@@ -316,6 +316,99 @@ Future<bool> _overlayGranted() async {
   }
 }
 
+/// Repeated tring for one offer. Safe to call again for the same id.
+///
+/// The ring stream follows the device ringer. Silent mode plays nothing.
+/// Vibrate mode vibrates without sound. Do Not Disturb is not bypassed:
+/// the in-app tone does not play while an interruption filter is active.
+/// A killed process stops the loop; the notification channel can still play
+/// its one-shot sound when Android delivers the notification.
+Future<bool> beginRiderOfferSound({
+  required String offerId,
+  String? expiresAtRaw,
+}) async {
+  final String id = offerId.trim();
+  if (id.isEmpty || kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return false;
+  }
+  final DateTime? expiresAt = DateTime.tryParse((expiresAtRaw ?? '').trim());
+  if (expiresAt != null && !expiresAt.isAfter(DateTime.now())) {
+    return false;
+  }
+  try {
+    final bool started = await RiderOfferLaunch.startOfferAlert(
+      offerId: id,
+      expiresAtMillis: expiresAt?.millisecondsSinceEpoch,
+    );
+    riderOfferLog(
+      started ? 'offer_sound_started' : 'offer_sound_skipped',
+      offerId: id,
+    );
+    return started;
+  } on MissingPluginException {
+    riderOfferLog('offer_sound_skipped', offerId: id, reason: 'channel_unavailable');
+    return false;
+  } catch (error) {
+    riderOfferLog(
+      'offer_sound_failed',
+      offerId: id,
+      reason: error.runtimeType.toString(),
+    );
+    return false;
+  }
+}
+
+Future<void> endRiderOfferSound(String? offerId) async {
+  final String id = (offerId ?? '').trim();
+  if (id.isEmpty || kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return;
+  }
+  try {
+    await RiderOfferLaunch.stopOfferAlert(id);
+    riderOfferLog('offer_sound_stopped', offerId: id);
+  } on MissingPluginException {
+    return;
+  } catch (error) {
+    riderOfferLog(
+      'offer_sound_stop_failed',
+      offerId: id,
+      reason: error.runtimeType.toString(),
+    );
+  }
+}
+
+Future<void> playRiderOfferTick() async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return;
+  }
+  try {
+    await RiderOfferLaunch.playOfferTick();
+  } on MissingPluginException {
+    return;
+  } catch (_) {
+    // A missed tick must not break the countdown.
+  }
+}
+
+Future<void> setRiderOfferScreenAwake(bool awake) async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return;
+  }
+  try {
+    await _offerChannel.invokeMethod<void>(
+      'setOfferScreenAwake',
+      <String, bool>{'awake': awake},
+    );
+  } on MissingPluginException {
+    return;
+  } catch (error) {
+    riderOfferLog(
+      'offer_screen_awake_failed',
+      reason: error.runtimeType.toString(),
+    );
+  }
+}
+
 Future<void> openRiderFullScreenOfferSettings() async {
   await ensureRiderOfferAlerts();
   final AndroidFlutterLocalNotificationsPlugin? androidPlugin =
@@ -378,6 +471,12 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
       ? 'New delivery request'
       : data['title']!.trim();
   _alertedOfferIds.add(offerId);
+  // In-app loop is the repeated tring. The channel still plays its one-shot
+  // sound for a heads-up when the process cannot keep the loop running.
+  await beginRiderOfferSound(
+    offerId: offerId,
+    expiresAtRaw: data['expires_at'],
+  );
   try {
     await _plugin.show(
     _notificationId(offerId),
@@ -394,32 +493,20 @@ Future<RiderOfferAlertOutcome> showRiderOfferAlert(
         visibility: NotificationVisibility.public,
         // The OS shows the activity only when full-screen access is allowed.
         // Otherwise this stays a high-importance heads-up notification.
+        // Acceptance is the slide control on that screen, not a notification tap.
         fullScreenIntent: fsiAllowed,
         timeoutAfter: window.timeoutAfterMs,
         playSound: true,
         enableVibration: true,
         ticker: 'New delivery request',
         styleInformation: BigTextStyleInformation(_alertBody(data)),
-        actions: const <AndroidNotificationAction>[
-          AndroidNotificationAction(
-            'reject',
-            'Reject',
-            showsUserInterface: true,
-            cancelNotification: true,
-          ),
-          AndroidNotificationAction(
-            'accept',
-            'Accept',
-            showsUserInterface: true,
-            cancelNotification: true,
-          ),
-        ],
       ),
     ),
     payload: offerId,
     );
   } catch (error) {
     _alertedOfferIds.remove(offerId);
+    await endRiderOfferSound(offerId);
     riderOfferLog(
       'local_notification_failed',
       offerId: offerId,
@@ -470,6 +557,7 @@ Future<void> cancelRiderOfferAlert(String? offerId) async {
     return;
   }
   _alertedOfferIds.remove(id);
+  await endRiderOfferSound(id);
   if (!_ready) {
     return;
   }

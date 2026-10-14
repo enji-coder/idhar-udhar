@@ -552,6 +552,30 @@ export class OrdersService {
     });
   }
 
+  async riderPickupWait(auth: OrderActor, orderId: string) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider access is required', 403);
+    }
+    const order = await this.requireOrder(orderId);
+    const riderProfileId = await this.canonicalRiderProfileId(auth);
+    if (order.rider_profile_id !== riderProfileId) {
+      throw new ApiError(
+        ErrorCodes.FORBIDDEN,
+        'Rider is not assigned to this order',
+        403,
+      );
+    }
+    const preview = await this.settlement.previewPickupWait(order.order_id);
+    if (!preview) {
+      throw new ApiError(
+        ErrorCodes.FARE_NOT_CONFIRMED,
+        'Waiting rules for this order are not available',
+        409,
+      );
+    }
+    return preview;
+  }
+
   async transition(
     auth: OrderActor,
     orderId: string,

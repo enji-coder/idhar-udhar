@@ -51,6 +51,15 @@ export class RiderOrdersController {
   }
 
   @Roles('RIDER')
+  @Get('orders/:id/pickup-wait')
+  pickupWait(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.orders.riderPickupWait(auth, id);
+  }
+
+  @Roles('RIDER')
   @Get('orders/:id')
   getOrder(
     @CurrentAuth() auth: AuthContext,

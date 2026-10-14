@@ -20,7 +20,7 @@ import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
-import '../../push/rider_offer_diag.dart';
+import '../../push/rider_accept_flow.dart';
 import '../../push/rider_offer_rules.dart';
 import '../../routing/rider_routes.dart';
 import '../../screens/earnings/rider_income_screen.dart';
@@ -367,8 +367,7 @@ class _HomeTab extends ConsumerWidget {
                       }
                     }());
                   },
-                  onAccept: () {
-                    unawaited(() async {
+                  onAccept: () async {
                       if (!ref.read(riderSessionProvider).isApproved) {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -415,43 +414,17 @@ class _HomeTab extends ConsumerWidget {
                         return;
                       }
                       try {
-                        final accepted = await ref
-                            .read(riderApiProvider)
-                            .acceptOffer(offerId);
-                        if (!context.mounted) return;
-                        var details = accepted;
-                        if (accepted.orderId.isNotEmpty) {
-                          try {
-                            details = await ref
-                                .read(riderApiProvider)
-                                .getOrder(accepted.orderId);
-                          } on ApiException catch (error) {
-                            riderOfferLog(
-                              'order_details_failed',
-                              offerId: offerId,
-                              reason: error.code,
-                            );
-                          } catch (error) {
-                            riderOfferLog(
-                              'order_details_failed',
-                              offerId: offerId,
-                              reason: error.runtimeType.toString(),
-                            );
-                          }
-                        }
-                        if (!context.mounted) return;
-                        ref.read(activeOrderProvider.notifier).state =
-                            OrderMapper.toRiderOrder(
+                        final RiderOrder accepted = await loadOrderAfterAccept(
+                          api: ref.read(riderApiProvider),
                           offer: pendingOffer!,
-                          order: details,
                         );
-                        ref.read(deliveryStatusProvider.notifier).state =
-                            DeliveryLifecycleStatus.accepted;
-                        await ref
-                            .read(riderSessionProvider.notifier)
-                            .refreshOffers();
                         if (!context.mounted) return;
-                        unawaited(context.push(RiderRoutes.acceptConfirmation));
+                        final String route = await publishAcceptedOrder(
+                          ref: ref,
+                          order: accepted,
+                        );
+                        if (!context.mounted) return;
+                        context.go(route);
                       } on ApiException catch (error) {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -461,7 +434,6 @@ class _HomeTab extends ConsumerWidget {
                           ref.read(riderSessionProvider.notifier).refreshOffers(),
                         );
                       }
-                    }());
                   },
                 ),
               ],
@@ -884,7 +856,7 @@ class _IncomingOrderCard extends StatefulWidget {
   final RiderOrder order;
   final NumberFormat currency;
   final VoidCallback onReject;
-  final VoidCallback onAccept;
+  final Future<void> Function() onAccept;
 
   @override
   State<_IncomingOrderCard> createState() => _IncomingOrderCardState();
@@ -893,6 +865,7 @@ class _IncomingOrderCard extends StatefulWidget {
 class _IncomingOrderCardState extends State<_IncomingOrderCard> {
   Timer? _timer;
   int? _secondsLeft;
+  bool _accepting = false;
 
   @override
   void initState() {
@@ -944,12 +917,25 @@ class _IncomingOrderCardState extends State<_IncomingOrderCard> {
     return '$minutes:$seconds';
   }
 
+  Future<void> _accept() async {
+    if (_accepting) {
+      return;
+    }
+    setState(() => _accepting = true);
+    try {
+      await widget.onAccept();
+    } finally {
+      if (mounted) {
+        setState(() => _accepting = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final RiderOrder order = widget.order;
     final NumberFormat currency = widget.currency;
     final VoidCallback onReject = widget.onReject;
-    final VoidCallback onAccept = widget.onAccept;
     final bool expired = _secondsLeft == 0;
     final String? countdown = _countdownLabel;
     return Material(
@@ -1067,8 +1053,10 @@ class _IncomingOrderCardState extends State<_IncomingOrderCard> {
                     flex: 2,
                     child: RiderPrimaryButton(
                       label: expired ? 'Expired' : 'Accept',
-                      enabled: !expired,
-                      onPressed: expired ? null : onAccept,
+                      enabled: !expired && !_accepting,
+                      onPressed: expired || _accepting
+                          ? null
+                          : () => unawaited(_accept()),
                     ),
                   ),
                 ],

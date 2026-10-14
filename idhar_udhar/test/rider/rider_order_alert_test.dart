@@ -11,6 +11,7 @@ void main() {
   ) async {
     final Completer<String?> acceptGate = Completer<String?>();
     var accepts = 0;
+    var rejects = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -24,7 +25,10 @@ void main() {
                     accepts += 1;
                     return acceptGate.future;
                   },
-                  onReject: () async => 'not used',
+                  onReject: () async {
+                    rejects += 1;
+                    return 'not used';
+                  },
                 );
               },
               child: const Text('open'),
@@ -39,21 +43,25 @@ void main() {
 
     expect(find.text('CG Road'), findsOneWidget);
     expect(find.text('Navrangpura'), findsOneWidget);
-    expect(find.text('₹500'), findsOneWidget);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Text &&
-            RegExp(r'^\d+s$').hasMatch(widget.data ?? ''),
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Rs. 500'), findsOneWidget);
+    expect(find.text('Distance'), findsOneWidget);
+    expect(find.text('ETA'), findsOneWidget);
+    expect(find.text('Trip Fare'), findsOneWidget);
+    expect(find.text('Reject'), findsOneWidget);
+    expect(find.text('Accept'), findsOneWidget);
+    final int started = _secondsShowing(tester);
+    expect(started, inInclusiveRange(1, 30));
+    await tester.pump();
+    expect(_secondsShowing(tester), started);
 
     await tester.tap(find.text('Accept'));
     await tester.pump();
     await tester.tap(find.text('Accept'));
     await tester.pump();
+    await tester.tap(find.text('Reject'));
+    await tester.pump();
     expect(accepts, 1);
+    expect(rejects, 0);
 
     acceptGate.complete(null);
     await tester.pump();
@@ -93,11 +101,52 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Expired'), findsOneWidget);
-    await tester.tap(find.text('Expired'));
+    expect(find.text('0s'), findsOneWidget);
+    await tester.tap(find.text('Accept'));
     await tester.tap(find.text('Reject'));
     await tester.pump();
     expect(taps, 0);
+  });
+
+  testWidgets('reject uses the reject callback and blocks a second tap', (
+    tester,
+  ) async {
+    final Completer<String?> rejectGate = Completer<String?>();
+    var rejects = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return TextButton(
+              onPressed: () {
+                RiderOrderAlert.show(
+                  context,
+                  order: _order(DateTime.now().add(const Duration(seconds: 30))),
+                  onAccept: () async => 'not used',
+                  onReject: () {
+                    rejects += 1;
+                    return rejectGate.future;
+                  },
+                );
+              },
+              child: const Text('open'),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Reject'));
+    await tester.pump();
+    await tester.tap(find.text('Reject'));
+    await tester.pump();
+    expect(rejects, 1);
+    rejectGate.complete(null);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('CG Road'), findsNothing);
   });
 
   testWidgets('a missing pickup is not invented', (tester) async {
@@ -126,8 +175,19 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Not provided'), findsOneWidget);
+    expect(find.text('—'), findsWidgets);
+    expect(find.textContaining('CG Road'), findsNothing);
   });
+}
+
+int _secondsShowing(WidgetTester tester) {
+  final Text timer = tester.widget<Text>(
+    find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is Text && RegExp(r'^\d+s$').hasMatch(widget.data ?? ''),
+    ),
+  );
+  return int.parse(timer.data!.replaceAll('s', ''));
 }
 
 RiderOrder _order(DateTime expiresAt, {String pickup = 'CG Road'}) {

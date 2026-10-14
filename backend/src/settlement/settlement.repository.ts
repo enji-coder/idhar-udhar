@@ -450,4 +450,71 @@ export class SettlementRepository {
       [orderId],
     );
   }
+
+  /**
+   * Read-only pickup-wait facts. Does not insert a charge.
+   * The persisted assessment remains assessPickup at PICKED_UP.
+   */
+  async loadPickupWaitFacts(
+    orderId: string,
+    db: Queryable = this.postgres,
+  ): Promise<PickupWaitFacts | null> {
+    const result = await db.query<PickupWaitFacts>(
+      `
+      SELECT
+        s.initial_waiting_minutes,
+        s.waiting_charge_per_minute::text AS waiting_charge_per_minute,
+        arrived.created_at AS arrived_at,
+        picked.created_at AS picked_up_at,
+        now() AS server_now,
+        categories.name AS vehicle_category_name,
+        categories.vehicle AS vehicle,
+        waiting.amount::text AS assessed_amount,
+        waiting.chargeable_minutes AS assessed_chargeable_minutes,
+        waiting.elapsed_minutes AS assessed_elapsed_minutes,
+        waiting.settlement_status AS assessed_settlement_status,
+        waiting.initial_waiting_minutes AS assessed_initial_waiting_minutes,
+        waiting.waiting_charge_per_minute::text AS assessed_waiting_charge_per_minute
+      FROM order_fare_snapshots s
+      JOIN orders o ON o.order_id = s.order_id
+      LEFT JOIN vehicle_categories categories
+        ON categories.vehicle_category_id = o.vehicle_category_id
+      LEFT JOIN LATERAL (
+        SELECT created_at
+        FROM order_status_events
+        WHERE order_id = s.order_id AND to_status = 'ARRIVED_PICKUP'
+        ORDER BY created_at ASC
+        LIMIT 1
+      ) arrived ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT created_at
+        FROM order_status_events
+        WHERE order_id = s.order_id AND to_status = 'PICKED_UP'
+        ORDER BY created_at ASC
+        LIMIT 1
+      ) picked ON TRUE
+      LEFT JOIN order_waiting_charges waiting
+        ON waiting.order_id = s.order_id
+      WHERE s.order_id = $1
+      `,
+      [orderId],
+    );
+    return result.rows[0] ?? null;
+  }
 }
+
+export type PickupWaitFacts = {
+  initial_waiting_minutes: number;
+  waiting_charge_per_minute: string;
+  arrived_at: Date | null;
+  picked_up_at: Date | null;
+  server_now: Date;
+  vehicle_category_name: string | null;
+  vehicle: string | null;
+  assessed_amount: string | null;
+  assessed_chargeable_minutes: number | null;
+  assessed_elapsed_minutes: number | null;
+  assessed_settlement_status: 'OPEN' | 'SETTLED' | 'VOID' | null;
+  assessed_initial_waiting_minutes: number | null;
+  assessed_waiting_charge_per_minute: string | null;
+};

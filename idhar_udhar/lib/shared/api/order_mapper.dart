@@ -3,6 +3,7 @@ import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
 import 'package:idhar_udhar/rider/push/rider_offer_rules.dart';
 
+import 'api_exception.dart';
 import 'orders_api.dart';
 import 'rider_api.dart';
 
@@ -30,6 +31,37 @@ class RiderStatusAdvanceOutcome {
   final List<String> hopsSent;
 }
 
+/// Safe copy for a failed rider status advance.
+///
+/// A missing hop list is a client-side unsupported status. An
+/// [ApiException] is a server rejection. The failed hop is not sent again.
+String riderStatusAdvanceMessage(RiderStatusAdvanceOutcome outcome) {
+  final String status = (outcome.canonicalStatus ?? '').trim();
+  final String current = status.isEmpty ? 'unknown' : status;
+  final Object? failure = outcome.failure;
+  if (failure is ApiException) {
+    if (failure.code == 'INVALID_TRANSITION') {
+      final String backend = failure.message.trim().toLowerCase();
+      if (backend.contains('concurrent')) {
+        return 'The order changed while this step was sending. '
+            'It is now $current. Try the step that matches that status.';
+      }
+      if (failure.message.trim().isNotEmpty &&
+          failure.message != 'That order update is not allowed yet.') {
+        return '${failure.message.trim()} Current status: $current.';
+      }
+      return 'The server rejected this status change. '
+          'The order is currently $current. Try the step that matches it.';
+    }
+    return failure.message;
+  }
+  if (!outcome.supported) {
+    return 'This order is $current, so that step is not available from here.';
+  }
+  return 'The order status could not be confirmed. '
+      'It is now $current. Try the current step again.';
+}
+
 /// Sends only the hops still ahead of the server status.
 ///
 /// A second call while one is running returns null and sends nothing.
@@ -40,6 +72,7 @@ class RiderStatusAdvance {
     required DeliveryLifecycleStatus target,
     required Future<String> Function() fetchStatus,
     required Future<String> Function(String hop) applyHop,
+    List<String>? Function(String serverStatus)? hopsOverride,
   }) async {
     if (_inFlight) {
       return null;
@@ -48,10 +81,12 @@ class RiderStatusAdvance {
     final List<String> sent = <String>[];
     try {
       final String serverStatus = await fetchStatus();
-      final List<String>? hops = OrderMapper.remainingRiderHops(
-        serverStatus: serverStatus,
-        target: target,
-      );
+      final List<String>? hops = hopsOverride == null
+          ? OrderMapper.remainingRiderHops(
+              serverStatus: serverStatus,
+              target: target,
+            )
+          : hopsOverride(serverStatus);
       if (hops == null) {
         return RiderStatusAdvanceOutcome(
           supported: false,
@@ -95,6 +130,24 @@ class RiderStatusAdvance {
     } finally {
       _inFlight = false;
     }
+  }
+
+  /// Stops at [targetStatus] on the happy path. Used for drop arrival,
+  /// which must not continue into delivery completion.
+  Future<RiderStatusAdvanceOutcome?> runToStatus({
+    required String targetStatus,
+    required Future<String> Function() fetchStatus,
+    required Future<String> Function(String hop) applyHop,
+  }) {
+    return run(
+      target: DeliveryLifecycleStatus.goingToDrop,
+      fetchStatus: fetchStatus,
+      applyHop: applyHop,
+      hopsOverride: (String serverStatus) => OrderMapper.remainingToCanonical(
+        serverStatus: serverStatus,
+        targetStatus: targetStatus,
+      ),
+    );
   }
 }
 
@@ -262,6 +315,18 @@ abstract final class OrderMapper {
       case DeliveryLifecycleStatus.accepted:
         return null;
     }
+  }
+
+  /// Happy-path hops that stop at [targetStatus]. Only NEAR_DROP is exposed
+  /// so arrival at drop cannot mark the order delivered.
+  static List<String>? remainingToCanonical({
+    required String serverStatus,
+    required String targetStatus,
+  }) {
+    if (targetStatus != 'NEAR_DROP') {
+      return null;
+    }
+    return _remainingOn(_happyPathStatuses, serverStatus, 'NEAR_DROP');
   }
 
   static List<String>? _remainingOn(

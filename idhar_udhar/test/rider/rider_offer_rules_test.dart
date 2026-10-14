@@ -204,6 +204,29 @@ void main() {
     );
   });
 
+  test('offer popup keeps only the area and the city', () {
+    expect(
+      offerAreaCity(
+        'A-102, Shivalik Shilp, Satellite, Ahmedabad, Gujarat 380015, India',
+      ).area,
+      'Satellite',
+    );
+    expect(
+      offerAreaCity(
+        'A-102, Shivalik Shilp, Satellite, Ahmedabad, Gujarat 380015, India',
+      ).city,
+      'Ahmedabad',
+    );
+    final OfferAreaCity drop = offerAreaCity('Bopal, Ahmedabad');
+    expect(drop.area, 'Bopal');
+    expect(drop.city, 'Ahmedabad');
+    expect(offerAreaCity('Navrangpura').area, 'Navrangpura');
+    expect(offerAreaCity('Navrangpura').city, '');
+    expect(offerAreaCity('').area, '');
+    expect(offerAreaCity('23.0225, 72.5714').area, '');
+    expect(offerAreaCity('380015').area, '');
+  });
+
   test('accepted order keeps offer duration and prefers server fare and distance', () {
     final RiderOffer active = _offer(
       'offer-a',

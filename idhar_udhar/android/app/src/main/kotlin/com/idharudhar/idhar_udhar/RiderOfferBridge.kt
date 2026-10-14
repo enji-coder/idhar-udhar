@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -16,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 object RiderOfferBridge {
     private const val CHANNEL = "com.idharudhar.rider/offer_alerts"
     private const val OFFER_CHANNEL_ID = "rider_incoming_offers_v1"
+    private const val RIDER_PACKAGE = "com.idharudhar.rider"
     const val OFFER_ID_EXTRA = "iu_offer_id"
 
     @JvmStatic
@@ -30,6 +32,11 @@ object RiderOfferBridge {
                         openChannelSettings(context)
                         result.success(true)
                     }
+                    "setOfferScreenAwake" -> {
+                        val awake = call.argument<Boolean>("awake") == true
+                        setOfferScreenAwake(context, awake)
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -42,6 +49,43 @@ object RiderOfferBridge {
         }
         activity.intent?.removeExtra(OFFER_ID_EXTRA)
         return id
+    }
+
+    /**
+     * Lock-screen presentation for the Rider activity.
+     *
+     * API 27+ already declares showWhenLocked and turnScreenOn on the Rider
+     * manifest. Older APIs ignore those attributes, so the same flags are
+     * applied here. This does not grant full-screen-intent access: Android 14+
+     * still requires the user to allow that special access, and a denied
+     * full-screen intent stays a heads-up notification.
+     */
+    fun prepareIncomingOfferWindow(activity: Activity) {
+        if (activity.packageName != RIDER_PACKAGE) {
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            activity.setShowWhenLocked(true)
+            activity.setTurnScreenOn(true)
+            return
+        }
+        @Suppress("DEPRECATION")
+        activity.window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+        )
+    }
+
+    private fun setOfferScreenAwake(context: Context, awake: Boolean) {
+        val activity = context as? Activity ?: return
+        if (activity.packageName != RIDER_PACKAGE) {
+            return
+        }
+        if (awake) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     private fun canUse(context: Context): Boolean {

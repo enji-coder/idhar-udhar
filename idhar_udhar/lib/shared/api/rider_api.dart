@@ -125,6 +125,71 @@ class RiderOffer {
   }
 }
 
+class PickupWaitSnapshot {
+  const PickupWaitSnapshot({
+    required this.arrivalAt,
+    required this.pickedUpAt,
+    required this.serverNow,
+    required this.timestampStatus,
+    required this.initialWaitingMinutes,
+    required this.perMinute,
+    required this.elapsedSeconds,
+    required this.elapsedMinutes,
+    required this.chargeableMinutes,
+    required this.amount,
+    required this.amountSource,
+    required this.vehicleCategoryName,
+  });
+
+  final DateTime? arrivalAt;
+  final DateTime? pickedUpAt;
+  final DateTime serverNow;
+  final String timestampStatus;
+  final int initialWaitingMinutes;
+  final String perMinute;
+  final int? elapsedSeconds;
+  final int elapsedMinutes;
+  final int chargeableMinutes;
+  final String amount;
+  final String amountSource;
+  final String vehicleCategoryName;
+
+  factory PickupWaitSnapshot.fromJson(Map<String, Object?> json) {
+    return PickupWaitSnapshot(
+      arrivalAt: _time(json['arrival_at']),
+      pickedUpAt: _time(json['picked_up_at']),
+      serverNow: _time(json['server_now']) ?? DateTime.now().toUtc(),
+      timestampStatus: jsonString(json['timestamp_status']) ?? 'missing_arrival',
+      initialWaitingMinutes: json['initial_waiting_minutes'] is num
+          ? (json['initial_waiting_minutes'] as num).toInt()
+          : 0,
+      perMinute: jsonString(json['waiting_charge_per_minute']) ?? '0.00',
+      elapsedSeconds: json['elapsed_seconds'] is num
+          ? (json['elapsed_seconds'] as num).toInt()
+          : null,
+      elapsedMinutes: json['elapsed_minutes'] is num
+          ? (json['elapsed_minutes'] as num).toInt()
+          : 0,
+      chargeableMinutes: json['chargeable_minutes'] is num
+          ? (json['chargeable_minutes'] as num).toInt()
+          : 0,
+      amount: jsonString(json['amount']) ?? '0.00',
+      amountSource: jsonString(json['amount_source']) ?? 'preview',
+      vehicleCategoryName: jsonString(json['vehicle_category_name']) ?? '',
+    );
+  }
+
+  bool get arrivalMissing => timestampStatus != 'ok' || arrivalAt == null;
+}
+
+DateTime? _time(Object? value) {
+  final String? text = jsonString(value);
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  return DateTime.tryParse(text)?.toUtc();
+}
+
 class RiderApi {
   RiderApi(this._client);
 
@@ -153,6 +218,12 @@ class RiderApi {
 
   Future<ApiOrder> getOrder(String orderId) async {
     return ApiOrder.fromJson(await _client.get('/v1/rider/orders/$orderId'));
+  }
+
+  Future<PickupWaitSnapshot> getPickupWait(String orderId) async {
+    return PickupWaitSnapshot.fromJson(
+      await _client.get('/v1/rider/orders/$orderId/pickup-wait'),
+    );
   }
 
   /// Existing payment view. Null when the body has no usable allocation.

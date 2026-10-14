@@ -155,6 +155,119 @@ String _minutesLabel(int seconds) {
   ).etaLabel;
 }
 
+/// Locality and city parsed from a stored stop address.
+///
+/// Booking addresses are a comma-separated Google line, sometimes prefixed
+/// with a house or building. The popup shows only the area and the city.
+class OfferAreaCity {
+  const OfferAreaCity({required this.area, required this.city});
+
+  final String area;
+  final String city;
+}
+
+OfferAreaCity offerAreaCity(String raw) {
+  final String trimmed = raw.trim();
+  if (trimmed.isEmpty || _isCoordinatePair(trimmed)) {
+    return const OfferAreaCity(area: '', city: '');
+  }
+  final List<String> kept = <String>[];
+  for (final String part in trimmed.split(RegExp(r'[,|]'))) {
+    final String token = _stripPin(part);
+    if (token.isEmpty || _isAddressNoise(token)) {
+      continue;
+    }
+    kept.add(token);
+  }
+  if (kept.isEmpty) {
+    return const OfferAreaCity(area: '', city: '');
+  }
+  if (kept.length == 1) {
+    return OfferAreaCity(area: kept.single, city: '');
+  }
+  return OfferAreaCity(
+    area: kept[kept.length - 2],
+    city: kept.last,
+  );
+}
+
+const Set<String> _addressAdmin = <String>{
+  'india',
+  'bharat',
+  'andhra pradesh',
+  'arunachal pradesh',
+  'assam',
+  'bihar',
+  'chhattisgarh',
+  'goa',
+  'gujarat',
+  'haryana',
+  'himachal pradesh',
+  'jharkhand',
+  'karnataka',
+  'kerala',
+  'madhya pradesh',
+  'maharashtra',
+  'manipur',
+  'meghalaya',
+  'mizoram',
+  'nagaland',
+  'odisha',
+  'orissa',
+  'punjab',
+  'rajasthan',
+  'sikkim',
+  'tamil nadu',
+  'telangana',
+  'tripura',
+  'uttar pradesh',
+  'uttarakhand',
+  'west bengal',
+  'delhi',
+  'nct of delhi',
+  'jammu and kashmir',
+  'ladakh',
+  'lakshadweep',
+  'andaman and nicobar islands',
+  'dadra and nagar haveli',
+  'daman and diu',
+  'dadra and nagar haveli and daman and diu',
+};
+
+final RegExp _pinCode = RegExp(r'\b\d{5,6}\b');
+final RegExp _plusCode = RegExp(
+  r'^[23456789cfghjmpqrvwx]{4,}\+[23456789cfghjmpqrvwx]{2,}$',
+  caseSensitive: false,
+);
+final RegExp _houseToken = RegExp(r'^(\d+[a-zA-Z]?|[a-zA-Z]-?\d+[a-zA-Z]?)$');
+final RegExp _coordinateToken = RegExp(r'^-?\d{1,3}\.\d+$');
+final RegExp _coordinatePair = RegExp(
+  r'^-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+$',
+);
+
+String _stripPin(String token) {
+  return token
+      .replaceAll(_pinCode, '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+bool _isCoordinatePair(String value) => _coordinatePair.hasMatch(value);
+
+bool _isAddressNoise(String token) {
+  final String key = token.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (key.length < 2) {
+    return true;
+  }
+  if (_addressAdmin.contains(key) || key == 'unnamed road') {
+    return true;
+  }
+  if (_plusCode.hasMatch(token) || _coordinateToken.hasMatch(token)) {
+    return true;
+  }
+  return _houseToken.hasMatch(token);
+}
+
 /// Why a data message cannot be shown. Null means the payload is displayable.
 String? offerAlertSkipReason({
   required String? offerId,

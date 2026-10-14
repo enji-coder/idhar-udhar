@@ -37,6 +37,30 @@ void main() {
     );
   });
 
+  test('drop arrival stops at NEAR_DROP and does not deliver', () {
+    expect(
+      OrderMapper.remainingToCanonical(
+        serverStatus: 'IN_TRANSIT',
+        targetStatus: 'NEAR_DROP',
+      ),
+      <String>['NEAR_DROP'],
+    );
+    expect(
+      OrderMapper.remainingToCanonical(
+        serverStatus: 'NEAR_DROP',
+        targetStatus: 'NEAR_DROP',
+      ),
+      isEmpty,
+    );
+    expect(
+      OrderMapper.remainingToCanonical(
+        serverStatus: 'IN_TRANSIT',
+        targetStatus: 'DELIVERED',
+      ),
+      isNull,
+    );
+  });
+
   test('NEAR_DROP does not replay itself on the way to delivered', () {
     expect(
       OrderMapper.remainingRiderHops(
@@ -592,5 +616,87 @@ void main() {
       isNull,
     );
     expect(base.receiverCash, 0);
+  });
+
+  test('ASSIGNED arrival walks EN_ROUTE_PICKUP then ARRIVED_PICKUP', () {
+    expect(
+      OrderMapper.remainingRiderHops(
+        serverStatus: 'ASSIGNED',
+        target: DeliveryLifecycleStatus.arrivedAtPickup,
+      ),
+      <String>['EN_ROUTE_PICKUP', 'ARRIVED_PICKUP'],
+    );
+  });
+
+  test('arrival sends both hops and stops when the first hop fails', () async {
+    final RiderStatusAdvance advance = RiderStatusAdvance();
+    final List<String> sent = <String>[];
+    var status = 'ASSIGNED';
+    final RiderStatusAdvanceOutcome? ok = await advance.run(
+      target: DeliveryLifecycleStatus.arrivedAtPickup,
+      fetchStatus: () async => status,
+      applyHop: (String hop) async {
+        sent.add(hop);
+        status = hop;
+        return status;
+      },
+    );
+    expect(ok!.completed, isTrue);
+    expect(sent, <String>['EN_ROUTE_PICKUP', 'ARRIVED_PICKUP']);
+
+    final RiderStatusAdvance failed = RiderStatusAdvance();
+    final List<String> failedSent = <String>[];
+    final RiderStatusAdvanceOutcome? blocked = await failed.run(
+      target: DeliveryLifecycleStatus.arrivedAtPickup,
+      fetchStatus: () async => 'ASSIGNED',
+      applyHop: (String hop) async {
+        failedSent.add(hop);
+        throw const ApiException(
+          code: 'INVALID_TRANSITION',
+          message: 'Transition ASSIGNED → EN_ROUTE_PICKUP is not allowed',
+        );
+      },
+    );
+    expect(failedSent, <String>['EN_ROUTE_PICKUP']);
+    expect(blocked!.completed, isFalse);
+    expect(blocked.canonicalStatus, 'ASSIGNED');
+  });
+
+  test('a concurrent status change is refreshed and not retried', () async {
+    final RiderStatusAdvance advance = RiderStatusAdvance();
+    final List<String> sent = <String>[];
+    var status = 'ASSIGNED';
+    var fetches = 0;
+    final RiderStatusAdvanceOutcome? outcome = await advance.run(
+      target: DeliveryLifecycleStatus.arrivedAtPickup,
+      fetchStatus: () async {
+        fetches += 1;
+        return status;
+      },
+      applyHop: (String hop) async {
+        sent.add(hop);
+        status = 'CANCELLED';
+        throw const ApiException(
+          code: 'INVALID_TRANSITION',
+          message: 'Order status changed concurrently',
+        );
+      },
+    );
+    expect(sent, <String>['EN_ROUTE_PICKUP']);
+    expect(fetches, 2);
+    expect(outcome!.canonicalStatus, 'CANCELLED');
+    expect(riderStatusAdvanceMessage(outcome), contains('CANCELLED'));
+    expect(riderStatusAdvanceMessage(outcome), contains('changed'));
+  });
+
+  test('an unsupported status is explained without a server rejection', () {
+    const RiderStatusAdvanceOutcome outcome = RiderStatusAdvanceOutcome(
+      supported: false,
+      completed: false,
+      canonicalStatus: 'OFFERED',
+    );
+    final String message = riderStatusAdvanceMessage(outcome);
+    expect(message, contains('OFFERED'));
+    expect(message, isNot(contains('That order update is not allowed yet.')));
   });
 }

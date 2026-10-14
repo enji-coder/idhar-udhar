@@ -57,7 +57,7 @@ void main() {
       ..payment = _onlinePayment();
     await _pumpDelivery(tester, api: api, order: _mappedOrder(riderAmount: 85));
 
-    await tester.tap(find.text('Mark as delivered'));
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
     await tester.pump();
 
@@ -76,12 +76,18 @@ void main() {
       ..failTransition = true;
     await _pumpDelivery(tester, api: api, order: _mappedOrder());
 
-    await tester.tap(find.text('Mark as delivered'));
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
 
     expect(find.text('Delivery complete'), findsNothing);
     expect(find.text('Mark as delivered'), findsOneWidget);
-    expect(find.text('That order update is not allowed yet.'), findsOneWidget);
+    expect(
+      find.text(
+        'The server rejected this status change. The order is currently NEAR_DROP. Try the step that matches it.',
+      ),
+      findsOneWidget,
+    );
+    expect(api.transitions, <String>['DELIVERY_ATTEMPT']);
   });
 
   testWidgets('a non-DELIVERED status does not open completion', (tester) async {
@@ -91,21 +97,28 @@ void main() {
       ..returnedStatus = 'IN_TRANSIT';
     await _pumpDelivery(tester, api: api, order: _mappedOrder());
 
-    await tester.tap(find.text('Mark as delivered'));
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
 
     expect(find.text('Delivery complete'), findsNothing);
     expect(find.text('Mark as delivered'), findsOneWidget);
-    expect(api.transitions, isNotEmpty);
+    expect(api.transitions, <String>['DELIVERY_ATTEMPT', 'DELIVERED']);
   });
 
   testWidgets('a missing payment view does not open completion', (tester) async {
     final _ScriptedRiderApi api = _ScriptedRiderApi()..payment = _nullPayment();
     await _pumpDelivery(tester, api: api, order: _mappedOrder());
-    await tester.tap(find.text('Mark as delivered'));
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
     expect(find.text('Delivery complete'), findsNothing);
-    expect(api.transitions, isEmpty);
+    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(
+      find.text(
+        'Payment details for this order are incomplete or inconsistent, so it was not marked delivered.',
+      ),
+      findsOneWidget,
+    );
+    expect(api.transitions, <String>['NEAR_DROP']);
   });
 
   testWidgets('cancelling cash collection does not open completion', (
@@ -113,13 +126,14 @@ void main() {
   ) async {
     final _ScriptedRiderApi api = _ScriptedRiderApi()..payment = _cashPayment();
     await _pumpDelivery(tester, api: api, order: _mappedOrder());
-    await tester.tap(find.text('Mark as delivered'));
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.text('Delivery complete'), findsNothing);
     expect(find.text('Confirm Cash Collected'), findsNothing);
-    expect(api.transitions, isEmpty);
+    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(api.transitions, <String>['NEAR_DROP']);
   });
 
   testWidgets('completion screen omits a missing CRN and earning', (tester) async {

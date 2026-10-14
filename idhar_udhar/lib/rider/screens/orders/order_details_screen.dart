@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
-import '../../features/orders/external_navigation.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
@@ -107,7 +106,9 @@ class OrderDetailsScreen extends ConsumerWidget {
         title: Text('Order #${order.id}'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
+          onPressed: () => context.canPop()
+              ? context.pop()
+              : context.go(RiderRoutes.dashboard),
         ),
         actions: [
           if (photoUrl != null)
@@ -121,17 +122,7 @@ class OrderDetailsScreen extends ConsumerWidget {
       ),
       bottom: RiderPrimaryButton(
         label: 'Start Delivery',
-        onPressed: () async {
-          await openRiderExternalNavigation(
-            context,
-            latitude: order.pickupLatitude,
-            longitude: order.pickupLongitude,
-          );
-          if (!context.mounted) {
-            return;
-          }
-          context.push(RiderRoutes.activeDelivery);
-        },
+        onPressed: () => context.push(RiderRoutes.activeDelivery),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -170,12 +161,12 @@ class OrderDetailsScreen extends ConsumerWidget {
                     value: order.etaLabel,
                     icon: Icons.timer_outlined,
                   ),
-                  const SizedBox(height: RiderSpacing.md),
-                  _Detail(
-                    label: 'Estimated Earnings',
-                    value: currency.format(order.estimatedEarnings),
-                    icon: Icons.payments_rounded,
-                  ),
+                  // const SizedBox(height: RiderSpacing.md),
+                  // _Detail(
+                  //   label: 'Estimated Earnings',
+                  //   value: currency.format(order.estimatedEarnings),
+                  //   icon: Icons.payments_rounded,
+                  // ),
                   const SizedBox(height: RiderSpacing.md),
                   _Detail(
                     label: 'Trip Amount',
@@ -229,55 +220,7 @@ class OrderDetailsScreen extends ConsumerWidget {
                     name: order.receiverName,
                     phone: order.receiverPhone,
                   ),
-                  const SizedBox(height: RiderSpacing.lg),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                behavior: SnackBarBehavior.floating,
-                                backgroundColor: RiderColors.secondary,
-                                content: Text(
-                                  'Masked calling (demo)',
-                                  style: RiderTextStyles.bodyMedium.copyWith(
-                                    color: RiderColors.textOnPrimary,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.call_rounded),
-                          label: const Text('Call'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: RiderColors.primary,
-                            side: const BorderSide(color: RiderColors.primary),
-                            minimumSize: const Size.fromHeight(48),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: RiderSpacing.md),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            openRiderExternalNavigation(
-                              context,
-                              latitude: order.pickupLatitude,
-                              longitude: order.pickupLongitude,
-                            );
-                          },
-                          icon: const Icon(Icons.navigation_rounded),
-                          label: const Text('Navigate'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: RiderColors.primary,
-                            side: const BorderSide(color: RiderColors.primary),
-                            minimumSize: const Size.fromHeight(48),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  
                 ],
               ),
             ),

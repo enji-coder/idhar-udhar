@@ -7,23 +7,15 @@ import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
-import 'package:intl/intl.dart';
-
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../data/models/rider_order.dart';
+import '../../push/rider_accept_flow.dart';
 import '../../push/rider_offer_alerts.dart';
 import '../../push/rider_offer_diag.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
-import '../../theme/rider_colors.dart';
-import '../../theme/rider_spacing.dart';
-import '../../theme/rider_text_styles.dart';
-import '../../widgets/rider_glass_card.dart';
-import '../../widgets/rider_primary_button.dart';
-import '../../widgets/rider_scaffold.dart';
-import '../../widgets/rider_secondary_button.dart';
-import '../profile/rider_profile_screen.dart';
+import '../../widgets/rider_order_alert.dart';
 
 class IncomingOrderScreen extends ConsumerStatefulWidget {
   const IncomingOrderScreen({super.key});
@@ -36,20 +28,18 @@ class IncomingOrderScreen extends ConsumerStatefulWidget {
 class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
   RiderOrder? _order;
   RiderOffer? _sourceOffer;
-  late int _secondsLeft;
-  Timer? _timer;
   StreamSubscription<RiderOfferUserAction>? _actions;
   bool _expired = false;
   bool _loading = true;
   bool _submitting = false;
   bool _inLoad = false;
   bool _applyingAction = false;
+  Timer? _leaveTimer;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _secondsLeft = 0;
     _actions = riderOfferUserActions.listen((_) {
       unawaited(_applyPendingAction());
     });
@@ -124,7 +114,6 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         setState(() {
           _sourceOffer = offer;
           _loading = false;
-          _secondsLeft = 0;
           if (offer.status != 'PENDING') {
             _order = null;
             _expired = false;
@@ -143,7 +132,6 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         _loading = false;
         _expired = false;
         _error = null;
-        _secondsLeft = mapped.decisionSeconds;
       });
       riderOfferLog(
         'incoming_screen_ready',
@@ -151,25 +139,6 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         reason: 'seconds_left=${mapped.decisionSeconds}',
       );
       await _applyPendingAction();
-      if (!mounted || _expired || _submitting || _order?.expiresAt == null) {
-        return;
-      }
-      final DateTime expiresAt = _order!.expiresAt!;
-      _timer?.cancel();
-      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) return;
-        final int? left = offerSecondsRemaining(expiresAt, DateTime.now());
-        if (left == null || left <= 0) {
-          _timer?.cancel();
-          setState(() {
-            _secondsLeft = 0;
-            _expired = true;
-          });
-          unawaited(cancelRiderOfferAlert(_order?.offerId));
-        } else {
-          setState(() => _secondsLeft = left);
-        }
-      });
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -245,24 +214,42 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
 
   @override
   void dispose() {
+    _leaveTimer?.cancel();
     _actions?.cancel();
-    _timer?.cancel();
     super.dispose();
   }
 
-  String get _timerLabel {
-    if (_order?.expiresAt == null) {
-      return '—';
+  void _handleExpired() {
+    if (mounted) {
+      setState(() => _expired = true);
+    } else {
+      _expired = true;
     }
-    final m = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
-    final s = (_secondsLeft % 60).toString().padLeft(2, '0');
-    return '$m:$s';
+    unawaited(cancelRiderOfferAlert(_order?.offerId));
+    if (_leaveTimer != null) {
+      return;
+    }
+    _leaveTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || _submitting) {
+        return;
+      }
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(RiderRoutes.dashboard);
+      }
+    });
   }
 
-  Future<void> _accept() async {
+  Future<bool> _accept() async {
     final RiderOrder? order = _order;
     if (_expired || _submitting || order == null) {
-      return;
+      return false;
+    }
+    final DateTime? expiresAt = order.expiresAt;
+    if (expiresAt != null && !expiresAt.isAfter(DateTime.now())) {
+      _handleExpired();
+      return false;
     }
     if (!ref.read(riderSessionProvider).isApproved) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -272,7 +259,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
           ),
         ),
       );
-      return;
+      return false;
     }
     if (riderIsSuspended(ref)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -280,7 +267,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
           content: Text('Account suspended until COD Due is cleared.'),
         ),
       );
-      return;
+      return false;
     }
     if (!ref.read(riderOnlineProvider)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -288,7 +275,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
           content: Text('Go online to accept delivery requests.'),
         ),
       );
-      return;
+      return false;
     }
     final String? offerId = order.offerId;
     if (offerId == null || offerId.isEmpty) {
@@ -297,44 +284,15 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
           content: Text('This order request is no longer available.'),
         ),
       );
-      return;
+      return false;
     }
     setState(() => _submitting = true);
     var acceptedOk = false;
     try {
-      final accepted =
-          await ref.read(riderApiProvider).acceptOffer(offerId);
-      if (!mounted) {
-        return;
-      }
-      var details = accepted;
-      if (accepted.orderId.isNotEmpty) {
-        try {
-          details =
-              await ref.read(riderApiProvider).getOrder(accepted.orderId);
-        } on ApiException catch (error) {
-          riderOfferLog(
-            'order_details_failed',
-            offerId: offerId,
-            reason: error.code,
-          );
-        } catch (error) {
-          riderOfferLog(
-            'order_details_failed',
-            offerId: offerId,
-            reason: error.runtimeType.toString(),
-          );
-        }
-      }
-      if (!mounted) {
-        return;
-      }
-      _timer?.cancel();
-      unawaited(cancelRiderOfferAlert(order.offerId));
       final RiderOffer active = _sourceOffer ??
           RiderOffer(
             offerId: offerId,
-            orderId: order.backendOrderId ?? details.orderId,
+            orderId: order.backendOrderId ?? '',
             status: 'PENDING',
             createdAt: DateTime.now(),
             displayId: order.id,
@@ -343,14 +301,24 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
             estimatedDurationSeconds:
                 order.estimatedMinutes > 0 ? order.estimatedMinutes * 60 : null,
           );
-      ref.read(activeOrderProvider.notifier).state = OrderMapper.toRiderOrder(
-        offer: acceptedOfferState(active: active, order: details),
-        order: details,
+      final RiderOrder accepted = await loadOrderAfterAccept(
+        api: ref.read(riderApiProvider),
+        offer: active,
       );
-      ref.read(deliveryStatusProvider.notifier).state =
-          DeliveryLifecycleStatus.accepted;
+      if (!mounted) {
+        return false;
+      }
+      unawaited(cancelRiderOfferAlert(order.offerId));
+      final String route = await publishAcceptedOrder(
+        ref: ref,
+        order: accepted,
+      );
+      if (!mounted) {
+        return false;
+      }
       acceptedOk = true;
-      context.go(RiderRoutes.orderDetails);
+      context.go(route);
+      return true;
     } on ApiException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -358,6 +326,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         );
         unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       }
+      return false;
     } finally {
       if (mounted && _submitting && !acceptedOk) {
         setState(() => _submitting = false);
@@ -365,26 +334,25 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
     }
   }
 
-  Future<void> _reject() async {
+  Future<bool> _reject() async {
     if (_submitting || _expired) {
-      return;
+      return false;
     }
     final String? offerId = _order?.offerId;
     if (offerId == null || offerId.isEmpty) {
-      _timer?.cancel();
       if (mounted) {
         context.pop();
       }
-      return;
+      return true;
     }
     setState(() => _submitting = true);
     try {
       await ref.read(riderApiProvider).rejectOffer(offerId);
       unawaited(cancelRiderOfferAlert(offerId));
-      _timer?.cancel();
       if (mounted) {
         context.pop();
       }
+      return true;
     } on ApiException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -392,6 +360,7 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         );
         setState(() => _submitting = false);
       }
+      return false;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -401,282 +370,47 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         );
         setState(() => _submitting = false);
       }
+      return false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const RiderScaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (_order == null) {
-      return RiderScaffold(
-        appBar: AppBar(title: const Text('New order')),
-        body: Center(child: Text(_error ?? 'No incoming orders right now.')),
-      );
-    }
-    final RiderOrder order = _order!;
-    final bool approved = ref.watch(riderSessionProvider).isApproved;
-    final String? photoUrl = _httpPhotoUrl(
-      ref.watch(riderProfileStateProvider).photoUrl,
-    );
-    final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-
-    return RiderScaffold(
-      appBar: AppBar(
-        title: const Text('New order'),
-        automaticallyImplyLeading: false,
-        actions: [
-          if (photoUrl != null)
-            Padding(
-              padding: const EdgeInsets.only(right: RiderSpacing.sm),
-              child: Center(
-                child: RiderProfileAvatar(photoUrl: photoUrl, radius: 16),
-              ),
-            ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded),
-            onPressed: _submitting
-                ? null
-                : _expired
-                    ? () => context.go(RiderRoutes.dashboard)
-                    : _reject,
-          ),
-        ],
-      ),
-      bottom: _expired
-          ? RiderSecondaryButton(
-              label: 'Back to Dashboard',
-              onPressed: () => context.go(RiderRoutes.dashboard),
-            )
-          : Row(
-              children: [
-                Expanded(
-                  child: RiderSecondaryButton(
-                    label: 'Reject',
-                    destructive: true,
-                    onPressed: _submitting || _expired ? null : _reject,
-                  ),
-                ),
-                const SizedBox(width: RiderSpacing.md),
-                Expanded(
-                  flex: 2,
-                  child: RiderPrimaryButton(
-                    label: 'Accept',
-                    enabled: approved && !_submitting && !_expired,
-                    onPressed: approved && !_submitting && !_expired
-                        ? _accept
-                        : null,
-                  ),
-                ),
-              ],
-            ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: (_expired ? RiderColors.error : RiderColors.primary)
-                    .withValues(alpha: 0.12),
-                border: Border.all(
-                  color: _expired ? RiderColors.error : RiderColors.primary,
-                  width: 3,
-                ),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _expired ? '00:00' : _timerLabel,
-                style: RiderTextStyles.heading.copyWith(
-                  color: _expired ? RiderColors.error : RiderColors.primary,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ),
-            const SizedBox(height: RiderSpacing.md),
-            Text(
-              _expired ? 'Order Expired' : 'Incoming delivery request',
-              style: RiderTextStyles.title,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: RiderSpacing.md),
-            Text(
-              order.tripAmount > 0
-                  ? currency.format(order.tripAmount)
-                  : '—',
-              style: RiderTextStyles.heading.copyWith(
-                color: RiderColors.primary,
-                fontSize: 40,
-                fontWeight: FontWeight.w800,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            Text(
-              'Trip fare',
-              style: RiderTextStyles.caption,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: RiderSpacing.xl),
-            RiderGlassCard(
-              child: Column(
-                children: [
-                  if ((order.crn ?? '').trim().isNotEmpty)
-                    _InfoRow(
-                      icon: Icons.tag_rounded,
-                      label: 'CRN',
-                      value: order.crn!.trim(),
+    final bool canLeave = _expired || _order == null || _error != null;
+    return PopScope(
+      canPop: canLeave,
+      child: Scaffold(
+        backgroundColor: const Color(0xB3000000),
+        body: SafeArea(
+          child: _loading
+              ? const Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                )
+              : _order == null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          _error ?? 'No incoming orders right now.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    )
+                  : Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 28),
+                        child: RiderIncomingOfferCard(
+                          key: ValueKey<String>(_order!.offerId ?? _order!.id),
+                          order: _order!,
+                          onAccept: _accept,
+                          onReject: _reject,
+                          onExpired: _handleExpired,
+                        ),
+                      ),
                     ),
-                  _InfoRow(
-                    icon: Icons.store_mall_directory_rounded,
-                    label: 'Pickup',
-                    value: order.pickup,
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.location_on_rounded,
-                    label: 'Drop',
-                    value: order.drop,
-                  ),
-                  if (order.receiverName.trim().isNotEmpty) ...[
-                    const Divider(height: RiderSpacing.xl),
-                    _InfoRow(
-                      icon: Icons.person_outline_rounded,
-                      label: 'Receiver',
-                      value: order.receiverName.trim(),
-                    ),
-                  ],
-                  if (order.receiverPhone.trim().isNotEmpty) ...[
-                    const Divider(height: RiderSpacing.xl),
-                    _InfoRow(
-                      icon: Icons.phone_iphone_rounded,
-                      label: 'Receiver contact',
-                      value: order.receiverPhone.trim(),
-                    ),
-                  ],
-                  if (order.vehicleName.trim().isNotEmpty) ...[
-                    const Divider(height: RiderSpacing.xl),
-                    _InfoRow(
-                      icon: Icons.two_wheeler_rounded,
-                      label: 'Vehicle',
-                      value: order.vehicleName.trim(),
-                    ),
-                  ],
-                  if (order.packageLabel.trim().isNotEmpty) ...[
-                    const Divider(height: RiderSpacing.xl),
-                    _InfoRow(
-                      icon: Icons.inventory_2_outlined,
-                      label: 'Package',
-                      value: order.packageLabel.trim(),
-                    ),
-                  ],
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.route_rounded,
-                    label: 'Distance',
-                    value: order.distanceLabel,
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.receipt_long_rounded,
-                    label: 'Trip Fare',
-                    value: order.tripAmount > 0
-                        ? currency.format(order.tripAmount)
-                        : '—',
-                    emphasize: true,
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.payments_rounded,
-                    label: 'Your Earnings',
-                    value: currency.format(order.estimatedEarnings),
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Customer Payment',
-                    value: currency.format(order.customerResponsibility),
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.person_pin_circle_outlined,
-                    label: 'Receiver Payment',
-                    value: currency.format(order.receiverResponsibility),
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.credit_score_rounded,
-                    label: 'Payment Status',
-                    value: order.paymentStatusLabel,
-                  ),
-                  const Divider(height: RiderSpacing.xl),
-                  _InfoRow(
-                    icon: Icons.timer_outlined,
-                    label: 'Estimated Time',
-                    value: order.etaLabel,
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );
   }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.emphasize = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool emphasize;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: RiderColors.primary, size: 22),
-        const SizedBox(width: RiderSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: RiderTextStyles.caption),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: emphasize
-                    ? RiderTextStyles.title.copyWith(color: RiderColors.primary)
-                    : RiderTextStyles.bodyMedium,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-String? _httpPhotoUrl(String? raw) {
-  final String value = (raw ?? '').trim();
-  final Uri? uri = Uri.tryParse(value);
-  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-    return null;
-  }
-  if (uri.host.isEmpty) {
-    return null;
-  }
-  return value;
 }

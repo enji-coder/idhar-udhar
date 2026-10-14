@@ -196,6 +196,24 @@ class _ScriptedRiderApi extends RiderApi {
   Completer<void>? hold;
 
   @override
+  Future<PickupWaitSnapshot> getPickupWait(String orderId) async {
+    return PickupWaitSnapshot(
+      arrivalAt: DateTime.utc(2026, 10, 14, 8),
+      pickedUpAt: null,
+      serverNow: DateTime.utc(2026, 10, 14, 8, 1, 20),
+      timestampStatus: 'ok',
+      initialWaitingMinutes: 10,
+      perMinute: '2.00',
+      elapsedSeconds: 80,
+      elapsedMinutes: 1,
+      chargeableMinutes: 0,
+      amount: '0.00',
+      amountSource: 'preview',
+      vehicleCategoryName: 'Scooty',
+    );
+  }
+
+  @override
   Future<ApiOrder> getOrder(String orderId) async {
     gets += 1;
     return _apiOrder(status);

@@ -34,6 +34,7 @@ import '../state/rider_session.dart';
 
 import '../widgets/rider_order_alert.dart';
 
+import 'rider_accept_flow.dart';
 import 'rider_offer_alerts.dart';
 
 import 'rider_offer_diag.dart';
@@ -301,8 +302,6 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     );
 
-    var alertPlayed = false;
-
     if (showDialog) {
 
       final RiderOfferAlertOutcome outcome = await showRiderOfferAlert(
@@ -312,8 +311,6 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
         postSystemNotification: true,
 
       );
-
-      alertPlayed = outcome == RiderOfferAlertOutcome.posted;
 
       if (outcome == RiderOfferAlertOutcome.permissionDenied) {
 
@@ -330,8 +327,6 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
       offerId: offerId.isEmpty ? null : offerId,
 
       force: !showDialog,
-
-      playFallbackSound: showDialog && !alertPlayed,
 
     );
 
@@ -404,8 +399,6 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
     bool force = false,
 
     int attempt = 0,
-
-    bool playFallbackSound = false,
 
   }) async {
 
@@ -497,8 +490,6 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
           attempt: attempt + 1,
 
-          playFallbackSound: playFallbackSound,
-
         );
 
       }
@@ -547,13 +538,7 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     if (!fromNotification && _appInForeground()) {
 
-      await _presentForegroundDialog(
-
-        offer,
-
-        playFallbackSound: playFallbackSound,
-
-      );
+      await _presentForegroundDialog(offer);
 
       return;
 
@@ -649,13 +634,7 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
 
 
-  Future<void> _presentForegroundDialog(
-
-    RiderOffer offer, {
-
-    bool playFallbackSound = false,
-
-  }) async {
+  Future<void> _presentForegroundDialog(RiderOffer offer) async {
 
     if (!mounted) {
 
@@ -700,8 +679,6 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
         context,
 
         order: order,
-
-        playFallbackSound: playFallbackSound,
 
         onExpired: () {
 
@@ -779,7 +756,13 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     try {
 
-      final accepted = await ref.read(riderApiProvider).acceptOffer(offer.offerId);
+      final RiderOrder accepted = await loadOrderAfterAccept(
+
+        api: ref.read(riderApiProvider),
+
+        offer: offer,
+
+      );
 
       if (!mounted) {
 
@@ -787,57 +770,17 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
       }
 
-      var details = accepted;
+      final String route = await publishAcceptedOrder(
 
-      if (accepted.orderId.isNotEmpty) {
+        ref: ref,
 
-        try {
-
-          details = await ref.read(riderApiProvider).getOrder(accepted.orderId);
-
-        } on ApiException catch (error) {
-
-          riderOfferLog(
-
-            'order_details_failed',
-
-            offerId: offer.offerId,
-
-            reason: error.code,
-
-          );
-
-        } catch (error) {
-
-          riderOfferLog(
-
-            'order_details_failed',
-
-            offerId: offer.offerId,
-
-            reason: error.runtimeType.toString(),
-
-          );
-
-        }
-
-      }
-
-      ref.read(activeOrderProvider.notifier).state = OrderMapper.toRiderOrder(
-
-        offer: acceptedOfferState(active: offer, order: details),
-
-        order: details,
+        order: accepted,
 
       );
 
-      ref.read(deliveryStatusProvider.notifier).state =
-
-          DeliveryLifecycleStatus.accepted;
-
       unawaited(cancelRiderOfferAlert(offer.offerId));
 
-      _routeAfterDialog = RiderRoutes.orderDetails;
+      _routeAfterDialog = route;
 
       riderOfferLog('accept_result', offerId: offer.offerId, reason: 'ok');
 
