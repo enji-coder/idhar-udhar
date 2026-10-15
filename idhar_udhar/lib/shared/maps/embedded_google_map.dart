@@ -14,6 +14,7 @@ class MapMarkerSpec {
     required this.id,
     required this.point,
     this.hue = BitmapDescriptor.hueOrange,
+    this.icon,
     this.title = '',
     this.snippet = '',
   });
@@ -21,6 +22,9 @@ class MapMarkerSpec {
   final String id;
   final GeoPoint point;
   final double hue;
+
+  /// When set, used instead of the default hue pin.
+  final BitmapDescriptor? icon;
   final String title;
   final String snippet;
 }
@@ -136,7 +140,7 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
         infoWindow: spec.title.isEmpty
             ? InfoWindow.noText
             : InfoWindow(title: spec.title, snippet: spec.snippet),
-        icon: BitmapDescriptor.defaultMarkerWithHue(spec.hue),
+        icon: spec.icon ?? BitmapDescriptor.defaultMarkerWithHue(spec.hue),
       );
     }).toSet();
   }
@@ -166,8 +170,9 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
       return;
     }
     if (widget.follow) {
+      // ~11 m grid — skip camera motion for GPS jitter below that.
       final String key =
-          '${widget.initial.latitude.toStringAsFixed(5)},${widget.initial.longitude.toStringAsFixed(5)}';
+          '${widget.initial.latitude.toStringAsFixed(4)},${widget.initial.longitude.toStringAsFixed(4)}';
       if (key != _lastFollowKey) {
         _lastFollowKey = key;
         _movingProgrammatically = true;

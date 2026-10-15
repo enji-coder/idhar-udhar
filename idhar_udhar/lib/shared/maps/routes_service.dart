@@ -74,7 +74,10 @@ class RoutesService {
         'travelMode': 'DRIVE',
         'routingPreference': 'TRAFFIC_UNAWARE',
         'computeAlternativeRoutes': false,
-        'polylineQuality': 'OVERVIEW',
+        // Rider turn-by-turn / off-route needs denser geometry than fare preview.
+        'polylineQuality': 'HIGH_QUALITY',
+        'languageCode': 'en',
+        'units': 'METRIC',
       },
       fieldMask: _guidanceFieldMask,
     );

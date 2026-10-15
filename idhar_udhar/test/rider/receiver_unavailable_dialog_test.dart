@@ -72,6 +72,13 @@ void main() {
     return container;
   }
 
+  Future<void> openReceiverUnavailableAction(WidgetTester tester) async {
+    await tester.tap(find.textContaining('View Details'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Receiver Unavailable'));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('pickup steps do not show Receiver Unavailable', (tester) async {
     for (final DeliveryLifecycleStatus status in <DeliveryLifecycleStatus>[
       DeliveryLifecycleStatus.accepted,
@@ -82,6 +89,8 @@ void main() {
       final _ScriptedRiderApi api = _ScriptedRiderApi();
       await pumpDelivery(tester, api: api, status: status);
       expect(find.text('Receiver Unavailable'), findsNothing);
+      expect(find.text('Receiver not available?'), findsNothing);
+      expect(find.textContaining('View Details'), findsNothing);
       expect(api.transitions, isEmpty);
     }
   });
@@ -93,8 +102,7 @@ void main() {
       api: api,
       status: DeliveryLifecycleStatus.goingToDrop,
     );
-    await tester.tap(find.text('Receiver Unavailable'));
-    await tester.pumpAndSettle();
+    await openReceiverUnavailableAction(tester);
     expect(
       find.text(
         'Confirming this records a failed delivery attempt because the receiver is unavailable.',
@@ -115,8 +123,7 @@ void main() {
       api: api,
       status: DeliveryLifecycleStatus.goingToDrop,
     );
-    await tester.tap(find.text('Receiver Unavailable'));
-    await tester.pumpAndSettle();
+    await openReceiverUnavailableAction(tester);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
 
@@ -138,8 +145,7 @@ void main() {
       api: api,
       status: DeliveryLifecycleStatus.goingToDrop,
     );
-    await tester.tap(find.text('Receiver Unavailable'));
-    await tester.pumpAndSettle();
+    await openReceiverUnavailableAction(tester);
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
@@ -161,8 +167,7 @@ void main() {
       api: api,
       status: DeliveryLifecycleStatus.goingToDrop,
     );
-    await tester.tap(find.text('Receiver Unavailable'));
-    await tester.pumpAndSettle();
+    await openReceiverUnavailableAction(tester);
     await tester.tap(find.text('Confirm'));
     await tester.pump();
 
@@ -170,7 +175,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Confirm'), findsNothing);
 
-    await tester.tap(find.text('Receiver Unavailable'));
+    await openReceiverUnavailableAction(tester);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 

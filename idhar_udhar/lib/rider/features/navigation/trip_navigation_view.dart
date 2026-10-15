@@ -145,20 +145,12 @@ class TripNavigationView extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: RiderSpacing.sm),
-                if (secondaryLabel != null)
+                if (secondaryLabel != null && onSecondary != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: OutlinedButton(
-                        onPressed: onSecondary,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: RiderColors.error,
-                          side: const BorderSide(color: RiderColors.error),
-                        ),
-                        child: Text(secondaryLabel!),
-                      ),
+                    child: _ReceiverUnavailablePrompt(
+                      semanticsLabel: secondaryLabel!,
+                      onViewDetails: onSecondary!,
                     ),
                   ),
                 SizedBox(
@@ -186,6 +178,132 @@ class TripNavigationView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Soft delivery-status prompt (not an error banner) above the primary CTA.
+class _ReceiverUnavailablePrompt extends StatelessWidget {
+  const _ReceiverUnavailablePrompt({
+    required this.semanticsLabel,
+    required this.onViewDetails,
+  });
+
+  final String semanticsLabel;
+  final VoidCallback onViewDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: semanticsLabel,
+      child: Material(
+        color: RiderColors.surface,
+        elevation: 2,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onViewDetails,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const CircleAvatar(
+                        radius: 22,
+                        backgroundColor: Color(0xFFD7EEF5),
+                        child: Icon(
+                          Icons.person_outline_rounded,
+                          color: RiderColors.primary,
+                        ),
+                      ),
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          decoration: BoxDecoration(
+                            color: RiderColors.success,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: RiderColors.surface,
+                              width: 2,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.help_outline_rounded,
+                            size: 11,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Receiver not available?',
+                        style: RiderTextStyles.title.copyWith(fontSize: 15),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'View contact details & take action',
+                        style: RiderTextStyles.caption.copyWith(
+                          color: RiderColors.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 40),
+                  child: FilledButton(
+                    onPressed: onViewDetails,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: RiderColors.primary,
+                      foregroundColor: RiderColors.textOnPrimary,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      minimumSize: const Size(0, 40),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      textStyle: RiderTextStyles.bodyMedium.copyWith(
+                        color: RiderColors.textOnPrimary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('View Details'),
+                        SizedBox(width: 2),
+                        Icon(Icons.chevron_right_rounded, size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

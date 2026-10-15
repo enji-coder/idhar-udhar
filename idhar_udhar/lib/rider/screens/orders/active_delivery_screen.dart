@@ -18,9 +18,11 @@ import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/navigation/navigation_speaker.dart';
 import '../../features/navigation/pickup_wait_view.dart';
+import '../../features/navigation/receiver_action_sheet.dart';
 import '../../features/navigation/rider_order_details_sheet.dart';
 import '../../features/navigation/route_guidance.dart';
 import '../../features/navigation/trip_navigation_view.dart';
+import '../../features/navigation/vehicle_marker.dart';
 import '../../features/navigation/waiting_clock.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
@@ -125,6 +127,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   String? _canonical;
   Timer? _waitTimer;
   Timer? _gpsTimer;
+  int _waitPollTick = 0;
   PickupWaitSnapshot? _wait;
   DateTime? _waitFetchedAt;
   String? _waitError;
@@ -135,8 +138,21 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   bool _routeRetry = false;
   String? _routeKey;
   int _routeToken = 0;
+  bool _routeRequestInFlight = false;
+  final SequentialGuidance _guidance = SequentialGuidance();
+  String? _guidanceBindKey;
+  GuidanceBanner? _banner;
+  BitmapDescriptor? _riderMarkerIcon;
+  String? _riderMarkerAsset;
   String? _paymentCacheOrderId;
   ApiOrderPaymentView? _paymentCache;
+
+  /// Nav GPS poll interval. MapsPlatform only exposes one-shot location (no
+  /// position stream); faster polling reuses [DeviceLocationService.currentLocation].
+  static const Duration _navGpsInterval = Duration(seconds: 2);
+
+  /// Waiting-charge API stays on an ~8s cadence while the nav timer is 2s.
+  static const int _waitPollEveryTicks = 4;
 
   static const List<DeliveryLifecycleStatus> _happyPath = [
     DeliveryLifecycleStatus.accepted,
@@ -159,17 +175,22 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       }
       _prepareTripChrome();
       if (!MapsRuntime.isFlutterTest) {
-        _gpsTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+        _gpsTimer = Timer.periodic(_navGpsInterval, (_) {
           final RiderOrder? order = ref.read(activeOrderProvider);
           final DeliveryLifecycleStatus status =
               ref.read(deliveryStatusProvider);
-          if (order != null && _chrome(status) != _TripChrome.legacy) {
-            if (_chrome(status) == _TripChrome.waiting) {
-              unawaited(_loadWait(order));
-            } else {
-              unawaited(_refreshNavigation(order, status));
-            }
+          if (order == null || _chrome(status) == _TripChrome.legacy) {
+            return;
           }
+          if (_chrome(status) == _TripChrome.waiting) {
+            _waitPollTick++;
+            if (_waitPollTick >= _waitPollEveryTicks) {
+              _waitPollTick = 0;
+              unawaited(_loadWait(order));
+            }
+            return;
+          }
+          unawaited(_refreshNavigation(order, status));
         });
       }
       if (!MapsRuntime.isFlutterTest) {
@@ -189,6 +210,11 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     _waitTimer?.cancel();
     _gpsTimer?.cancel();
     _publisher?.stop();
+    final NavigationSpeaker? speaker = _speaker;
+    if (speaker != null) {
+      unawaited(speaker.stop());
+    }
+    _guidance.reset();
     super.dispose();
   }
 
@@ -272,9 +298,8 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
             Padding(
               padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
               child: RiderSecondaryButton(
-                label: 'Receiver Unavailable',
-                destructive: true,
-                onPressed: () => _confirmReceiverUnavailable(order),
+                label: 'Receiver not available?',
+                onPressed: () => _openReceiverActionSheet(order),
               ),
             ),
           if (!done && riderCancel.allowed)
@@ -512,10 +537,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       );
     }
     final bool toDrop = chrome == _TripChrome.dropNav;
-    final GuidanceBanner? banner = guidanceBanner(
-      steps: _guided?.steps ?? const <RouteStep>[],
-      position: _navHere,
-    );
+    final GuidanceBanner? banner = _banner;
     final String remaining = _guided == null
         ? 'Route pending'
         : '${_guided!.route.distanceLabel} · ${_guided!.route.etaLabel}';
@@ -528,7 +550,8 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           initial: _navHere ?? _stopPoint(order, toDrop) ?? MapsDefaults.cityCenter,
           markers: _navMarkers(order, toDrop),
           route: _guided?.route.points ?? const <GeoPoint>[],
-          myLocationEnabled: true,
+          // Custom rider marker is the position indicator; avoid a second blue dot.
+          myLocationEnabled: false,
           follow: _navHere != null,
           accentColor: RiderColors.primary,
           borderColor: RiderColors.border,
@@ -557,7 +580,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
         onMenu: () => _openOrderMenu(order, status),
         secondaryLabel: tripStarted ? 'Receiver Unavailable' : null,
         onSecondary: tripStarted
-            ? () => unawaited(_confirmReceiverUnavailable(order))
+            ? () => _openReceiverActionSheet(order)
             : null,
         statusMessage: _navStatus,
         onRetryRoute: _routeRetry ? () => unawaited(_retryRoute(order, status)) : null,
@@ -717,9 +740,19 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
         ? null
         : locationFailureMessage(result.failure!);
     if (destination == null || here == null) {
+      final GuidanceBanner? banner = destination == null
+          ? null
+          : _guidance.update(
+              steps: _guided?.steps ?? const <RouteStep>[],
+              position: null,
+            );
+      if (destination == null) {
+        _resetGuidanceTracker();
+      }
       setState(() {
         _navHere = here;
         _guided = destination == null ? null : _guided;
+        _banner = banner;
         _routeRetry = false;
         _navStatus = destination == null
             ? 'This stop does not have usable coordinates.'
@@ -727,6 +760,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       });
       return;
     }
+    final String bindKey = _guidanceBindingKey(order, destination);
     final bool offRoute = _guided != null &&
         shouldRecalculateRoute(
           line: _guided!.route.points,
@@ -735,40 +769,84 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     final String key =
         '${here.latitude.toStringAsFixed(3)},${here.longitude.toStringAsFixed(3)}>${destination.latitude.toStringAsFixed(3)},${destination.longitude.toStringAsFixed(3)}';
     if (!force && !offRoute && key == _routeKey && _guided != null) {
-      setState(() => _navHere = here);
-      final GuidanceBanner? banner = guidanceBanner(
+      _bindGuidance(bindKey);
+      final GuidanceBanner? banner = _guidance.update(
         steps: _guided!.steps,
         position: here,
       );
+      setState(() {
+        _navHere = here;
+        _banner = banner;
+      });
+      unawaited(_ensureRiderMarkerIcon(order));
       unawaited(_speakerCue(banner));
       return;
     }
+    if (_routeRequestInFlight && !force && !offRoute) {
+      final GuidanceBanner? pendingBanner = _guidance.update(
+        steps: _guided?.steps ?? const <RouteStep>[],
+        position: here,
+      );
+      setState(() {
+        _navHere = here;
+        _banner = pendingBanner;
+      });
+      unawaited(_ensureRiderMarkerIcon(order));
+      unawaited(_speakerCue(pendingBanner));
+      return;
+    }
     _routeKey = key;
-    final RouteGuidanceResult guidance =
-        await ref.read(routesServiceProvider).computeGuidance(
-              origin: here,
-              destination: destination,
-            );
+    _routeRequestInFlight = true;
+    final RouteGuidanceResult guidance;
+    try {
+      guidance = await ref.read(routesServiceProvider).computeGuidance(
+            origin: here,
+            destination: destination,
+          );
+    } finally {
+      _routeRequestInFlight = false;
+    }
     if (!mounted || token != _routeToken) {
       return;
     }
     final GuidedRoute? guided = guidance.route;
+    _bindGuidance(bindKey, routeReplaced: guided != null);
+    final GuidanceBanner? banner = _guidance.update(
+      steps: (guided ?? _guided)?.steps ?? const <RouteStep>[],
+      position: here,
+    );
     setState(() {
       _navHere = here;
       if (guided != null) {
         _guided = guided;
       }
+      _banner = banner;
       _routeRetry = guided == null;
       _navStatus = guided == null ? routeGuidanceMessage(guidance.kind) : problem;
     });
-    unawaited(
-      _speakerCue(
-        guidanceBanner(
-          steps: (guided ?? _guided)?.steps ?? const <RouteStep>[],
-          position: here,
-        ),
-      ),
-    );
+    unawaited(_ensureRiderMarkerIcon(order));
+    unawaited(_speakerCue(banner));
+  }
+
+  /// Order + stop coordinates. Changes when the trip target genuinely changes.
+  String _guidanceBindingKey(RiderOrder order, GeoPoint destination) {
+    final String orderId = (order.backendOrderId ?? order.id).trim();
+    return '$orderId|'
+        '${destination.latitude.toStringAsFixed(5)},'
+        '${destination.longitude.toStringAsFixed(5)}';
+  }
+
+  void _bindGuidance(String bindKey, {bool routeReplaced = false}) {
+    if (_guidanceBindKey != bindKey || routeReplaced) {
+      _guidance.reset();
+      _guidanceBindKey = bindKey;
+    }
+  }
+
+  void _resetGuidanceTracker() {
+    _guidance.reset();
+    _guidanceBindKey = null;
+    _banner = null;
   }
 
   Future<void> _speakerCue(GuidanceBanner? banner) async {
@@ -813,6 +891,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           id: 'rider',
           point: _navHere!,
           hue: BitmapDescriptor.hueAzure,
+          icon: _riderMarkerIcon,
           title: _vehicleName(order).isEmpty ? 'You' : _vehicleName(order),
         ),
       if (stop != null)
@@ -824,6 +903,57 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           snippet: toDrop ? order.drop : order.pickup,
         ),
     ];
+  }
+
+  Future<void> _ensureRiderMarkerIcon(RiderOrder order) async {
+    if (MapsRuntime.isFlutterTest) {
+      return;
+    }
+    final RiderVehicleMarker kind = vehicleMarkerFor(_vehicleName(order));
+    final String? asset = vehicleMapMarkerAssetPath(kind);
+    if (asset == null) {
+      if (_riderMarkerIcon != null || _riderMarkerAsset != null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _riderMarkerIcon = null;
+          _riderMarkerAsset = null;
+        });
+      }
+      return;
+    }
+    if (asset == _riderMarkerAsset && _riderMarkerIcon != null) {
+      return;
+    }
+    try {
+      final ImageConfiguration config = createLocalImageConfiguration(context);
+      final BitmapDescriptor icon = await BitmapDescriptor.asset(
+        config,
+        asset,
+        width: 64,
+        height: 64,
+      );
+      if (!mounted ||
+          asset !=
+              vehicleMapMarkerAssetPath(
+                vehicleMarkerFor(_vehicleName(order)),
+              )) {
+        return;
+      }
+      setState(() {
+        _riderMarkerIcon = icon;
+        _riderMarkerAsset = asset;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _riderMarkerIcon = null;
+        _riderMarkerAsset = null;
+      });
+    }
   }
 
   Future<void> _openOrderMenu(
@@ -1064,6 +1194,25 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           'Payment details for this order are incomplete or inconsistent, so it was not marked delivered.',
         ),
       ),
+    );
+  }
+
+  void _openReceiverActionSheet(RiderOrder order) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: RiderColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext sheetContext) {
+        return ReceiverActionSheet(
+          order: order,
+          onMarkUnavailable: () {
+            unawaited(_confirmReceiverUnavailable(order));
+          },
+        );
+      },
     );
   }
 

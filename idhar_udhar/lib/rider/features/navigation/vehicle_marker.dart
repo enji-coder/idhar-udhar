@@ -24,6 +24,24 @@ RiderVehicleMarker vehicleMarkerFor(String vehicleName) {
   return RiderVehicleMarker.parcel;
 }
 
+/// Existing project assets suitable as map markers (declared in pubspec).
+///
+/// Prefer square mid-size PNGs. Returns null when no dedicated asset exists
+/// (caller should keep the default pin).
+String? vehicleMapMarkerAssetPath(RiderVehicleMarker marker) {
+  switch (marker) {
+    case RiderVehicleMarker.bike:
+      return 'assets/customer/images/3d/idhar_udhar_delivery_bike.png';
+    case RiderVehicleMarker.scooter:
+      return 'assets/rider/images/rider_delivery_scooter_3.png';
+    case RiderVehicleMarker.truck:
+      return 'assets/customer/images/3d/idhar_udhar_delivery_truck_1.png';
+    case RiderVehicleMarker.threeWheeler:
+    case RiderVehicleMarker.parcel:
+      return null;
+  }
+}
+
 IconData vehicleMarkerIcon(RiderVehicleMarker marker) {
   switch (marker) {
     case RiderVehicleMarker.bike:

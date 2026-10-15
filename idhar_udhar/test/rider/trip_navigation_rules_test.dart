@@ -119,4 +119,223 @@ void main() {
     );
     expect(banner!.instruction, 'Turn right onto CG Road');
   });
+
+  test('sequential guidance approaches then advances past a maneuver end', () {
+    final List<RouteStep> steps = _lineSteps();
+    final GeoPoint approaching = GeoPoint(
+      latitude: steps[0].end.latitude - 0.0018,
+      longitude: steps[0].end.longitude,
+    );
+    final GuidanceBanner? approachingBanner = guidanceBanner(
+      steps: steps,
+      position: approaching,
+    );
+    expect(approachingBanner!.stepIndex, 0);
+    expect(approachingBanner.instruction, 'Turn right onto CG Road');
+    expect(approachingBanner.meters, greaterThan(35));
+
+    final GeoPoint atEnd = steps[0].end;
+    final GuidanceBanner? arrivedBanner = guidanceBanner(
+      steps: steps,
+      position: atEnd,
+    );
+    expect(arrivedBanner!.stepIndex, 1);
+    expect(arrivedBanner.instruction, 'Turn left onto Ashram Road');
+
+    // Past step 0 by more than arrive radius, but still nearer step 0 than step 1.
+    // Old nearest-end logic stayed on step 0; sequential must advance.
+    final GeoPoint pastFirst = GeoPoint(
+      latitude: steps[0].end.latitude + 0.0005,
+      longitude: steps[0].end.longitude,
+    );
+    expect(metersBetween(pastFirst, steps[0].end), greaterThan(35));
+    expect(
+      metersBetween(pastFirst, steps[0].end),
+      lessThan(metersBetween(pastFirst, steps[1].end)),
+    );
+    final GuidanceBanner? pastBanner = guidanceBanner(
+      steps: steps,
+      position: pastFirst,
+    );
+    expect(pastBanner!.stepIndex, 1);
+    expect(pastBanner.instruction, 'Turn left onto Ashram Road');
+  });
+
+  test('sequential guidance does not jump to a geographically nearer later step', () {
+    // Step 2 ends near the start (loop fold). Nearest-end would pick it early.
+    final List<RouteStep> steps = <RouteStep>[
+      RouteStep(
+        instruction: 'Head north',
+        maneuver: 'DEPART',
+        distanceMeters: 200,
+        end: const GeoPoint(latitude: 23.0300, longitude: 72.5700),
+      ),
+      RouteStep(
+        instruction: 'Turn right',
+        maneuver: 'TURN_RIGHT',
+        distanceMeters: 200,
+        end: const GeoPoint(latitude: 23.0320, longitude: 72.5700),
+      ),
+      RouteStep(
+        instruction: 'Arrive',
+        maneuver: 'ARRIVE',
+        distanceMeters: 50,
+        end: const GeoPoint(latitude: 23.0282, longitude: 72.5700),
+      ),
+    ];
+    const GeoPoint atStart = GeoPoint(latitude: 23.0280, longitude: 72.5700);
+    expect(
+      metersBetween(atStart, steps[2].end),
+      lessThan(metersBetween(atStart, steps[0].end)),
+    );
+    final GuidanceBanner? banner = guidanceBanner(
+      steps: steps,
+      position: atStart,
+    );
+    expect(banner!.stepIndex, 0);
+    expect(banner.instruction, 'Head north');
+  });
+
+  test('SequentialGuidance keeps monotonic step index across samples', () {
+    final List<RouteStep> steps = _lineSteps();
+    final SequentialGuidance tracker = SequentialGuidance();
+
+    final GuidanceBanner? first = tracker.update(
+      steps: steps,
+      position: GeoPoint(
+        latitude: steps[0].end.latitude - 0.001,
+        longitude: steps[0].end.longitude,
+      ),
+    );
+    expect(first!.stepIndex, 0);
+
+    final GuidanceBanner? second = tracker.update(
+      steps: steps,
+      position: steps[0].end,
+    );
+    expect(second!.stepIndex, 1);
+
+    // GPS jitter back toward step 0 must not rewind the active maneuver.
+    final GuidanceBanner? jitter = tracker.update(
+      steps: steps,
+      position: GeoPoint(
+        latitude: steps[0].end.latitude - 0.0004,
+        longitude: steps[0].end.longitude,
+      ),
+    );
+    expect(jitter!.stepIndex, 1);
+    expect(tracker.stepIndex, 1);
+  });
+
+  test('SequentialGuidance reset restarts progression for a new route', () {
+    final List<RouteStep> steps = _lineSteps();
+    final SequentialGuidance tracker = SequentialGuidance();
+
+    tracker.update(steps: steps, position: steps[0].end);
+    expect(tracker.stepIndex, 1);
+
+    tracker.reset();
+    expect(tracker.stepIndex, 0);
+
+    final GuidanceBanner? afterReset = tracker.update(
+      steps: steps,
+      position: GeoPoint(
+        latitude: steps[0].end.latitude - 0.001,
+        longitude: steps[0].end.longitude,
+      ),
+    );
+    expect(afterReset!.stepIndex, 0);
+    expect(afterReset.instruction, 'Turn right onto CG Road');
+  });
+
+  test('SequentialGuidance repeated GPS ticks stay on the same maneuver', () {
+    final List<RouteStep> steps = _lineSteps();
+    final SequentialGuidance tracker = SequentialGuidance();
+    final GeoPoint approaching = GeoPoint(
+      latitude: steps[0].end.latitude - 0.0012,
+      longitude: steps[0].end.longitude,
+    );
+
+    for (int i = 0; i < 5; i++) {
+      final GuidanceBanner? banner = tracker.update(
+        steps: steps,
+        position: approaching,
+      );
+      expect(banner!.stepIndex, 0, reason: 'tick $i');
+      expect(banner.speechKey, '0:Turn right onto CG Road');
+    }
+
+    expect(tracker.update(steps: steps, position: null)!.stepIndex, 0);
+    expect(tracker.update(steps: const <RouteStep>[], position: approaching), isNull);
+    expect(tracker.stepIndex, 0);
+  });
+
+  test('off-route uses segment distance, not only vertices', () {
+    const GeoPoint a = GeoPoint(latitude: 23.0300, longitude: 72.5700);
+    const GeoPoint b = GeoPoint(latitude: 23.0320, longitude: 72.5700);
+    final List<GeoPoint> sparse = <GeoPoint>[a, b];
+
+    // Midpoint between sparse vertices — on the road chord.
+    const GeoPoint onSegment = GeoPoint(latitude: 23.0310, longitude: 72.5700);
+    expect(shouldRecalculateRoute(line: sparse, position: onSegment), isFalse);
+    expect(
+      distanceToPolylineMeters(line: sparse, position: onSegment),
+      lessThan(20),
+    );
+
+    // ~200 m east of the segment — genuinely off route.
+    const GeoPoint offRoute = GeoPoint(latitude: 23.0310, longitude: 72.5720);
+    expect(shouldRecalculateRoute(line: sparse, position: offRoute), isTrue);
+    expect(
+      distanceToPolylineMeters(line: sparse, position: offRoute),
+      greaterThan(80),
+    );
+
+    // Degenerate zero-length segment falls back to point distance.
+    expect(
+      distanceToSegmentMeters(position: onSegment, start: a, end: a),
+      closeTo(metersBetween(onSegment, a), 1),
+    );
+    expect(shouldRecalculateRoute(line: <GeoPoint>[a], position: offRoute), isFalse);
+  });
+
+  test('vehicle map marker assets follow category mapping', () {
+    expect(
+      vehicleMapMarkerAssetPath(vehicleMarkerFor('Bike')),
+      'assets/customer/images/3d/idhar_udhar_delivery_bike.png',
+    );
+    expect(
+      vehicleMapMarkerAssetPath(vehicleMarkerFor('Scooty')),
+      'assets/rider/images/rider_delivery_scooter_3.png',
+    );
+    expect(
+      vehicleMapMarkerAssetPath(vehicleMarkerFor('Truck')),
+      'assets/customer/images/3d/idhar_udhar_delivery_truck_1.png',
+    );
+    expect(vehicleMapMarkerAssetPath(vehicleMarkerFor('Auto')), isNull);
+    expect(vehicleMapMarkerAssetPath(vehicleMarkerFor('')), isNull);
+  });
+}
+
+List<RouteStep> _lineSteps() {
+  return <RouteStep>[
+    RouteStep(
+      instruction: 'Turn right onto CG Road',
+      maneuver: 'TURN_RIGHT',
+      distanceMeters: 200,
+      end: const GeoPoint(latitude: 23.0300, longitude: 72.5700),
+    ),
+    RouteStep(
+      instruction: 'Turn left onto Ashram Road',
+      maneuver: 'TURN_LEFT',
+      distanceMeters: 250,
+      end: const GeoPoint(latitude: 23.0320, longitude: 72.5700),
+    ),
+    RouteStep(
+      instruction: 'You have arrived',
+      maneuver: 'ARRIVE',
+      distanceMeters: 100,
+      end: const GeoPoint(latitude: 23.0335, longitude: 72.5700),
+    ),
+  ];
 }

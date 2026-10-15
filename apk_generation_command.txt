@@ -8,3 +8,8 @@ flutter build apk --release --flavor customer -t lib/customer/customer_main.dart
 
 # IU_CITY_ID = production launch_city_id from GET /v1/vehicle-categories
 # If omitted, the app still falls back to catalog launch_city_id at runtime.
+
+
+cd .\idhar_udhar
+
+flutter run --debug --flavor rider -t lib/rider/rider_main.dart --dart-define=API_BASE_URL=https://api.idharudhar.co.in
