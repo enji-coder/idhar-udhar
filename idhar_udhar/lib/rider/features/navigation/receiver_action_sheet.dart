@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:idhar_udhar/shared/phone/native_dialer.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/models/rider_order.dart';
 import '../../theme/rider_colors.dart';
-import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 
 /// Contact + failed-delivery actions opened from the drop-nav prompt card.
@@ -31,42 +29,13 @@ class ReceiverActionSheet extends StatelessWidget {
         : order.senderPhone;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          RiderSpacing.screenH,
-          RiderSpacing.md,
-          RiderSpacing.screenH,
-          RiderSpacing.lg,
-        ),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    color: RiderColors.textPrimary,
-                  ),
-                  Expanded(
-                    child: Text(
-                      'Contact Details',
-                      style: RiderTextStyles.heading.copyWith(fontSize: 20),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Call receiver',
-                    onPressed: () => openNativePhoneDialer(
-                      context,
-                      order.receiverPhone,
-                    ),
-                    icon: const Icon(Icons.call_rounded),
-                    color: RiderColors.primary,
-                  ),
-                ],
-              ),
-              const SizedBox(height: RiderSpacing.md),
+              _SheetHeader(receiverPhone: order.receiverPhone),
+              const SizedBox(height: 12),
               _ContactCard(
                 title: 'Sender',
                 badge: 'Shipper',
@@ -78,7 +47,7 @@ class ReceiverActionSheet extends StatelessWidget {
                 locationLabel: 'Pickup Location',
                 location: order.pickup,
               ),
-              const SizedBox(height: RiderSpacing.md),
+              const SizedBox(height: 10),
               _ContactCard(
                 title: 'Receiver',
                 badge: 'Customer',
@@ -90,68 +59,57 @@ class ReceiverActionSheet extends StatelessWidget {
                 locationLabel: 'Drop Location',
                 location: order.drop,
               ),
-              const SizedBox(height: RiderSpacing.lg),
-              Material(
-                color: const Color(0xFFF0F7F5),
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: RiderSpacing.md,
-                    vertical: RiderSpacing.md,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _MetaCell(
-                          icon: Icons.inventory_2_outlined,
-                          label: 'Order ID',
-                          value: order.id,
-                        ),
-                      ),
-                      Expanded(
-                        child: _MetaCell(
-                          icon: Icons.local_shipping_outlined,
-                          label: 'Items',
-                          value: order.packageLabel.trim().isEmpty
-                              ? 'Parcel'
-                              : order.packageLabel.trim(),
-                        ),
-                      ),
-                      Expanded(
-                        child: _MetaCell(
-                          icon: Icons.currency_rupee_rounded,
-                          label: 'Trip fare',
-                          value: order.tripAmount > 0
-                              ? '₹${order.tripAmount.toStringAsFixed(order.tripAmount == order.tripAmount.roundToDouble() ? 0 : 2)}'
-                              : '—',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: RiderSpacing.lg),
-              SizedBox(
-                height: 52,
-                child: OutlinedButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    onMarkUnavailable();
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: RiderColors.textPrimary,
-                    side: const BorderSide(color: RiderColors.border),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(26),
-                    ),
-                  ),
-                  child: const Text('Receiver Unavailable'),
-                ),
+              const SizedBox(height: 12),
+              _OrderMeta(order: order),
+              const SizedBox(height: 16),
+              _UnavailableButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  onMarkUnavailable();
+                },
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader({required this.receiverPhone});
+
+  final String receiverPhone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Close',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+          color: RiderColors.textPrimary,
+          visualDensity: VisualDensity.compact,
+        ),
+        Expanded(
+          child: Text(
+            'Contact Details',
+            style: RiderTextStyles.title.copyWith(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Call receiver',
+          onPressed: () => openNativePhoneDialer(context, receiverPhone),
+          icon: const Icon(Icons.call_rounded),
+          color: RiderColors.primary,
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
     );
   }
 }
@@ -183,12 +141,14 @@ class _ContactCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final String shownName = name.trim().isEmpty ? '—' : name.trim();
     final String shownPhone = phone.trim().isEmpty ? '—' : phone.trim();
-    return Material(
-      color: RiderColors.surface,
-      elevation: 1,
-      borderRadius: BorderRadius.circular(16),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: RiderColors.border.withValues(alpha: 0.85)),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(RiderSpacing.md),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -196,100 +156,155 @@ class _ContactCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
-                  radius: 22,
+                  radius: 18,
                   backgroundColor: avatarColor,
-                  child: const Icon(Icons.person, color: Colors.white),
+                  child:
+                      const Icon(Icons.person, color: Colors.white, size: 18),
                 ),
-                const SizedBox(width: RiderSpacing.md),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: RiderTextStyles.caption),
-                      Text(shownName, style: RiderTextStyles.title),
-                      Text(shownPhone, style: RiderTextStyles.body),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
+                      Text(title, style: _SheetType.caption),
+                      const SizedBox(height: 1),
+                      Text(shownName, style: _SheetType.name),
+                      const SizedBox(height: 1),
+                      Text(shownPhone, style: _SheetType.phone),
+                      const SizedBox(height: 6),
+                      DecoratedBox(
                         decoration: BoxDecoration(
                           color: badgeColor,
                           borderRadius: BorderRadius.circular(999),
                         ),
-                        child: Text(
-                          badge,
-                          style: RiderTextStyles.caption.copyWith(
-                            color: badgeTextColor,
-                            fontWeight: FontWeight.w600,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            badge,
+                            style: _SheetType.caption.copyWith(
+                              color: badgeTextColor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                            ),
                           ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                Column(
-                  children: [
-                    SizedBox(
-                      height: 36,
-                      child: OutlinedButton.icon(
-                        onPressed: phone.trim().isEmpty
-                            ? null
-                            : () => openNativePhoneDialer(context, phone),
-                        icon: const Icon(Icons.call_rounded, size: 16),
-                        label: const Text('Call'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: RiderColors.primary,
-                          side: const BorderSide(color: RiderColors.primary),
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      height: 36,
-                      child: OutlinedButton.icon(
-                        onPressed: phone.trim().isEmpty
-                            ? null
-                            : () {
-                                _openWhatsApp(context, phone);
-                              },
-                        icon: const Icon(Icons.chat_rounded, size: 16),
-                        label: const Text('WhatsApp'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: RiderColors.primary,
-                          side: const BorderSide(color: RiderColors.primary),
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                const SizedBox(width: 8),
+                _CallPill(phone: phone),
               ],
             ),
-            const SizedBox(height: RiderSpacing.md),
+            const Padding(
+              padding: EdgeInsets.only(top: 10, bottom: 8),
+              child: Divider(height: 1, color: RiderColors.border),
+            ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(
                   Icons.location_on_rounded,
                   color: RiderColors.primary,
-                  size: 18,
+                  size: 16,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(locationLabel, style: RiderTextStyles.caption),
-                      Text(location, style: RiderTextStyles.body),
+                      Text(locationLabel, style: _SheetType.caption),
+                      const SizedBox(height: 1),
+                      Text(location, style: _SheetType.body),
                     ],
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CallPill extends StatelessWidget {
+  const _CallPill({required this.phone});
+
+  final String phone;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool enabled = phone.trim().isNotEmpty;
+    return OutlinedButton.icon(
+      onPressed: enabled ? () => openNativePhoneDialer(context, phone) : null,
+      icon: const Icon(Icons.call_rounded, size: 16),
+      label: const Text('Call'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: RiderColors.primary,
+        disabledForegroundColor: RiderColors.hint,
+        backgroundColor: Colors.white,
+        minimumSize: const Size(78, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.standard,
+        side: BorderSide(
+          color: enabled ? RiderColors.primary : RiderColors.border,
+        ),
+        shape: const StadiumBorder(),
+        textStyle: RiderTextStyles.bodyMedium.copyWith(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _OrderMeta extends StatelessWidget {
+  const _OrderMeta({required this.order});
+
+  final RiderOrder order;
+
+  @override
+  Widget build(BuildContext context) {
+    final String fare = order.tripAmount > 0
+        ? '₹${order.tripAmount.toStringAsFixed(order.tripAmount == order.tripAmount.roundToDouble() ? 0 : 2)}'
+        : '—';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F7F5),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: _MetaCell(
+                icon: Icons.inventory_2_outlined,
+                label: 'Order ID',
+                value: order.id,
+              ),
+            ),
+            Expanded(
+              child: _MetaCell(
+                icon: Icons.local_shipping_outlined,
+                label: 'Items',
+                value: order.packageLabel.trim().isEmpty
+                    ? 'Parcel'
+                    : order.packageLabel.trim(),
+              ),
+            ),
+            Expanded(
+              child: _MetaCell(
+                icon: Icons.currency_rupee_rounded,
+                label: 'Trip fare',
+                value: fare,
+              ),
             ),
           ],
         ),
@@ -313,42 +328,75 @@ class _MetaCell extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Icon(icon, size: 18, color: RiderColors.primary),
+        Icon(icon, size: 16, color: RiderColors.primary),
         const SizedBox(height: 4),
-        Text(label, style: RiderTextStyles.caption),
+        Text(label, style: _SheetType.caption),
+        const SizedBox(height: 1),
         Text(
           value,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
-          style: RiderTextStyles.bodyMedium.copyWith(fontSize: 12),
+          style: _SheetType.metaValue,
         ),
       ],
     );
   }
 }
 
-Future<void> _openWhatsApp(BuildContext context, String phone) async {
-  final String digits = phone.replaceAll(RegExp(r'\D'), '');
-  if (digits.isEmpty) {
-    return;
-  }
-  final Uri uri = Uri.parse('https://wa.me/$digits');
-  try {
-    final bool opened = await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
+class _UnavailableButton extends StatelessWidget {
+  const _UnavailableButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: RiderColors.primary,
+          backgroundColor: Colors.white,
+          side: const BorderSide(color: RiderColors.primary, width: 1.2),
+          shape: const StadiumBorder(),
+          textStyle: RiderTextStyles.bodyMedium.copyWith(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        child: const Text('Receiver Unavailable'),
+      ),
     );
-    if (!opened && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('WhatsApp could not be opened.')),
-      );
-    }
-  } catch (_) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('WhatsApp could not be opened.')),
-      );
-    }
   }
+}
+
+abstract final class _SheetType {
+  static TextStyle get caption => RiderTextStyles.caption.copyWith(
+        fontSize: 12,
+        height: 1.25,
+      );
+
+  static TextStyle get name => RiderTextStyles.bodyMedium.copyWith(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+        height: 1.25,
+      );
+
+  static TextStyle get phone => RiderTextStyles.body.copyWith(
+        fontSize: 13,
+        height: 1.3,
+        color: RiderColors.textSecondary,
+      );
+
+  static TextStyle get body => RiderTextStyles.body.copyWith(
+        fontSize: 13,
+        height: 1.35,
+      );
+
+  static TextStyle get metaValue => RiderTextStyles.bodyMedium.copyWith(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        height: 1.25,
+      );
 }

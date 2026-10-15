@@ -95,6 +95,25 @@ void main() {
     }
   });
 
+  testWidgets('contact sheet has call actions and no WhatsApp buttons', (
+    tester,
+  ) async {
+    await pumpDelivery(
+      tester,
+      api: _ScriptedRiderApi(),
+      status: DeliveryLifecycleStatus.goingToDrop,
+    );
+    await tester.tap(find.textContaining('View Details'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('WhatsApp'), findsNothing);
+    expect(find.text('Contact Details'), findsOneWidget);
+    expect(find.text('Call'), findsWidgets);
+    expect(find.text('Receiver Unavailable'), findsOneWidget);
+    expect(find.text('Pickup Location'), findsOneWidget);
+    expect(find.text('Drop Location'), findsOneWidget);
+  });
+
   testWidgets('the action opens a confirmation dialog', (tester) async {
     final _ScriptedRiderApi api = _ScriptedRiderApi();
     await pumpDelivery(
