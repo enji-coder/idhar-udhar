@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Address
 import android.location.Geocoder
+import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
@@ -122,13 +123,7 @@ internal class MapsBridge(private val context: Context) : MethodChannel.MethodCa
                     if (location == null) {
                         fallbackLastLocation(result)
                     } else {
-                        result.success(
-                            mapOf(
-                                "latitude" to location.latitude,
-                                "longitude" to location.longitude,
-                                "accuracy" to location.accuracy.toDouble(),
-                            ),
-                        )
+                        result.success(locationPayload(location))
                     }
                 }
                 .addOnFailureListener {
@@ -151,13 +146,7 @@ internal class MapsBridge(private val context: Context) : MethodChannel.MethodCa
                     if (location == null) {
                         result.error("UNAVAILABLE", "Current location is unavailable", null)
                     } else {
-                        result.success(
-                            mapOf(
-                                "latitude" to location.latitude,
-                                "longitude" to location.longitude,
-                                "accuracy" to location.accuracy.toDouble(),
-                            ),
-                        )
+                        result.success(locationPayload(location))
                     }
                 }
                 .addOnFailureListener {
@@ -166,6 +155,21 @@ internal class MapsBridge(private val context: Context) : MethodChannel.MethodCa
         } catch (_: Exception) {
             result.error("UNAVAILABLE", "Current location is unavailable", null)
         }
+    }
+
+    private fun locationPayload(location: Location): Map<String, Any> {
+        val payload = mutableMapOf<String, Any>(
+            "latitude" to location.latitude,
+            "longitude" to location.longitude,
+            "accuracy" to location.accuracy.toDouble(),
+        )
+        if (location.hasBearing()) {
+            payload["bearing"] = location.bearing.toDouble()
+        }
+        if (location.hasSpeed()) {
+            payload["speed"] = location.speed.toDouble()
+        }
+        return payload
     }
 
     private fun reverseGeocode(call: MethodCall, result: MethodChannel.Result) {

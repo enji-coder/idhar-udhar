@@ -14,9 +14,20 @@ class NavigationSpeaker {
   FlutterTts? _owned;
   String? lastSpokenKey;
   bool _ready = false;
+  bool _muted = false;
+
+  bool get isMuted => _muted;
+
+  /// Mutes or restores spoken cues. GPS and route updates are unaffected.
+  Future<void> setMuted(bool muted) async {
+    _muted = muted;
+    if (muted) {
+      await stop();
+    }
+  }
 
   Future<void> cue(GuidanceBanner? banner) async {
-    if (!_enabled || banner == null) {
+    if (_muted || !_enabled || banner == null) {
       return;
     }
     if (!shouldSpeakCue(banner: banner, lastSpokenKey: lastSpokenKey)) {

@@ -13,7 +13,6 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: PickupWaitView(
-            clock: '01:20',
             freeMinutes: 10,
             elapsedSeconds: 80,
             perMinute: '2.50',
@@ -25,16 +24,26 @@ void main() {
         ),
       ),
     );
-    expect(find.text('01:20'), findsOneWidget);
-    expect(find.text('Waiting charge Rs 0.00'), findsOneWidget);
-    expect(find.text('Rate Rs 2.50 / completed minute'), findsOneWidget);
-    expect(find.text('PACKAGE PICKED UP → START TRIP'), findsOneWidget);
+    expect(find.text('08:40'), findsOneWidget);
+    expect(find.text('FREE WAITING TIME'), findsOneWidget);
+    expect(find.text('Free waiting in progress'), findsOneWidget);
+    expect(
+      find.text('Free waiting is counting down. No fee applies until it ends.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Your free waiting time starts after arrival is confirmed.'),
+      findsNothing,
+    );
+    expect(find.text('No waiting fee during this time'), findsOneWidget);
+    expect(find.text('₹ 2.50 / min'), findsOneWidget);
+    expect(find.text('₹0.00'), findsOneWidget);
+    expect(find.text('Confirm Pickup & Start Trip'), findsOneWidget);
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: PickupWaitView(
-            clock: '11:00',
             freeMinutes: 10,
             elapsedSeconds: 660,
             perMinute: '2.50',
@@ -46,11 +55,20 @@ void main() {
         ),
       ),
     );
-    expect(find.text('11:00'), findsOneWidget);
-    expect(find.text('Waiting charge Rs 2.50'), findsOneWidget);
+    expect(find.text('01:00'), findsOneWidget);
+    expect(find.text('CHARGEABLE WAITING'), findsOneWidget);
+    expect(find.text('Free waiting time has ended'), findsWidgets);
+    expect(
+      find.text(
+        'Chargeable waiting time is running. Each completed minute is charged at the snapshot rate.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('₹2.50'), findsOneWidget);
   });
 
-  testWidgets('order menu opens real details and closing it leaves navigation', (
+  testWidgets('order menu opens real details and closing it leaves navigation',
+      (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1600);
@@ -80,7 +98,10 @@ void main() {
           builder: (BuildContext context) {
             return Scaffold(
               body: TripNavigationView(
-                map: const ColoredBox(color: Color(0xFFE6F4F1), key: Key('nav-map')),
+                map: const ColoredBox(
+                  color: Color(0xFFE6F4F1),
+                  key: Key('nav-map'),
+                ),
                 vehicleName: 'Bike',
                 instruction: 'Turn right in 200 meters',
                 maneuverDistance: '200 m',
@@ -91,7 +112,7 @@ void main() {
                   showModalBottomSheet<void>(
                     context: context,
                     builder: (BuildContext sheetContext) {
-                      return RiderOrderDetailsSheet(
+                      return const RiderOrderDetailsSheet(
                         order: order,
                         statusLabel: 'Going to Pickup',
                       );
@@ -116,7 +137,10 @@ void main() {
     expect(find.text('Turn right in 200 meters'), findsOneWidget);
     expect(find.byKey(const Key('nav-map')), findsOneWidget);
     expect(starts, 0);
-    expect(find.byKey(const ValueKey<String>('vehicle-marker-bike')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('vehicle-marker-bike')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a disabled pickup action does not fire twice', (tester) async {
@@ -125,7 +149,6 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: PickupWaitView(
-            clock: '00:05',
             freeMinutes: 10,
             elapsedSeconds: 5,
             perMinute: '1.00',
@@ -138,8 +161,134 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('PACKAGE PICKED UP → START TRIP'));
+    await tester.tap(find.text('Confirm Pickup & Start Trip'));
     await tester.pump();
     expect(taps, 0);
   });
+
+  testWidgets('free time counts down and then shows the chargeable minute', (
+    tester,
+  ) async {
+    Future<void> show(int elapsed, String amount) {
+      return tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PickupWaitView(
+              freeMinutes: 10,
+              elapsedSeconds: elapsed,
+              perMinute: '2.50',
+              amount: amount,
+              amountSource: 'preview',
+              onStartTrip: () {},
+              onMenu: () {},
+            ),
+          ),
+        ),
+      );
+    }
+
+    await show(0, '0.00');
+    expect(find.text('10:00'), findsOneWidget);
+    expect(find.text('Free waiting in progress'), findsOneWidget);
+    expect(
+      find.text('Your free waiting time starts after arrival is confirmed.'),
+      findsNothing,
+    );
+
+    await show(1, '0.00');
+    expect(find.text('09:59'), findsOneWidget);
+    expect(find.text('₹0.00'), findsOneWidget);
+
+    await show(660, '2.50');
+    expect(find.text('01:00'), findsOneWidget);
+    expect(find.text('Free waiting time has ended'), findsWidgets);
+    expect(find.text('₹2.50'), findsOneWidget);
+  });
+
+  testWidgets('missing rules keep the screen and do not invent a countdown', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PickupWaitView(
+            freeMinutes: 0,
+            elapsedSeconds: null,
+            rulesLoaded: false,
+            perMinute: '',
+            amount: '0.00',
+            amountSource: 'preview',
+            arrivalMissing: true,
+            error: 'Waiting details for this order are not available.',
+            onStartTrip: () {},
+            onMenu: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('--:--'), findsOneWidget);
+    expect(find.text('We could not find that.'), findsNothing);
+    expect(
+      find.text('Waiting details for this order are not available.'),
+      findsOneWidget,
+    );
+    expect(find.text('Rider at Pickup'), findsOneWidget);
+    expect(find.text('Confirm Pickup & Start Trip'), findsOneWidget);
+  });
+
+  testWidgets(
+      'arrival not confirmed explains that free waiting has not started', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: PickupWaitView(
+            freeMinutes: 10,
+            elapsedSeconds: null,
+            perMinute: '2.50',
+            amount: '0.00',
+            amountSource: 'preview',
+            arrivalMissing: true,
+            onStartTrip: _noop,
+            onMenu: _noop,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('10:00'), findsOneWidget);
+    expect(find.text('Customer not here yet'), findsOneWidget);
+    expect(
+      find.text('Your free waiting time starts after arrival is confirmed.'),
+      findsOneWidget,
+    );
+    expect(find.text('Free waiting in progress'), findsNothing);
+  });
+
+  testWidgets('a missing waiting rate is not shown as a zero charge', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: PickupWaitView(
+            freeMinutes: 10,
+            elapsedSeconds: 30,
+            perMinute: '',
+            amount: '',
+            amountSource: 'preview',
+            rateAvailable: false,
+            onStartTrip: _noop,
+            onMenu: _noop,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('09:30'), findsOneWidget);
+    expect(find.text('Unavailable'), findsNWidgets(2));
+    expect(find.text('₹0.00'), findsNothing);
+    expect(find.text('₹ 0.00 / min'), findsNothing);
+  });
 }
+
+void _noop() {}

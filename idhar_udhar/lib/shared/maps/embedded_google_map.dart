@@ -17,6 +17,10 @@ class MapMarkerSpec {
     this.icon,
     this.title = '',
     this.snippet = '',
+    this.rotation = 0,
+    this.flat = false,
+    this.anchor = const Offset(0.5, 1.0),
+    this.zIndex = 0,
   });
 
   final String id;
@@ -27,6 +31,14 @@ class MapMarkerSpec {
   final BitmapDescriptor? icon;
   final String title;
   final String snippet;
+
+  /// Clockwise degrees from the icon's default orientation (north, tip up).
+  final double rotation;
+
+  /// When true, [rotation] is relative to the map rather than the screen.
+  final bool flat;
+  final Offset anchor;
+  final int zIndex;
 }
 
 /// Interactive Google Map framed to match existing glass cards (no BackdropFilter).
@@ -49,6 +61,7 @@ class EmbeddedGoogleMap extends StatefulWidget {
     this.fitRouteOnce = false,
     this.deferFitUntilRoute = false,
     this.expanded = false,
+    this.navigationMode = false,
   });
 
   final double height;
@@ -76,6 +89,10 @@ class EmbeddedGoogleMap extends StatefulWidget {
   /// Fill the parent. [height] is ignored.
   final bool expanded;
 
+  /// Rider turn-by-turn presentation: clearer roads, a cased route, and a
+  /// camera viewport that stays above the bottom controls.
+  final bool navigationMode;
+
   @override
   State<EmbeddedGoogleMap> createState() => _EmbeddedGoogleMapState();
 }
@@ -100,6 +117,12 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
   }
 
   CameraPosition get _initialCamera {
+    if (widget.navigationMode) {
+      return CameraPosition(
+        target: LatLng(widget.initial.latitude, widget.initial.longitude),
+        zoom: 16.6,
+      );
+    }
     final List<GeoPoint> framed = widget.markers
         .map((MapMarkerSpec spec) => spec.point)
         .toList(growable: false);
@@ -141,6 +164,10 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
             ? InfoWindow.noText
             : InfoWindow(title: spec.title, snippet: spec.snippet),
         icon: spec.icon ?? BitmapDescriptor.defaultMarkerWithHue(spec.hue),
+        rotation: spec.rotation,
+        flat: spec.flat,
+        anchor: spec.anchor,
+        zIndexInt: spec.zIndex,
       );
     }).toSet();
   }
@@ -149,16 +176,78 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     if (widget.route.length < 2) {
       return const <Polyline>{};
     }
+    final List<LatLng> points = widget.route
+        .map((GeoPoint p) => LatLng(p.latitude, p.longitude))
+        .toList(growable: false);
+    if (!widget.navigationMode) {
+      return <Polyline>{
+        Polyline(
+          polylineId: const PolylineId('route'),
+          color: widget.accentColor,
+          width: 4,
+          points: points,
+        ),
+      };
+    }
     return <Polyline>{
       Polyline(
-        polylineId: const PolylineId('route'),
-        color: widget.accentColor,
-        width: 4,
-        points: widget.route
-            .map((GeoPoint p) => LatLng(p.latitude, p.longitude))
-            .toList(growable: false),
+        polylineId: const PolylineId('route-shadow'),
+        color: const Color(0x66148BA6),
+        width: 18,
+        jointType: JointType.round,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
+        geodesic: true,
+        zIndex: 1,
+        points: points,
       ),
+      Polyline(
+        polylineId: const PolylineId('route-casing'),
+        color: Colors.white,
+        width: 12,
+        jointType: JointType.round,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
+        geodesic: true,
+        zIndex: 2,
+        points: points,
+      ),
+      ..._routeBands(points),
     };
+  }
+
+  List<Polyline> _routeBands(List<LatLng> points) {
+    const List<Color> colors = <Color>[
+      Color(0xFF0B6E8C),
+      Color(0xFF0E88A8),
+      Color(0xFF12A3B8),
+      Color(0xFF1BB8C4),
+    ];
+    final int segments = points.length - 1;
+    final List<Polyline> bands = <Polyline>[];
+    for (int band = 0; band < colors.length; band++) {
+      final int start = (segments * band / colors.length).floor();
+      final int end = band == colors.length - 1
+          ? points.length - 1
+          : (segments * (band + 1) / colors.length).ceil();
+      if (end <= start) {
+        continue;
+      }
+      bands.add(
+        Polyline(
+          polylineId: PolylineId('route-core-$band'),
+          color: colors[band],
+          width: 7,
+          jointType: JointType.round,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          geodesic: true,
+          zIndex: 3,
+          points: points.sublist(start, end + 1),
+        ),
+      );
+    }
+    return bands;
   }
 
   Future<void> _syncCamera() async {
@@ -170,13 +259,13 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
       return;
     }
     if (widget.follow) {
-      // ~11 m grid — skip camera motion for GPS jitter below that.
+      // ~1 m grid. The pose tracker already drops smaller GPS jitter.
       final String key =
-          '${widget.initial.latitude.toStringAsFixed(4)},${widget.initial.longitude.toStringAsFixed(4)}';
+          '${widget.initial.latitude.toStringAsFixed(5)},${widget.initial.longitude.toStringAsFixed(5)}';
       if (key != _lastFollowKey) {
         _lastFollowKey = key;
         _movingProgrammatically = true;
-        await controller.animateCamera(
+        await controller.moveCamera(
           CameraUpdate.newLatLng(
             LatLng(widget.initial.latitude, widget.initial.longitude),
           ),
@@ -298,9 +387,7 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
                   widget.statusMessage!.trim().isNotEmpty)
                 Positioned(
                   left: AppSpacing.sm,
-                  right: widget.onMyLocation == null
-                      ? AppSpacing.sm
-                      : 56,
+                  right: widget.onMyLocation == null ? AppSpacing.sm : 56,
                   top: AppSpacing.sm,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
@@ -343,6 +430,11 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
       initialCameraPosition: _initialCamera,
       markers: _markers,
       polylines: _polylines,
+      style: widget.navigationMode ? _navigationMapStyle : null,
+      padding: widget.navigationMode
+          ? const EdgeInsets.fromLTRB(16, 108, 16, 196)
+          : EdgeInsets.zero,
+      buildingsEnabled: !widget.navigationMode,
       myLocationEnabled: widget.myLocationEnabled,
       myLocationButtonEnabled: false,
       zoomControlsEnabled: false,
@@ -375,15 +467,31 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
               }
               final LatLngBounds bounds = await controller.getVisibleRegion();
               final GeoPoint center = GeoPoint(
-                latitude: (bounds.northeast.latitude +
-                        bounds.southwest.latitude) /
-                    2,
-                longitude: (bounds.northeast.longitude +
-                        bounds.southwest.longitude) /
-                    2,
+                latitude:
+                    (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
+                longitude:
+                    (bounds.northeast.longitude + bounds.southwest.longitude) /
+                        2,
               );
               widget.onCameraIdle!(center);
             },
     );
   }
 }
+
+/// Light roads with visible strokes so the cased route stays readable.
+const String _navigationMapStyle = '''
+[
+  {"elementType":"geometry","stylers":[{"color":"#eef2f4"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"#3d4a55"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"#f8fafb"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
+  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"#c5ced6"}]},
+  {"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#f4f6f8"}]},
+  {"featureType":"road.highway","elementType":"geometry.stroke","stylers":[{"color":"#b7c2cc"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#c5e4f3"}]},
+  {"featureType":"poi","elementType":"labels","stylers":[{"visibility":"simplified"}]},
+  {"featureType":"transit","stylers":[{"visibility":"off"}]}
+]
+''';

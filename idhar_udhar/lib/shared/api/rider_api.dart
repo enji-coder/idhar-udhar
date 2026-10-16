@@ -14,9 +14,8 @@ class RiderRatingSummary {
   final String? latestComment;
 
   factory RiderRatingSummary.fromJson(Map<String, Object?> json) {
-    final List<Map<String, Object?>> rows = jsonList(json['ratings'])
-        .map(jsonObject)
-        .toList(growable: false);
+    final List<Map<String, Object?>> rows =
+        jsonList(json['ratings']).map(jsonObject).toList(growable: false);
     String? comment;
     for (final Map<String, Object?> row in rows) {
       final String? text = jsonString(row['comment']);
@@ -26,8 +25,12 @@ class RiderRatingSummary {
       }
     }
     return RiderRatingSummary(
-      count: json['rating_count'] is num ? (json['rating_count'] as num).toInt() : 0,
-      average: json['rating_average'] == null ? 0 : jsonDouble(json['rating_average']),
+      count: json['rating_count'] is num
+          ? (json['rating_count'] as num).toInt()
+          : 0,
+      average: json['rating_average'] == null
+          ? 0
+          : jsonDouble(json['rating_average']),
       latestComment: comment,
     );
   }
@@ -91,7 +94,8 @@ class RiderOffer {
       displayId: jsonString(json['display_id']),
       crn: jsonString(json['crn']),
       orderStatus: jsonString(json['order_status']),
-      tripFare: json['trip_fare'] == null ? null : jsonDouble(json['trip_fare']),
+      tripFare:
+          json['trip_fare'] == null ? null : jsonDouble(json['trip_fare']),
       riderAmount: json['rider_amount'] == null
           ? null
           : jsonDouble(json['rider_amount']),
@@ -139,6 +143,8 @@ class PickupWaitSnapshot {
     required this.amount,
     required this.amountSource,
     required this.vehicleCategoryName,
+    this.hasWaitingRules = true,
+    this.hasWaitingRate = true,
   });
 
   final DateTime? arrivalAt;
@@ -154,25 +160,29 @@ class PickupWaitSnapshot {
   final String amountSource;
   final String vehicleCategoryName;
 
+  /// False when the payload omitted the snapshotted free-waiting minutes.
+  final bool hasWaitingRules;
+
+  /// False when the snapshot rate is missing or not a rupee amount.
+  /// An explicit zero from the server stays true.
+  final bool hasWaitingRate;
+
   factory PickupWaitSnapshot.fromJson(Map<String, Object?> json) {
+    final int? minutes = _waitingMinutes(json['initial_waiting_minutes']);
+    final String? rate = _waitingRate(json['waiting_charge_per_minute']);
     return PickupWaitSnapshot(
       arrivalAt: _time(json['arrival_at']),
       pickedUpAt: _time(json['picked_up_at']),
       serverNow: _time(json['server_now']) ?? DateTime.now().toUtc(),
-      timestampStatus: jsonString(json['timestamp_status']) ?? 'missing_arrival',
-      initialWaitingMinutes: json['initial_waiting_minutes'] is num
-          ? (json['initial_waiting_minutes'] as num).toInt()
-          : 0,
-      perMinute: jsonString(json['waiting_charge_per_minute']) ?? '0.00',
-      elapsedSeconds: json['elapsed_seconds'] is num
-          ? (json['elapsed_seconds'] as num).toInt()
-          : null,
-      elapsedMinutes: json['elapsed_minutes'] is num
-          ? (json['elapsed_minutes'] as num).toInt()
-          : 0,
-      chargeableMinutes: json['chargeable_minutes'] is num
-          ? (json['chargeable_minutes'] as num).toInt()
-          : 0,
+      timestampStatus:
+          jsonString(json['timestamp_status']) ?? 'missing_arrival',
+      initialWaitingMinutes: minutes ?? 0,
+      hasWaitingRules: minutes != null,
+      hasWaitingRate: rate != null,
+      perMinute: rate ?? '',
+      elapsedSeconds: _waitingMinutes(json['elapsed_seconds']),
+      elapsedMinutes: _waitingMinutes(json['elapsed_minutes']) ?? 0,
+      chargeableMinutes: _waitingMinutes(json['chargeable_minutes']) ?? 0,
       amount: jsonString(json['amount']) ?? '0.00',
       amountSource: jsonString(json['amount_source']) ?? 'preview',
       vehicleCategoryName: jsonString(json['vehicle_category_name']) ?? '',
@@ -180,6 +190,49 @@ class PickupWaitSnapshot {
   }
 
   bool get arrivalMissing => timestampStatus != 'ok' || arrivalAt == null;
+}
+
+int? _waitingMinutes(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is int) {
+    return value;
+  }
+  if (value is num && value.isFinite) {
+    return value.toInt();
+  }
+  if (value is String) {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return int.tryParse(trimmed);
+  }
+  return null;
+}
+
+String? _waitingRate(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is num) {
+    if (!value.isFinite || value < 0) {
+      return null;
+    }
+    return value.toStringAsFixed(2);
+  }
+  final String? text = jsonString(value)?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  final RegExpMatch? match =
+      RegExp(r'^(\d+)(?:\.(\d{1,2}))?$').firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  final String frac = (match.group(2) ?? '').padRight(2, '0');
+  return '${match.group(1)}.$frac';
 }
 
 DateTime? _time(Object? value) {
@@ -209,7 +262,9 @@ class RiderApi {
   Future<ApiOrder> acceptOffer(String offerId) async {
     final Map<String, Object?> body =
         await _client.post('/v1/rider/offers/$offerId/accept');
-    return ApiOrder.fromJson(jsonObject(body['order']).isEmpty ? body : jsonObject(body['order']));
+    return ApiOrder.fromJson(
+      jsonObject(body['order']).isEmpty ? body : jsonObject(body['order']),
+    );
   }
 
   Future<void> rejectOffer(String offerId) async {

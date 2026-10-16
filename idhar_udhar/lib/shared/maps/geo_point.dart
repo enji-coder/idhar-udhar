@@ -8,7 +8,8 @@ class GeoPoint {
   final double longitude;
 
   bool get isValid =>
-      latitude.abs() <= 90 && longitude.abs() <= 180 &&
+      latitude.abs() <= 90 &&
+      longitude.abs() <= 180 &&
       !(latitude == 0 && longitude == 0);
 }
 
@@ -35,8 +36,7 @@ class ResolvedAddress {
   final String address;
   final String city;
 
-  GeoPoint get point =>
-      GeoPoint(latitude: latitude, longitude: longitude);
+  GeoPoint get point => GeoPoint(latitude: latitude, longitude: longitude);
 }
 
 class PlaceSuggestion {
@@ -110,24 +110,29 @@ class DeviceLocation {
     required this.latitude,
     required this.longitude,
     this.accuracy,
+    this.bearingDegrees,
+    this.speedMps,
   });
 
   final double latitude;
   final double longitude;
   final double? accuracy;
 
-  GeoPoint get point =>
-      GeoPoint(latitude: latitude, longitude: longitude);
+  /// Clockwise degrees from true north, when the platform reports a bearing.
+  final double? bearingDegrees;
+
+  /// Ground speed in meters per second, when the platform reports it.
+  final double? speedMps;
+
+  GeoPoint get point => GeoPoint(latitude: latitude, longitude: longitude);
 }
 
 class LocationResult {
   const LocationResult._({this.location, this.failure});
 
-  const LocationResult.ok(DeviceLocation location)
-      : this._(location: location);
+  const LocationResult.ok(DeviceLocation location) : this._(location: location);
 
-  const LocationResult.fail(LocationFailure failure)
-      : this._(failure: failure);
+  const LocationResult.fail(LocationFailure failure) : this._(failure: failure);
 
   final DeviceLocation? location;
   final LocationFailure? failure;

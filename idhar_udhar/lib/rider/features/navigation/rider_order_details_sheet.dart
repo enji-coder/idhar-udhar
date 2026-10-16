@@ -118,7 +118,9 @@ class RiderOrderDetailsSheet extends StatelessWidget {
                 icon: Icons.hourglass_bottom_rounded,
                 label: 'Waiting charge',
                 child: Text(
-                  'Rs ${waiting!.amount} · ${waiting!.initialWaitingMinutes} min free · Rs ${waiting!.perMinute}/min',
+                  waiting!.hasWaitingRate
+                      ? 'Rs ${waiting!.amount} · ${waiting!.initialWaitingMinutes} min free · Rs ${waiting!.perMinute}/min'
+                      : '${waiting!.initialWaitingMinutes} min free · waiting rate unavailable',
                   style: _valueStyle,
                 ),
               ),

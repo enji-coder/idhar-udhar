@@ -220,6 +220,25 @@ describe('SettlementService', () => {
     expect(paid.repo.debitWalletUpTo).not.toHaveBeenCalled();
   });
 
+  it('reuses the same waiting assessment key when pickup is recorded twice', async () => {
+    const { service, repo, receivables } = harness('0.00');
+    const tx = {
+      query: jest.fn(async () => ({
+        rows: [{ customer_profile_id: CUSTOMER }],
+        rowCount: 1,
+      })),
+    } as unknown as Queryable;
+    await service.onPickedUp(ORDER, tx);
+    await service.onPickedUp(ORDER, tx);
+    expect(repo.assessPickup).toHaveBeenCalledTimes(2);
+    expect(repo.assessPickup).toHaveBeenNthCalledWith(1, ORDER, tx);
+    expect(repo.assessPickup).toHaveBeenNthCalledWith(2, ORDER, tx);
+    expect(receivables).toHaveLength(2);
+    expect(receivables[0].idempotencyKey).toBe(`waiting-assessment:${WAITING}`);
+    expect(receivables[1].idempotencyKey).toBe(receivables[0].idempotencyKey);
+    expect(receivables[0].amount).toBe('5.00');
+  });
+
   it('leaves cancellation unchanged when pickup waiting was never assessed', async () => {
     const { service, repo } = harness('10.00');
     repo.findWaiting.mockResolvedValue(null as never);

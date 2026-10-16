@@ -9,7 +9,6 @@ import 'waiting_clock.dart';
 
 class PickupWaitView extends StatelessWidget {
   const PickupWaitView({
-    required this.clock,
     required this.freeMinutes,
     required this.elapsedSeconds,
     required this.perMinute,
@@ -17,13 +16,14 @@ class PickupWaitView extends StatelessWidget {
     required this.amountSource,
     required this.onStartTrip,
     required this.onMenu,
+    this.rulesLoaded = true,
+    this.rateAvailable = true,
     this.primaryEnabled = true,
     this.error,
     this.arrivalMissing = false,
     super.key,
   });
 
-  final String clock;
   final int freeMinutes;
   final int? elapsedSeconds;
   final String perMinute;
@@ -31,30 +31,68 @@ class PickupWaitView extends StatelessWidget {
   final String amountSource;
   final VoidCallback? onStartTrip;
   final VoidCallback onMenu;
+  final bool rulesLoaded;
+  final bool rateAvailable;
   final bool primaryEnabled;
   final String? error;
   final bool arrivalMissing;
 
+  bool get _counting =>
+      rulesLoaded && !arrivalMissing && elapsedSeconds != null;
+
+  bool get _charging {
+    if (!_counting) {
+      return false;
+    }
+    return freeWaitingRemainingSeconds(
+          elapsedSeconds: elapsedSeconds!,
+          freeMinutes: freeMinutes,
+        ) ==
+        0;
+  }
+
+  String get _clock {
+    if (!rulesLoaded) {
+      return '--:--';
+    }
+    if (!_counting) {
+      return formatWaitingClock(freeMinutes * 60);
+    }
+    if (_charging) {
+      return formatWaitingClock(
+        chargeableWaitingSeconds(
+          elapsedSeconds: elapsedSeconds!,
+          freeMinutes: freeMinutes,
+        ),
+      );
+    }
+    return formatWaitingClock(
+      freeWaitingRemainingSeconds(
+        elapsedSeconds: elapsedSeconds!,
+        freeMinutes: freeMinutes,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final int remaining = elapsedSeconds == null
-        ? 0
-        : freeWaitingRemainingSeconds(
-            elapsedSeconds: elapsedSeconds!,
-            freeMinutes: freeMinutes,
-          );
-    final bool charging =
-        elapsedSeconds != null && remaining == 0 && freeMinutes > 0
-            ? elapsedSeconds! >= freeMinutes * 60
-            : amount != '0.00' && amount != '0';
-    final String infoMessage = arrivalMissing
-        ? 'Arrival time not confirmed. Waiting charges have not started.'
-        : remaining > 0
-            ? 'Free waiting left ${formatWaitingClock(remaining)}'
-            : 'Free waiting of $freeMinutes min has ended';
-    final String chargeLabel = charging || amount != '0.00'
-        ? 'Waiting charge Rs $amount'
-        : 'Waiting charge Rs 0.00';
+    final bool charging = _charging;
+    final String infoTitle = !_counting
+        ? 'Customer not here yet'
+        : charging
+            ? 'Free waiting time has ended'
+            : 'Free waiting in progress';
+    final String infoBody = !_counting
+        ? 'Your free waiting time starts after arrival is confirmed.'
+        : charging
+            ? 'Chargeable waiting time is running. Each completed minute is charged at the snapshot rate.'
+            : 'Free waiting is counting down. No fee applies until it ends.';
+    final String rate = !rateAvailable
+        ? 'Unavailable'
+        : perMinute.trim().isEmpty
+            ? '—'
+            : '₹ $perMinute / min';
+    final String charge = !rateAvailable ? 'Unavailable' : '₹$amount';
 
     return SafeArea(
       child: Padding(
@@ -72,11 +110,11 @@ class PickupWaitView extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Rider at Pickup Location',
+                    'Rider at Pickup',
                     style: RiderTextStyles.heading.copyWith(
-                      fontSize: 22,
+                      fontSize: 28,
                       fontWeight: FontWeight.w700,
-                      height: 1.2,
+                      height: 1.15,
                     ),
                   ),
                 ),
@@ -87,6 +125,13 @@ class PickupWaitView extends StatelessWidget {
                   color: RiderColors.textPrimary,
                 ),
               ],
+            ),
+            Text(
+              'Waiting for customer',
+              style: RiderTextStyles.bodyMedium.copyWith(
+                fontSize: 16,
+                color: RiderColors.textPrimary,
+              ),
             ),
             Expanded(
               child: SingleChildScrollView(
@@ -101,88 +146,15 @@ class PickupWaitView extends StatelessWidget {
                         painter: _PickupWaitHeroPainter(),
                       ),
                     ),
-                    const SizedBox(height: RiderSpacing.xl),
-                    Text(
-                      'Waiting for customer',
-                      textAlign: TextAlign.center,
-                      style: RiderTextStyles.bodyMedium.copyWith(
-                        fontSize: 16,
-                        color: RiderColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: RiderSpacing.sm),
-                    Text(
-                      clock,
-                      key: const Key('waiting-clock'),
-                      textAlign: TextAlign.center,
-                      style: RiderTextStyles.heading.copyWith(
-                        fontSize: 56,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.5,
-                        fontFeatures: const <FontFeature>[
-                          FontFeature.tabularFigures(),
-                        ],
-                      ),
-                    ),
                     const SizedBox(height: RiderSpacing.lg),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: RiderSpacing.md,
-                        vertical: RiderSpacing.md,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD8F0EA),
-                        borderRadius: BorderRadius.circular(RiderRadius.md),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(
-                            Icons.info_outline_rounded,
-                            size: 22,
-                            color: RiderColors.textPrimary,
-                          ),
-                          const SizedBox(width: RiderSpacing.sm),
-                          Expanded(
-                            child: Text(
-                              infoMessage,
-                              style: RiderTextStyles.body.copyWith(
-                                fontSize: 13,
-                                height: 1.35,
-                                color: RiderColors.textPrimary,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                    _InfoCard(title: infoTitle, body: infoBody),
+                    const SizedBox(height: RiderSpacing.md),
+                    _WaitingCard(
+                      charging: charging,
+                      clock: _clock,
+                      rate: rate,
+                      charge: charge,
                     ),
-                    const SizedBox(height: RiderSpacing.lg),
-                    Text(
-                      'Rate Rs $perMinute / completed minute',
-                      textAlign: TextAlign.center,
-                      style: RiderTextStyles.caption.copyWith(
-                        color: RiderColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: RiderSpacing.xs),
-                    Text(
-                      chargeLabel,
-                      textAlign: TextAlign.center,
-                      style: RiderTextStyles.title.copyWith(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: RiderColors.primary,
-                      ),
-                    ),
-                    if (amountSource == 'assessed') ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        'Recorded by the server',
-                        textAlign: TextAlign.center,
-                        style: RiderTextStyles.caption,
-                      ),
-                    ],
                     if (error != null && error!.isNotEmpty) ...[
                       const SizedBox(height: RiderSpacing.sm),
                       Text(
@@ -193,7 +165,7 @@ class PickupWaitView extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: RiderSpacing.xl),
+                    const SizedBox(height: RiderSpacing.lg),
                   ],
                 ),
               ),
@@ -211,16 +183,226 @@ class PickupWaitView extends StatelessWidget {
                     borderRadius: BorderRadius.circular(28),
                   ),
                   textStyle: RiderTextStyles.button.copyWith(
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
                   ),
                 ),
-                child: const Text('PACKAGE PICKED UP → START TRIP'),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Text('Confirm Pickup & Start Trip'),
+                    SizedBox(width: 8),
+                    Icon(Icons.arrow_forward_rounded, size: 20),
+                  ],
+                ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4FBFA),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const _OutlineIcon(icon: Icons.access_time_rounded),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: RiderTextStyles.title.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  body,
+                  style: RiderTextStyles.body.copyWith(
+                    fontSize: 13,
+                    height: 1.35,
+                    color: RiderColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WaitingCard extends StatelessWidget {
+  const _WaitingCard({
+    required this.charging,
+    required this.clock,
+    required this.rate,
+    required this.charge,
+  });
+
+  final bool charging;
+  final String clock;
+  final String rate;
+  final String charge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x140F3D3E),
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const _OutlineIcon(icon: Icons.access_time_rounded),
+              const SizedBox(width: 12),
+              Text(
+                charging ? 'CHARGEABLE WAITING' : 'FREE WAITING TIME',
+                style: _sectionLabel,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            clock,
+            key: const Key('waiting-clock'),
+            style: RiderTextStyles.heading.copyWith(
+              fontSize: 40,
+              fontWeight: FontWeight.w700,
+              height: 1.05,
+              letterSpacing: 0.4,
+              fontFeatures: const <FontFeature>[
+                FontFeature.tabularFigures(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            charging
+                ? 'Free waiting time has ended'
+                : 'No waiting fee during this time',
+            style: RiderTextStyles.caption.copyWith(fontSize: 13),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: Divider(height: 1, color: Color(0xFFE3EEEC)),
+          ),
+          Row(
+            children: <Widget>[
+              const _OutlineIcon(icon: Icons.currency_rupee_rounded),
+              const SizedBox(width: 12),
+              Text('AFTER FREE TIME', style: _sectionLabel),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            rate,
+            style: RiderTextStyles.heading.copyWith(
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Charged for each completed waiting minute',
+            style: RiderTextStyles.caption.copyWith(fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE7F5F2),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: <Widget>[
+                const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 18,
+                  color: RiderColors.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Current waiting charge',
+                    style: RiderTextStyles.bodyMedium.copyWith(
+                      fontSize: 14,
+                      color: RiderColors.textPrimary,
+                    ),
+                  ),
+                ),
+                Text(
+                  charge,
+                  style: RiderTextStyles.title.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+TextStyle get _sectionLabel => RiderTextStyles.caption.copyWith(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.4,
+      color: const Color(0xFF8AA3A4),
+    );
+
+class _OutlineIcon extends StatelessWidget {
+  const _OutlineIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFFD5E3E4)),
+      ),
+      child: Icon(icon, size: 18, color: RiderColors.textPrimary),
     );
   }
 }

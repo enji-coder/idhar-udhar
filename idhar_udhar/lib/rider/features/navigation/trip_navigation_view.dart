@@ -20,6 +20,8 @@ class TripNavigationView extends StatelessWidget {
     this.onSecondary,
     this.statusMessage,
     this.onRetryRoute,
+    this.voiceMuted = false,
+    this.onToggleVoice,
     super.key,
   });
 
@@ -36,6 +38,8 @@ class TripNavigationView extends StatelessWidget {
   final VoidCallback? onSecondary;
   final String? statusMessage;
   final VoidCallback? onRetryRoute;
+  final bool voiceMuted;
+  final VoidCallback? onToggleVoice;
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +96,16 @@ class TripNavigationView extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (onToggleVoice != null) ...[
+                  const SizedBox(height: RiderSpacing.sm),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: _VoiceGuidanceButton(
+                      muted: voiceMuted,
+                      onPressed: onToggleVoice!,
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -178,6 +192,45 @@ class TripNavigationView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _VoiceGuidanceButton extends StatelessWidget {
+  const _VoiceGuidanceButton({
+    required this.muted,
+    required this.onPressed,
+  });
+
+  final bool muted;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final String tooltip =
+        muted ? 'Unmute voice guidance' : 'Mute voice guidance';
+    return Semantics(
+      button: true,
+      label: tooltip,
+      toggled: muted,
+      child: Material(
+        color: muted ? Colors.white : RiderColors.primary,
+        elevation: 3,
+        shape: CircleBorder(
+          side: BorderSide(
+            color: muted ? RiderColors.primary : Colors.transparent,
+            width: 1.4,
+          ),
+        ),
+        child: IconButton(
+          tooltip: tooltip,
+          onPressed: onPressed,
+          icon: Icon(
+            muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            color: muted ? RiderColors.primary : Colors.white,
+          ),
+        ),
+      ),
     );
   }
 }

@@ -170,17 +170,17 @@ class _StartDeliveryButton extends StatelessWidget {
           label: 'Start Delivery',
           onPressed: () => context.push(RiderRoutes.activeDelivery),
         ),
-        const Positioned(
-          right: 22,
-          bottom: 8,
-          child: IgnorePointer(
-            child: Icon(
-              Icons.auto_awesome,
-              size: 13,
-              color: Color(0xE6FFFFFF),
-            ),
-          ),
-        ),
+        // const Positioned(
+        //   right: 22,
+        //   bottom: 18,
+        //   child: IgnorePointer(
+        //     child: Icon(
+        //       Icons.auto_awesome,
+        //       size: 13,
+        //       color: Color(0xE6FFFFFF),
+        //     ),
+        //   ),
+        // ),
       ],
     );
   }

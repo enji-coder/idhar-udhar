@@ -105,6 +105,8 @@ class MapsPlatform {
           latitude: lat,
           longitude: lng,
           accuracy: (map['accuracy'] as num?)?.toDouble(),
+          bearingDegrees: (map['bearing'] as num?)?.toDouble(),
+          speedMps: (map['speed'] as num?)?.toDouble(),
         ),
       );
     } on MissingPluginException {
@@ -119,8 +121,8 @@ class MapsPlatform {
       return null;
     }
     try {
-      final Object? raw =
-          await _channel.invokeMethod<Object>('reverseGeocode', <String, Object>{
+      final Object? raw = await _channel
+          .invokeMethod<Object>('reverseGeocode', <String, Object>{
         'latitude': point.latitude,
         'longitude': point.longitude,
       });
@@ -140,8 +142,8 @@ class MapsPlatform {
       return null;
     }
     try {
-      final Object? raw =
-          await _channel.invokeMethod<Object>('forwardGeocode', <String, Object>{
+      final Object? raw = await _channel
+          .invokeMethod<Object>('forwardGeocode', <String, Object>{
         'query': trimmed,
       });
       return _parseResolved(raw, null, null);
@@ -162,10 +164,8 @@ class MapsPlatform {
     }
     final Map<Object?, Object?> map = raw;
     final String address = (map['address'] as String? ?? '').trim();
-    final double? lat =
-        (map['latitude'] as num?)?.toDouble() ?? fallbackLat;
-    final double? lng =
-        (map['longitude'] as num?)?.toDouble() ?? fallbackLng;
+    final double? lat = (map['latitude'] as num?)?.toDouble() ?? fallbackLat;
+    final double? lng = (map['longitude'] as num?)?.toDouble() ?? fallbackLng;
     if (address.isEmpty || lat == null || lng == null) {
       return null;
     }
