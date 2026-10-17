@@ -110,9 +110,69 @@ describe('FinanceService.captureOnDelivered', () => {
       { warn: jest.fn() } as never,
     );
 
-    await service.captureOnDelivered(deliveredOrder(), {} as never);
+    const result = await service.captureOnDelivered(deliveredOrder(), {} as never);
     expect(finance.insertOriginalFromFareSnapshot).not.toHaveBeenCalled();
+    expect(finance.findActiveSettings).not.toHaveBeenCalled();
+    expect(result.snapshot.rider_percentage).toBe('85.00');
+    expect(result.snapshot.company_commission_percentage).toBe('15.00');
+    expect(result.snapshot.operational_cost_percentage_of_commission).toBe('50.00');
+    expect(result.snapshot.rider_amount).toBe('85.00');
     expect(walletCod.syncOrderFinance).toHaveBeenCalled();
+  });
+
+  it('refuses capture when no payment settings version is ACTIVE', async () => {
+    const finance = {
+      findOriginal: jest.fn(async () => null),
+      findActiveSettings: jest.fn(async () => null),
+      insertOriginalFromFareSnapshot: jest.fn(),
+    };
+    const fares = {
+      findSnapshotByOrder: jest.fn(async () => ({
+        fare_snapshot_id: 'f1',
+        order_id: ORDER,
+        tax: '0.00',
+      })),
+    };
+    const service = new FinanceService(
+      {} as never,
+      {} as never,
+      fares as never,
+      finance as never,
+      { syncOrderFinance: jest.fn() } as never,
+      {} as never,
+      {} as never,
+      { warn: jest.fn() } as never,
+    );
+
+    await expect(
+      service.captureOnDelivered(deliveredOrder(), {} as never),
+    ).rejects.toMatchObject({
+      code: ErrorCodes.PAYMENT_SETTINGS_UNAVAILABLE,
+      message: 'No active payment settings version exists',
+      status: 409,
+    });
+    expect(finance.insertOriginalFromFareSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('refuses a fare allocation when no payment settings version is ACTIVE', async () => {
+    const finance = {
+      allocate: jest.fn(async () => null),
+    };
+    const service = new FinanceService(
+      {} as never,
+      {} as never,
+      {} as never,
+      finance as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { warn: jest.fn() } as never,
+    );
+    await expect(service.allocatePreview('100.00')).rejects.toMatchObject({
+      code: ErrorCodes.PAYMENT_SETTINGS_UNAVAILABLE,
+      message: 'No active payment settings version exists',
+      status: 409,
+    });
   });
 
   it('rejects capture when order is not delivered', async () => {

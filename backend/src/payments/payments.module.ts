@@ -9,10 +9,12 @@ import { OrdersModule } from '../orders/orders.module';
 import { SettlementModule } from '../settlement/settlement.module';
 import { WalletCodModule } from '../wallet-cod/wallet-cod.module';
 import { AdminFinanceController } from './admin-finance.controller';
+import { AdminPaymentSettingsController } from './admin-payment-settings.controller';
 import { AdminLedgerController } from './admin-ledger.controller';
 import { AdminTaxConfigController } from './admin-tax-config.controller';
 import { FinanceRepository } from './finance.repository';
 import { FinanceService } from './finance.service';
+import { PaymentSettingsService } from './payment-settings.service';
 import { OrderPaymentsController } from './order-payments.controller';
 import { OrderTaxSnapshotRepository } from './order-tax-snapshot.repository';
 import { PAYMENT_PROVIDER } from './payment-provider';
@@ -41,6 +43,7 @@ import { CashfreeWebhookService } from './cashfree-webhook.service';
   controllers: [
     OrderPaymentsController,
     AdminFinanceController,
+    AdminPaymentSettingsController,
     AdminLedgerController,
     AdminTaxConfigController,
     CashfreeWebhookController,
@@ -52,6 +55,7 @@ import { CashfreeWebhookService } from './cashfree-webhook.service';
     PaymentGatewayRepository,
     FinanceService,
     FinanceRepository,
+    PaymentSettingsService,
     TaxConfigService,
     TaxConfigRepository,
     OrderTaxSnapshotRepository,

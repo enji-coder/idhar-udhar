@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getPaymentSettings, PAYMENT_SETTINGS_KEY, subscribePaymentSettings } from '../services/commission';
+import { fetchPaymentSettings } from '../api/adminApi';
+import {
+  getPaymentSettings,
+  PAYMENT_SETTINGS_KEY,
+  paymentSettingsFromApi,
+  rememberPaymentSettings,
+  subscribePaymentSettings,
+} from '../services/commission';
 
 export default function usePaymentSettings() {
   const [settings, setSettings] = useState(getPaymentSettings);
@@ -7,6 +14,14 @@ export default function usePaymentSettings() {
   useEffect(() => {
     const refresh = () => setSettings(getPaymentSettings());
     const unsubscribe = subscribePaymentSettings(refresh);
+    fetchPaymentSettings()
+      .then((body) => {
+        const payment = paymentSettingsFromApi(body?.active);
+        if (payment) rememberPaymentSettings(payment);
+      })
+      .catch(() => {
+        /* The settings page reports a failed load. Other screens keep the last saved values. */
+      });
     function onStorage(event) {
       if (!event.key || event.key === PAYMENT_SETTINGS_KEY) refresh();
     }

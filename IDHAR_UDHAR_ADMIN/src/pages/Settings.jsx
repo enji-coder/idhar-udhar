@@ -19,11 +19,14 @@ import { MODULES, ROLES, defaultModulesForRole } from '../config/permissions';
 import { recordAudit } from '../services/auditService';
 import { nextId } from '../utils/ids';
 import { compactErrors, isEmail, required } from '../utils/validation';
+import { fetchPaymentSettings, publishPaymentSettings } from '../api/adminApi';
 import {
   PAYMENT_DEFAULTS,
   calculateDistribution,
   normalizePaymentSettings,
-  notifyPaymentSettings,
+  paymentSettingsFromApi,
+  paymentSettingsPayload,
+  rememberPaymentSettings,
   round2,
 } from '../services/commission';
 import { formatINRExact } from '../utils/format';
@@ -95,7 +98,7 @@ const emptyAdmin = {
 function PaymentExplanation({ settings }) {
   const example = calculateDistribution(100, settings);
   const steps = [
-        { icon: Wallet, title: 'Trip Fare', percent: null, amount: example.totalAmount, note: '85/15 uses trip fare, not discounted payable' },
+        { icon: Wallet, title: 'Trip Fare', percent: null, amount: example.totalAmount, note: 'The split uses trip fare, not the discounted payable' },
     { icon: BadgePercent, title: 'Rider receives', percent: example.riderPercentage, amount: example.riderAmount, note: 'Always paid from the ride amount' },
     { icon: Building2, title: 'Company Commission', percent: example.companyCommissionPercentage, amount: example.companyCommission, note: 'Remaining share after rider payout' },
   ];
@@ -163,14 +166,34 @@ export default function Settings() {
   const [editor, setEditor] = useState(null);
   const [errors, setErrors] = useState({});
   const [payErrors, setPayErrors] = useState({});
+  const [activePayment, setActivePayment] = useState(null);
+  const [paymentVersion, setPaymentVersion] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setForm(loadSettings());
     setOffice(loadCompanyOffice());
     setCancellation(loadCancellationConfig());
+    let cancelled = false;
+    fetchPaymentSettings()
+      .then((body) => {
+        if (cancelled) return;
+        const payment = paymentSettingsFromApi(body?.active);
+        setActivePayment(payment);
+        setPaymentVersion(body?.active ?? null);
+        if (!payment) return;
+        setForm((current) => ({ ...current, ...payment }));
+        rememberPaymentSettings(payment);
+      })
+      .catch((error) => {
+        if (!cancelled) setToast(error.message || 'Payment settings could not be loaded.');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  function save() {
+  async function save() {
     const finance = normalizePaymentSettings(form);
     const issues = {};
     if (round2(finance.riderSharePercent + finance.companyCommissionPercent) !== 100) {
@@ -187,14 +210,33 @@ export default function Settings() {
       setTab('cancellation');
       return;
     }
-    const next = { ...form, ...finance };
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    setForm(next);
-    saveCompanyOffice(office);
-    saveCancellationConfig(cancellation);
-    notifyPaymentSettings();
-    setToast('Settings saved.');
-    recordAudit({ user, action: 'Update', module: 'Settings', newValue: 'General settings saved' });
+    const changed = !activePayment
+      || finance.riderSharePercent !== activePayment.riderSharePercent
+      || finance.companyCommissionPercent !== activePayment.companyCommissionPercent
+      || finance.operationalCostPercent !== activePayment.operationalCostPercent;
+    setSaving(true);
+    try {
+      let published = finance;
+      if (changed) {
+        const body = await publishPaymentSettings(paymentSettingsPayload(finance));
+        published = paymentSettingsFromApi(body.payment_settings) || finance;
+        setActivePayment(published);
+        setPaymentVersion(body.payment_settings);
+      }
+      const next = { ...form, ...published };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+      setForm(next);
+      rememberPaymentSettings(published);
+      saveCompanyOffice(office);
+      saveCancellationConfig(cancellation);
+      setToast(changed ? 'Payment settings published.' : 'Settings saved.');
+      recordAudit({ user, action: 'Update', module: 'Settings', newValue: changed ? 'Payment settings published' : 'General settings saved' });
+    } catch (error) {
+      setPayErrors({ share: error.message || 'Payment settings could not be published.' });
+      setTab('payments');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function setRiderShare(value) {
@@ -386,7 +428,12 @@ export default function Settings() {
 
           <GlassCard className="space-y-4">
             <h2 className="text-lg font-semibold">Payment distribution</h2>
-            <p className="text-sm text-ink-muted">85/15 is calculated on confirmed Trip Fare, not on the discounted amount the customer pays. COD Due is tracked separately from the rider earning wallet (never as a negative balance). A rider is suspended when COD Due is ₹{COD_SUSPEND_THRESHOLD} or more.</p>
+            <p className="text-sm text-ink-muted">
+              {paymentVersion
+                ? `Active version ${paymentVersion.version}. Rider and company shares apply to confirmed Trip Fare. Operational cost is a percent of company commission only.`
+                : 'No commission version is active yet. Saving publishes these percentages. Rider and company shares apply to confirmed Trip Fare. Operational cost is a percent of company commission only.'}
+              {' '}COD Due is tracked separately from the rider earning wallet (never as a negative balance). A rider is suspended when COD Due is ₹{COD_SUSPEND_THRESHOLD} or more.
+            </p>
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Rider Share (%)" error={payErrors.share}>
                 <input type="number" min="0" max="100" step="0.01" className={inputClass} value={form.riderSharePercent ?? 85} onChange={(event) => setRiderShare(event.target.value)} />
@@ -470,7 +517,7 @@ export default function Settings() {
         </GlassCard>
       ) : null}
 
-      {tab !== 'admins' ? <Button onClick={save}>Save settings</Button> : null}
+      {tab !== 'admins' ? <Button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Button> : null}
       <Toast open={Boolean(toast)} message={toast} onClose={() => setToast('')} />
 
       <Modal

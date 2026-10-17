@@ -311,6 +311,14 @@ export async function downloadGstReportExcel(params) {
   });
 }
 
+export async function fetchPaymentSettings() {
+  return apiRequest('/v1/admin/payment-settings');
+}
+
+export async function publishPaymentSettings(payload) {
+  return apiRequest('/v1/admin/payment-settings', { method: 'POST', body: payload });
+}
+
 export async function fetchTaxConfig() {
   return apiRequest('/v1/admin/tax-config');
 }

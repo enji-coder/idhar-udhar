@@ -57,12 +57,13 @@ const SNAP_COLUMNS = `
 `;
 
 /**
- * Locked 85/15/50 rounding (matches shared FinanceEngine):
+ * Rounding for whatever split is active (matches shared FinanceEngine):
  * rider = ROUND(trip_fare * rider% / 100, 2)
  * company = ROUND(trip_fare - rider, 2)
- * operations = ROUND(company * ops% / 100, 2)
+ * operations = ROUND(company * operational-cost% / 100, 2)
  * profit = ROUND(company - operations, 2)
  *
+ * Operational cost is a percent of company commission, not of trip fare.
  * Computed in PostgreSQL NUMERIC. Remainder paise after ROUND stay with
  * company (vs rider) and profit (vs operations). No new tie-break.
  */
@@ -152,6 +153,10 @@ export class FinanceRepository {
     return result.rows[0] ?? null;
   }
 
+  /**
+   * Freezes a new ORIGINAL row from the confirmed trip fare and the ACTIVE
+   * payment-settings version. Does not update an existing snapshot row.
+   */
   async insertOriginalFromFareSnapshot(
     orderId: string,
     db: Queryable,
@@ -183,8 +188,8 @@ export class FinanceRepository {
       FROM (
         SELECT
           f.trip_fare,
-          f.rider_percentage,
-          f.company_commission_percentage,
+          v.rider_percentage,
+          v.company_commission_percentage,
           v.operational_cost_percentage_of_commission,
           v.payment_settings_version_id
         FROM order_fare_snapshots f
@@ -270,6 +275,120 @@ export class FinanceRepository {
     );
     return result.rows[0] ?? null;
   }
+
+  /**
+   * Publishes the admin-supplied split as version N+1 and activates it.
+   * The caller must pass the transaction client. The table lock, insert,
+   * supersede, and activate all run on that client and commit together.
+   * The previous ACTIVE row is superseded. Its percentages are not edited.
+   * Existing order finance snapshots are not updated.
+   */
+  async publishVersion(
+    adminProfileId: string,
+    split: {
+      riderPercentage: string;
+      companyCommissionPercentage: string;
+      operationalCostPercentageOfCommission: string;
+    },
+    db: Queryable,
+  ): Promise<PaymentSettingsRow> {
+    await db.query(`LOCK TABLE payment_settings_versions IN SHARE ROW EXCLUSIVE MODE`);
+    const active = await db.query<{ payment_settings_version_id: string }>(
+      `
+      SELECT payment_settings_version_id
+      FROM payment_settings_versions
+      WHERE status = 'ACTIVE'
+      FOR UPDATE
+      `,
+    );
+    const maxVersion = await db.query<{ version: string }>(
+      `SELECT COALESCE(MAX(version), 0)::text AS version FROM payment_settings_versions`,
+    );
+    const nextVersion = Number.parseInt(maxVersion.rows[0].version, 10) + 1;
+    const previousId = active.rows[0]?.payment_settings_version_id ?? null;
+    const inserted = await db.query<{ payment_settings_version_id: string }>(
+      `
+      INSERT INTO payment_settings_versions (
+        version,
+        status,
+        rider_percentage,
+        company_commission_percentage,
+        operational_cost_percentage_of_commission,
+        effective_from,
+        created_by_admin_profile_id
+      )
+      VALUES ($1, 'DRAFT', $2, $3, $4, now(), $5)
+      RETURNING payment_settings_version_id
+      `,
+      [
+        nextVersion,
+        split.riderPercentage,
+        split.companyCommissionPercentage,
+        split.operationalCostPercentageOfCommission,
+        adminProfileId,
+      ],
+    );
+    const newId = inserted.rows[0]?.payment_settings_version_id;
+    if (!newId) {
+      throw new Error('payment settings version was not inserted');
+    }
+    if (previousId) {
+      await db.query(
+        `
+        UPDATE payment_settings_versions
+        SET status = 'SUPERSEDED', effective_until = now()
+        WHERE payment_settings_version_id = $1
+          AND status = 'ACTIVE'
+        `,
+        [previousId],
+      );
+    }
+    const activated = await db.query<PaymentSettingsRow>(
+      `
+      UPDATE payment_settings_versions
+      SET status = 'ACTIVE'
+      WHERE payment_settings_version_id = $1
+      RETURNING
+        payment_settings_version_id,
+        version,
+        status,
+        rider_percentage::text AS rider_percentage,
+        company_commission_percentage::text AS company_commission_percentage,
+        operational_cost_percentage_of_commission::text AS operational_cost_percentage_of_commission
+      `,
+      [newId],
+    );
+    const row = activated.rows[0];
+    if (!row || row.status !== 'ACTIVE') {
+      throw new Error('payment settings version was not activated');
+    }
+    return row;
+  }
+}
+
+const PERCENT_TEXT = /^(?:\d{1,3})(?:\.\d{1,2})?$/;
+
+/** Percent points for the admin form. Not an INR amount. */
+function percentageValue(raw: string): number {
+  if (!PERCENT_TEXT.test(raw)) {
+    throw new Error(`Invalid percentage text: ${raw}`);
+  }
+  const [whole, frac = ''] = raw.split('.');
+  const cents = Number(whole) * 100 + Number((frac + '00').slice(0, 2));
+  return cents / 100;
+}
+
+export function serializePaymentSettings(row: PaymentSettingsRow) {
+  return {
+    payment_settings_version_id: row.payment_settings_version_id,
+    version: row.version,
+    status: row.status,
+    rider_percentage: percentageValue(row.rider_percentage),
+    company_commission_percentage: percentageValue(row.company_commission_percentage),
+    operational_cost_percentage_of_commission: percentageValue(
+      row.operational_cost_percentage_of_commission,
+    ),
+  };
 }
 
 export function serializeFinanceSnapshot(row: FinanceSnapshotRow) {

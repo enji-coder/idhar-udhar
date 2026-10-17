@@ -39,6 +39,39 @@ export function normalizePaymentSettings(raw = {}) {
   };
 }
 
+export function paymentSettingsFromApi(active) {
+  if (!active) return null;
+  const riderSharePercent = round2(Number(active.rider_percentage));
+  const companyCommissionPercent = round2(Number(active.company_commission_percentage));
+  const operationalCostPercent = round2(Number(active.operational_cost_percentage_of_commission));
+  if (![riderSharePercent, companyCommissionPercent, operationalCostPercent].every(Number.isFinite)) {
+    return null;
+  }
+  return { riderSharePercent, companyCommissionPercent, operationalCostPercent };
+}
+
+export function paymentSettingsPayload(settings) {
+  const config = ratesFromSettings(settings);
+  return {
+    rider_percentage: config.riderSharePercent.toFixed(2),
+    company_commission_percentage: config.companyCommissionPercent.toFixed(2),
+    operational_cost_percentage_of_commission: config.operationalCostPercent.toFixed(2),
+  };
+}
+
+export function rememberPaymentSettings(settings) {
+  let current = {};
+  try {
+    current = JSON.parse(localStorage.getItem(PAYMENT_SETTINGS_KEY) || '{}');
+  } catch {
+    current = {};
+  }
+  const next = { ...current, ...ratesFromSettings(settings) };
+  localStorage.setItem(PAYMENT_SETTINGS_KEY, JSON.stringify(next));
+  notifyPaymentSettings();
+  return next;
+}
+
 export function getPaymentSettings() {
   try {
     const stored = JSON.parse(localStorage.getItem(PAYMENT_SETTINGS_KEY) || '{}');
