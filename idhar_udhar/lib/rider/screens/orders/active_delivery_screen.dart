@@ -55,11 +55,13 @@ class _CashDue {
   final double amount;
 }
 
-/// Planned cash still to collect. Uses the allocation fields, not the
-/// payment-status label. Inconsistent or missing amounts block completion.
+/// Planned cash still to collect. Uses the payment bill and allocation,
+/// not the trip fare and not the payment-status label. Inconsistent or
+/// missing amounts block completion.
 _CashDue _cashDue(RiderOrder order) {
   final List<double> amounts = <double>[
     order.tripAmount,
+    order.paymentBill,
     order.customerResponsibility,
     order.receiverResponsibility,
     order.customerPaid,
@@ -82,11 +84,11 @@ _CashDue _cashDue(RiderOrder order) {
   );
   final double customerDue = FareEngine.round2(order.customerResponsibility);
   final double receiverDue = FareEngine.round2(order.receiverResponsibility);
-  final double trip = FareEngine.round2(order.tripAmount);
+  final double bill = FareEngine.round2(order.paymentBill);
   if (customerAllocated != customerDue || receiverAllocated != receiverDue) {
     return _CashDue.blocked;
   }
-  if (FareEngine.round2(customerDue + receiverDue) != trip) {
+  if (FareEngine.round2(customerDue + receiverDue) != bill) {
     return _CashDue.blocked;
   }
   final double cash =
@@ -97,7 +99,7 @@ _CashDue _cashDue(RiderOrder order) {
   if (cash > 0) {
     return _CashDue.collect(cash);
   }
-  if (order.paymentMethod == RiderOrderPaymentMethod.online && online > 0) {
+  if (online > 0 || bill == 0) {
     return _CashDue.skip;
   }
   return _CashDue.blocked;
@@ -731,6 +733,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
             vehicleName: vehicle,
             packageLabel: order.packageLabel,
             tripAmount: order.tripAmount,
+            paymentBill: order.paymentBill,
             riderAmount: order.riderAmount,
             companyShare: order.companyShare,
             officeDistanceKm: order.officeDistanceKm,
@@ -1126,7 +1129,12 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   }
 
   Future<void> _refreshSummaryOrder(RiderOrder order) async {
-    final RiderOrder? priced = await _orderWithPayment(order);
+    final RiderOrder? priced;
+    try {
+      priced = await _orderWithPayment(order);
+    } catch (_) {
+      return;
+    }
     if (!mounted || !_dropSummaryOpen || priced == null) {
       return;
     }
@@ -1225,7 +1233,17 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       setState(() {});
     }
     try {
-      final RiderOrder? priced = await _orderWithPayment(order);
+      final RiderOrder? priced;
+      try {
+        priced = await _orderWithPayment(order);
+      } on ApiException catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error.message)),
+          );
+        }
+        return;
+      }
       if (!mounted) {
         return;
       }
@@ -1313,12 +1331,8 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     if (_paymentCacheOrderId == id && cached != null) {
       return OrderMapper.applyPaymentView(order: order, payment: cached);
     }
-    final ApiOrderPaymentView? view;
-    try {
-      view = await ref.read(riderApiProvider).getOrderPayment(id);
-    } catch (_) {
-      return null;
-    }
+    final ApiOrderPaymentView? view =
+        await ref.read(riderApiProvider).getOrderPayment(id);
     if (view == null || !view.hasAllocation || view.orderId != id) {
       return null;
     }

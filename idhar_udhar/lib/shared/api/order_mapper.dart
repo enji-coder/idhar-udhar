@@ -545,6 +545,7 @@ abstract final class OrderMapper {
       return null;
     }
     return order.withPaymentAllocation(
+      paymentBill: responsibility.applicableBillTotal,
       customerResponsibility: responsibility.customerResponsibility,
       receiverResponsibility: responsibility.receiverResponsibility,
       customerOnline: plan.customerPlannedOnline,

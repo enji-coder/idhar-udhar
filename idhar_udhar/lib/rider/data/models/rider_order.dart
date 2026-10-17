@@ -100,6 +100,7 @@ class RiderOrder {
     this.vehicleName = '',
     this.packageLabel = '',
     this.tripAmount = 0,
+    this.paymentBill = 0,
     this.riderAmount = 0,
     this.companyShare = 0,
     this.officeDistanceKm = 0,
@@ -140,6 +141,9 @@ class RiderOrder {
   final String vehicleName;
   final String packageLabel;
   final double tripAmount;
+
+  /// Applicable bill from the payment responsibility. Not the trip fare.
+  final double paymentBill;
   final double riderAmount;
   final double companyShare;
   final double officeDistanceKm;
@@ -183,6 +187,7 @@ class RiderOrder {
   double get cashCollected => customerCash + receiverCash;
 
   RiderOrder withPaymentAllocation({
+    required double paymentBill,
     required double customerResponsibility,
     required double receiverResponsibility,
     required double customerOnline,
@@ -212,6 +217,7 @@ class RiderOrder {
       vehicleName: vehicleName,
       packageLabel: packageLabel,
       tripAmount: tripAmount,
+      paymentBill: paymentBill,
       riderAmount: riderAmount,
       companyShare: companyShare,
       officeDistanceKm: officeDistanceKm,

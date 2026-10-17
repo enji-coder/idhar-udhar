@@ -170,6 +170,67 @@ void main() {
     );
   });
 
+  testWidgets('collects the payment bill when it differs from the trip fare', (
+    tester,
+  ) async {
+    final _ScriptedRiderApi api = _ScriptedRiderApi()
+      ..payment = _paymentView(
+        bill: '90.00',
+        customerResponsibility: '90.00',
+        customerCash: '90.00',
+      );
+    await _pump(
+      tester,
+      api: api,
+      wallet: _QuietWalletApi(),
+      order: _mappedOrder(tripFare: 120),
+    );
+
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(_collectCopy(90)), findsOneWidget);
+    expect(find.text(_collectCopy(120)), findsNothing);
+    await tester.tap(find.text('Collected'));
+    await tester.pumpAndSettle();
+    expect(api.transitions, <String>[
+      'NEAR_DROP',
+      'DELIVERY_ATTEMPT',
+      'DELIVERED',
+    ]);
+  });
+
+  testWidgets('a rejected delivery status does not show a successful payment', (
+    tester,
+  ) async {
+    final _ScriptedRiderApi api = _ScriptedRiderApi()
+      ..payment = _cashPayment()
+      ..rejectDelivered = true;
+    final ProviderContainer container = await _pump(
+      tester,
+      api: api,
+      wallet: _QuietWalletApi(),
+      order: _mappedOrder(),
+    );
+
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Collected'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No active payment settings version exists'), findsOneWidget);
+    expect(find.text('Thank You!'), findsNothing);
+    expect(api.transitions, <String>['NEAR_DROP', 'DELIVERY_ATTEMPT']);
+    expect(
+      container.read(deliveryStatusProvider),
+      DeliveryLifecycleStatus.goingToDrop,
+    );
+  });
+
   testWidgets('a second tap does not open another cash dialog', (tester) async {
     final Completer<void> hold = Completer<void>();
     final _ScriptedRiderApi api = _ScriptedRiderApi()
@@ -314,6 +375,7 @@ void main() {
       DeliveryLifecycleStatus.goingToDrop,
     );
     expect(find.text('Thank You!'), findsNothing);
+    expect(find.text('Payment could not be loaded'), findsOneWidget);
   });
 
   testWidgets('payment for a different order does not complete delivery', (
@@ -467,12 +529,20 @@ class _ScriptedRiderApi extends RiderApi {
     return payment;
   }
 
+  bool rejectDelivered = false;
+
   @override
   Future<ApiOrder> transitionStatus({
     required String orderId,
     required String toStatus,
     String? reason,
   }) async {
+    if (rejectDelivered && toStatus == 'DELIVERED') {
+      throw const ApiException(
+        code: 'PAYMENT_SETTINGS_UNAVAILABLE',
+        message: 'No active payment settings version exists',
+      );
+    }
     transitions.add(toStatus);
     final Completer<void>? gate = hold;
     if (gate != null && !gate.isCompleted) {
@@ -486,7 +556,7 @@ class _ScriptedRiderApi extends RiderApi {
 
 const String _orderId = '11111111-1111-4111-8111-111111111111';
 
-RiderOrder _mappedOrder() {
+RiderOrder _mappedOrder({double tripFare = 100}) {
   return OrderMapper.toRiderOrder(
     offer: RiderOffer(
       offerId: '22222222-2222-4222-8222-222222222222',
@@ -494,7 +564,7 @@ RiderOrder _mappedOrder() {
       status: 'ACCEPTED',
       createdAt: DateTime.utc(2026, 10, 11),
       displayId: 'IU-1',
-      tripFare: 100,
+      tripFare: tripFare,
       riderAmount: 40,
       distanceKm: 3,
       estimatedDurationSeconds: 12 * 60,
@@ -502,6 +572,30 @@ RiderOrder _mappedOrder() {
       dropAddress: 'Drop lane',
     ),
   );
+}
+
+ApiOrderPaymentView _paymentView({
+  String orderId = _orderId,
+  required String bill,
+  required String customerResponsibility,
+  String receiverResponsibility = '0.00',
+  String customerOnline = '0.00',
+  String customerCash = '0.00',
+  String receiverOnline = '0.00',
+  String receiverCash = '0.00',
+}) {
+  return ApiOrderPaymentView.tryParse(
+    _paymentBody(
+      orderId: orderId,
+      customerResponsibility: customerResponsibility,
+      receiverResponsibility: receiverResponsibility,
+      customerOnline: customerOnline,
+      customerCash: customerCash,
+      receiverOnline: receiverOnline,
+      receiverCash: receiverCash,
+      bill: bill,
+    ),
+  )!;
 }
 
 ApiOrderPaymentView _cashPayment([String orderId = _orderId]) {
