@@ -59,11 +59,16 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
-    await tester.pump();
 
-    expect(find.text('Delivery complete'), findsOneWidget);
-    expect(find.text('Congratulations. This order has been delivered.'), findsOneWidget);
-    expect(find.text('Delivered'), findsOneWidget);
+    expect(find.text('Order Summary'), findsOneWidget);
+    expect(find.text('Thank You!'), findsNothing);
+    expect(api.transitions, isEmpty);
+
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Thank You!'), findsOneWidget);
+    expect(find.text('Go to Dashboard'), findsOneWidget);
     expect(api.transitions, <String>['DELIVERY_ATTEMPT', 'DELIVERED']);
   });
 
@@ -78,9 +83,11 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Delivery complete'), findsNothing);
-    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(find.text('Thank You!'), findsNothing);
+    expect(find.text('Mark as Delivered'), findsOneWidget);
     expect(
       find.text(
         'The server rejected this status change. The order is currently NEAR_DROP. Try the step that matches it.',
@@ -99,9 +106,12 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Delivery complete'), findsNothing);
-    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(find.text('Thank You!'), findsNothing);
+    expect(find.text('Order Summary'), findsOneWidget);
+    expect(find.text('Mark as Delivered'), findsOneWidget);
     expect(api.transitions, <String>['DELIVERY_ATTEMPT', 'DELIVERED']);
   });
 
@@ -110,8 +120,11 @@ void main() {
     await _pumpDelivery(tester, api: api, order: _mappedOrder());
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
-    expect(find.text('Delivery complete'), findsNothing);
-    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(find.text('Thank You!'), findsNothing);
+    expect(find.text('Order Summary'), findsOneWidget);
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+    expect(find.text('Thank You!'), findsNothing);
     expect(
       find.text(
         'Payment details for this order are incomplete or inconsistent, so it was not marked delivered.',
@@ -128,11 +141,13 @@ void main() {
     await _pumpDelivery(tester, api: api, order: _mappedOrder());
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Delivery complete'), findsNothing);
-    expect(find.text('Confirm Cash Collected'), findsNothing);
-    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(find.text('Thank You!'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
+    expect(find.text('Mark as Delivered'), findsOneWidget);
     expect(api.transitions, <String>['NEAR_DROP']);
   });
 
@@ -152,13 +167,12 @@ void main() {
     router.go(RiderRoutes.deliveryComplete);
     await tester.pumpAndSettle();
 
-    expect(find.text('Delivery complete'), findsOneWidget);
-    expect(find.text('Delivered'), findsOneWidget);
+    expect(find.text('Thank You!'), findsOneWidget);
+    expect(find.text('Go to Dashboard'), findsOneWidget);
     expect(find.text('CRN'), findsNothing);
     expect(find.text('Earning'), findsNothing);
-    expect(find.text('Back to Dashboard'), findsOneWidget);
 
-    await tester.tap(find.text('Back to Dashboard'));
+    await tester.tap(find.text('Go to Dashboard'));
     await tester.pumpAndSettle();
 
     expect(find.text('Rider dashboard'), findsOneWidget);
@@ -185,9 +199,9 @@ void main() {
     router.go(RiderRoutes.deliveryComplete);
     await tester.pumpAndSettle();
 
-    expect(find.text('IU-CRN-GJ-1234567890'), findsOneWidget);
-    expect(find.text('Earning'), findsOneWidget);
-    expect(find.textContaining('85'), findsOneWidget);
+    expect(find.text('Thank You!'), findsOneWidget);
+    expect(find.text('Go to Dashboard'), findsOneWidget);
+    expect(find.text('IU-CRN-GJ-1234567890'), findsNothing);
   });
 }
 

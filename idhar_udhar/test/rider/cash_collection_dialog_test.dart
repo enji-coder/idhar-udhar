@@ -62,11 +62,16 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    expect(find.text('Collect Cash Amount'), findsNothing);
+    expect(api.transitions, <String>['NEAR_DROP']);
 
-    expect(find.text('Collect cash'), findsOneWidget);
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Collect Cash Amount'), findsOneWidget);
     expect(find.text(_collectCopy(100)), findsOneWidget);
     expect(find.text('Cancel'), findsOneWidget);
-    expect(find.text('Confirm Cash Collected'), findsOneWidget);
+    expect(find.text('Collected'), findsOneWidget);
     expect(api.transitions, <String>['NEAR_DROP']);
     expect(api.paymentGets, 1);
     expect(order.customerCash, 0);
@@ -88,10 +93,12 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
     expect(api.gets, 1);
     expect(api.transitions, <String>['NEAR_DROP']);
     expect(wallet.reads, 0);
@@ -119,7 +126,9 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Cash Collected'));
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Collected'));
     await tester.pumpAndSettle();
 
     expect(api.transitions, <String>['DELIVERY_ATTEMPT', 'DELIVERED']);
@@ -147,9 +156,13 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    expect(find.text('Collect Cash Amount'), findsNothing);
+    expect(find.text('Order Summary'), findsOneWidget);
 
-    expect(find.text('Collect cash'), findsNothing);
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Collected'), findsNothing);
     expect(api.transitions, <String>['DELIVERY_ATTEMPT', 'DELIVERED']);
     expect(
       container.read(deliveryStatusProvider),
@@ -174,26 +187,30 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.transitions, <String>['NEAR_DROP']);
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pump();
 
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
     expect(api.transitions, <String>['NEAR_DROP']);
 
     hold.complete();
     await tester.pumpAndSettle();
-    expect(find.text('Confirm Cash Collected'), findsOneWidget);
+    expect(find.text('Order Summary'), findsOneWidget);
+    expect(find.text('Collected'), findsNothing);
     expect(api.transitions, <String>['NEAR_DROP']);
 
-    await tester.tap(find.text('Confirm Cash Collected'));
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+    expect(find.text('Collected'), findsOneWidget);
+    await tester.tap(find.text('Collected'));
     await tester.pumpAndSettle();
     expect(
       api.transitions,
       <String>['NEAR_DROP', 'DELIVERY_ATTEMPT', 'DELIVERED'],
     );
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
   });
 
   testWidgets('missing payment details do not complete the delivery', (
@@ -218,8 +235,10 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
     expect(
       find.text(
         'Payment details for this order are incomplete or inconsistent, so it was not marked delivered.',
@@ -250,8 +269,10 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
     expect(
       find.text(
         'Payment details for this order are incomplete or inconsistent, so it was not marked delivered.',
@@ -279,22 +300,20 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    expect(find.text('Order Summary'), findsOneWidget);
     expect(api.paymentGets, 1);
+    expect(api.transitions, <String>['NEAR_DROP']);
+
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
+
+    expect(api.paymentGets, 2);
     expect(api.transitions, <String>['NEAR_DROP']);
     expect(
       container.read(deliveryStatusProvider),
       DeliveryLifecycleStatus.goingToDrop,
     );
-
-    ScaffoldMessenger.of(
-      tester.element(find.byType(ActiveDeliveryScreen)),
-    ).hideCurrentSnackBar();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Mark as delivered'));
-    await tester.pumpAndSettle();
-
-    expect(api.paymentGets, 2);
-    expect(api.transitions, <String>['NEAR_DROP']);
+    expect(find.text('Thank You!'), findsNothing);
   });
 
   testWidgets('payment for a different order does not complete delivery', (
@@ -310,8 +329,11 @@ void main() {
 
     await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Mark as Delivered'));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Confirm Cash Collected'), findsNothing);
+    expect(find.text('Collected'), findsNothing);
+    expect(find.text('Thank You!'), findsNothing);
     expect(api.transitions, <String>['NEAR_DROP']);
     expect(
       container.read(deliveryStatusProvider),
@@ -326,7 +348,9 @@ String _collectCopy(num amount) {
     symbol: '₹',
     decimalDigits: 0,
   ).format(amount);
-  return 'Collect $rupees. Confirm that this cash was physically collected.';
+  return 'Collect $rupees from the customer. '
+      'This amount is the cash still due on the order. '
+      'Confirm only after you have collected it.';
 }
 
 Future<ProviderContainer> _pump(

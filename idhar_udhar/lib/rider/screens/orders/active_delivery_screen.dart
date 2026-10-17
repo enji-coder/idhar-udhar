@@ -16,6 +16,7 @@ import 'package:intl/intl.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
+import '../../features/navigation/drop_summary_view.dart';
 import '../../features/navigation/navigation_arrow.dart';
 import '../../features/navigation/navigation_pose.dart';
 import '../../features/navigation/navigation_speaker.dart';
@@ -38,7 +39,7 @@ import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_secondary_button.dart';
 import '../../widgets/rider_verification_timeline.dart';
 
-enum _TripChrome { pickupNav, waiting, dropNav, legacy }
+enum _TripChrome { pickupNav, waiting, dropNav, dropSummary, legacy }
 
 enum _CashGate { collect, skip, blocked }
 
@@ -126,6 +127,8 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   bool _cashBusy = false;
   bool _actionBusy = false;
   bool _completionOpened = false;
+  bool _dropSummaryOpen = false;
+  RiderOrder? _summaryOrder;
   String? _canonical;
   Timer? _waitTimer;
   Timer? _gpsTimer;
@@ -186,7 +189,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           final RiderOrder? order = ref.read(activeOrderProvider);
           final DeliveryLifecycleStatus status =
               ref.read(deliveryStatusProvider);
-          if (order == null || _chrome(status) == _TripChrome.legacy) {
+          if (order == null ||
+              _chrome(status) == _TripChrome.legacy ||
+              _chrome(status) == _TripChrome.dropSummary) {
             return;
           }
           if (_chrome(status) == _TripChrome.waiting) {
@@ -239,9 +244,11 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       unawaited(_loadWait(order));
       return;
     }
-    if (_chrome(status) != _TripChrome.legacy) {
-      unawaited(_refreshNavigation(order, status));
+    if (_chrome(status) == _TripChrome.legacy ||
+        _chrome(status) == _TripChrome.dropSummary) {
+      return;
     }
+    unawaited(_refreshNavigation(order, status));
   }
 
   @override
@@ -522,6 +529,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     DeliveryLifecycleStatus status,
     _TripChrome chrome,
   ) {
+    if (chrome == _TripChrome.dropSummary) {
+      return _dropSummaryScaffold(order);
+    }
     if (chrome == _TripChrome.waiting) {
       final int? elapsed = _displayedElapsed();
       return Scaffold(
@@ -611,9 +621,10 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       _ensureWaitTimer();
       return;
     }
-    if (chrome != _TripChrome.legacy) {
-      unawaited(_refreshNavigation(order, status));
+    if (chrome == _TripChrome.dropSummary || chrome == _TripChrome.legacy) {
+      return;
     }
+    unawaited(_refreshNavigation(order, status));
   }
 
   void _ensureWaitTimer() {
@@ -1070,6 +1081,61 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     }
   }
 
+  Widget _dropSummaryScaffold(RiderOrder order) {
+    final RiderOrder shown = _summaryFor(order);
+    return DropSummaryView(
+      orderId: shown.id.trim().isEmpty ? '—' : shown.id.trim(),
+      pickup: shown.pickup,
+      drop: shown.drop,
+      distanceLabel: shown.distanceLabel,
+      rideTimeLabel: shown.etaLabel,
+      orderValueLabel: shown.tripAmount > 0 ? _rupees(shown.tripAmount) : '—',
+      paymentMode: shown.paymentLabel,
+      customerName: _customerName(shown),
+      busy: _cashBusy || _actionBusy,
+      onBack: () {
+        if (_cashBusy || _actionBusy) {
+          return;
+        }
+        setState(() => _dropSummaryOpen = false);
+      },
+      onMarkDelivered: () => unawaited(_confirmCashBeforeDelivery(order)),
+    );
+  }
+
+  RiderOrder _summaryFor(RiderOrder order) {
+    final RiderOrder? summary = _summaryOrder;
+    if (summary == null || summary.backendOrderId != order.backendOrderId) {
+      return order;
+    }
+    return summary;
+  }
+
+  String _customerName(RiderOrder order) {
+    for (final String value in <String>[
+      order.senderName,
+      order.receiverName,
+      order.customerMaskedName,
+    ]) {
+      final String text = value.trim();
+      if (text.isNotEmpty && text != '—') {
+        return text;
+      }
+    }
+    return '—';
+  }
+
+  Future<void> _refreshSummaryOrder(RiderOrder order) async {
+    final RiderOrder? priced = await _orderWithPayment(order);
+    if (!mounted || !_dropSummaryOpen || priced == null) {
+      return;
+    }
+    if (_cashDue(priced).gate == _CashGate.blocked) {
+      return;
+    }
+    setState(() => _summaryOrder = priced);
+  }
+
   Future<void> _arriveAtDrop(RiderOrder order) async {
     if (_actionBusy || _cashBusy || _receiverBusy) {
       return;
@@ -1118,7 +1184,10 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
         );
         return;
       }
-      await _confirmCashBeforeDelivery(order);
+      if (serverStatus == 'NEAR_DROP' || serverStatus == 'DELIVERY_ATTEMPT') {
+        setState(() => _dropSummaryOpen = true);
+        unawaited(_refreshSummaryOrder(order));
+      }
     } finally {
       _actionBusy = false;
     }
@@ -1135,7 +1204,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
         return _TripChrome.dropNav;
       case DeliveryLifecycleStatus.goingToDrop:
         if (_canonical == 'NEAR_DROP' || _canonical == 'DELIVERY_ATTEMPT') {
-          return _TripChrome.legacy;
+          return _dropSummaryOpen
+              ? _TripChrome.dropSummary
+              : _TripChrome.dropNav;
         }
         return _TripChrome.dropNav;
       case DeliveryLifecycleStatus.delivered:
@@ -1150,6 +1221,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       return;
     }
     _cashBusy = true;
+    if (mounted) {
+      setState(() {});
+    }
     try {
       final RiderOrder? priced = await _orderWithPayment(order);
       if (!mounted) {
@@ -1168,23 +1242,35 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
         await _advanceTo(DeliveryLifecycleStatus.delivered, priced);
         return;
       }
+      var dialogClosed = false;
       final bool? confirmed = await showDialog<bool>(
         context: context,
+        barrierDismissible: false,
         builder: (BuildContext dialogContext) {
+          void close(bool value) {
+            if (dialogClosed) {
+              return;
+            }
+            dialogClosed = true;
+            Navigator.of(dialogContext).pop(value);
+          }
+
           return AlertDialog(
             backgroundColor: RiderColors.surface,
             shape: RoundedRectangleBorder(borderRadius: RiderRadius.lgAll),
             title: Text(
-              'Collect cash',
+              'Collect Cash Amount',
               style: RiderTextStyles.title,
             ),
             content: Text(
-              'Collect ${_rupees(due.amount)}. Confirm that this cash was physically collected.',
+              'Collect ${_rupees(due.amount)} from the customer. '
+              'This amount is the cash still due on the order. '
+              'Confirm only after you have collected it.',
               style: RiderTextStyles.body,
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
+                onPressed: () => close(false),
                 child: Text(
                   'Cancel',
                   style: RiderTextStyles.bodyMedium.copyWith(
@@ -1193,9 +1279,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
                 ),
               ),
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
+                onPressed: () => close(true),
                 child: Text(
-                  'Confirm Cash Collected',
+                  'Collected',
                   style: RiderTextStyles.bodyMedium.copyWith(
                     color: RiderColors.primary,
                     fontWeight: FontWeight.w700,
@@ -1212,6 +1298,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       await _advanceTo(DeliveryLifecycleStatus.delivered, priced);
     } finally {
       _cashBusy = false;
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 

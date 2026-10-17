@@ -112,7 +112,7 @@ class PickupWaitView extends StatelessWidget {
                   child: Text(
                     'Rider at Pickup',
                     style: RiderTextStyles.heading.copyWith(
-                      fontSize: 28,
+                      fontSize: 22,
                       fontWeight: FontWeight.w700,
                       height: 1.15,
                     ),
@@ -331,7 +331,7 @@ class _WaitingCard extends StatelessWidget {
           Text(
             rate,
             style: RiderTextStyles.heading.copyWith(
-              fontSize: 28,
+              fontSize: 20,
               fontWeight: FontWeight.w700,
               height: 1.1,
             ),
