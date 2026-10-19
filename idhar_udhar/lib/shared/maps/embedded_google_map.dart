@@ -8,6 +8,7 @@ import '../../customer/core/theme/theme.dart';
 import '../../customer/core/widgets/safe_asset_image.dart';
 import 'geo_point.dart';
 import 'maps_runtime.dart';
+import 'navigation_follow.dart';
 
 class MapMarkerSpec {
   const MapMarkerSpec({
@@ -62,6 +63,8 @@ class EmbeddedGoogleMap extends StatefulWidget {
     this.deferFitUntilRoute = false,
     this.expanded = false,
     this.navigationMode = false,
+    this.navigationBearing = 0,
+    this.navigationSpeedMps = 0,
   });
 
   final double height;
@@ -93,6 +96,12 @@ class EmbeddedGoogleMap extends StatefulWidget {
   /// camera viewport that stays above the bottom controls.
   final bool navigationMode;
 
+  /// Clockwise degrees from true north. The arrow icon uses the same zero.
+  final double navigationBearing;
+
+  /// Ground speed in meters per second. Tilt is applied only while moving.
+  final double navigationSpeedMps;
+
   @override
   State<EmbeddedGoogleMap> createState() => _EmbeddedGoogleMapState();
 }
@@ -102,6 +111,7 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
   bool _movingProgrammatically = false;
   String _lastFollowKey = '';
   String _lastFitKey = '';
+  final NavigationCameraEpisode _episode = NavigationCameraEpisode();
 
   @override
   void didUpdateWidget(covariant EmbeddedGoogleMap oldWidget) {
@@ -120,7 +130,8 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     if (widget.navigationMode) {
       return CameraPosition(
         target: LatLng(widget.initial.latitude, widget.initial.longitude),
-        zoom: 16.6,
+        zoom: NavigationCamera.zoom,
+        bearing: widget.navigationBearing,
       );
     }
     final List<GeoPoint> framed = widget.markers
@@ -189,65 +200,40 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
         ),
       };
     }
+    // Straight segments follow the encoded road geometry. A geodesic chord
+    // bows between points and does not match the street.
     return <Polyline>{
       Polyline(
         polylineId: const PolylineId('route-shadow'),
-        color: const Color(0x66148BA6),
-        width: 18,
+        color: const Color(0x551A3A6E),
+        width: 16,
         jointType: JointType.round,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
-        geodesic: true,
         zIndex: 1,
         points: points,
       ),
       Polyline(
         polylineId: const PolylineId('route-casing'),
-        color: Colors.white,
+        color: const Color(0xFF0D47A1),
         width: 12,
         jointType: JointType.round,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
-        geodesic: true,
         zIndex: 2,
         points: points,
       ),
-      ..._routeBands(points),
+      Polyline(
+        polylineId: const PolylineId('route-core'),
+        color: const Color(0xFF1A73E8),
+        width: 7,
+        jointType: JointType.round,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
+        zIndex: 3,
+        points: points,
+      ),
     };
-  }
-
-  List<Polyline> _routeBands(List<LatLng> points) {
-    const List<Color> colors = <Color>[
-      Color(0xFF0B6E8C),
-      Color(0xFF0E88A8),
-      Color(0xFF12A3B8),
-      Color(0xFF1BB8C4),
-    ];
-    final int segments = points.length - 1;
-    final List<Polyline> bands = <Polyline>[];
-    for (int band = 0; band < colors.length; band++) {
-      final int start = (segments * band / colors.length).floor();
-      final int end = band == colors.length - 1
-          ? points.length - 1
-          : (segments * (band + 1) / colors.length).ceil();
-      if (end <= start) {
-        continue;
-      }
-      bands.add(
-        Polyline(
-          polylineId: PolylineId('route-core-$band'),
-          color: colors[band],
-          width: 7,
-          jointType: JointType.round,
-          startCap: Cap.roundCap,
-          endCap: Cap.roundCap,
-          geodesic: true,
-          zIndex: 3,
-          points: points.sublist(start, end + 1),
-        ),
-      );
-    }
-    return bands;
   }
 
   Future<void> _syncCamera() async {
@@ -255,10 +241,17 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     if (controller == null || !mounted) {
       return;
     }
+    if (widget.navigationMode && _episode.follow.paused) {
+      return;
+    }
     if (widget.deferFitUntilRoute && widget.route.length < 2) {
       return;
     }
     if (widget.follow) {
+      if (widget.navigationMode) {
+        await _syncNavigationCamera(controller);
+        return;
+      }
       // ~1 m grid. The pose tracker already drops smaller GPS jitter.
       final String key =
           '${widget.initial.latitude.toStringAsFixed(5)},${widget.initial.longitude.toStringAsFixed(5)}';
@@ -298,6 +291,27 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
     if (key == _lastFitKey) {
       return;
     }
+    if (widget.navigationMode) {
+      // Follow is off, so this bounds fit can still run. It uses the same
+      // single episode as heading-up follow. Fits outside navigation mode
+      // are not paired: onCameraMoveStarted is not attached there.
+      if (_episode.inFlight || !_episode.requestAppMove()) {
+        return;
+      }
+      _lastFitKey = key;
+      _movingProgrammatically = true;
+      try {
+        await controller.animateCamera(
+          CameraUpdate.newLatLngBounds(_boundsOf(fit), 36),
+        );
+      } catch (_) {
+        if (!_episode.startSeen) {
+          _episode.failAppMove();
+          _movingProgrammatically = false;
+        }
+      }
+      return;
+    }
     _lastFitKey = key;
     _movingProgrammatically = true;
     try {
@@ -309,6 +323,107 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
       // already frames the stops, and the same coordinates are not fitted again.
     }
     _movingProgrammatically = false;
+  }
+
+  Future<void> _syncNavigationCamera(GoogleMapController controller) async {
+    if (_episode.follow.paused) {
+      return;
+    }
+    final double tilt = NavigationCamera.tiltForSpeed(widget.navigationSpeedMps);
+    final int bucket = NavigationCamera.bearingBucket(widget.navigationBearing);
+    final String key =
+        '${widget.initial.latitude.toStringAsFixed(5)},${widget.initial.longitude.toStringAsFixed(5)},$bucket,${tilt > 0 ? 1 : 0}';
+    if (_episode.inFlight) {
+      if (key != _lastFollowKey) {
+        _episode.queueLatest();
+      }
+      return;
+    }
+    if (key == _lastFollowKey) {
+      return;
+    }
+    if (!_episode.requestAppMove()) {
+      return;
+    }
+    _lastFollowKey = key;
+    _movingProgrammatically = true;
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: LatLng(
+              widget.initial.latitude,
+              widget.initial.longitude,
+            ),
+            zoom: NavigationCamera.zoom,
+            tilt: tilt,
+            bearing: widget.navigationBearing,
+          ),
+        ),
+      );
+    } catch (_) {
+      // A thrown future means the call was not accepted. If its start was
+      // already delivered, the episode stays open until camera idle.
+      if (_episode.startSeen) {
+        return;
+      }
+      _episode.failAppMove();
+      _movingProgrammatically = false;
+      if (_episode.takeQueue() && mounted) {
+        _lastFollowKey = '';
+        await _syncNavigationCamera(controller);
+      }
+    }
+  }
+
+  void _handleCameraMoveStarted() {
+    if (!widget.navigationMode) {
+      return;
+    }
+    final bool pausedFollow =
+        _episode.onMoveStarted(followEnabled: widget.follow);
+    if (pausedFollow && mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _handleCameraIdle() async {
+    if (widget.navigationMode) {
+      final bool applyQueued = _episode.onIdle(followEnabled: widget.follow);
+      if (!_episode.inFlight) {
+        _movingProgrammatically = false;
+      }
+      if (applyQueued && mounted) {
+        final GoogleMapController? controller = _controller;
+        if (controller != null) {
+          await _syncNavigationCamera(controller);
+        }
+      }
+    }
+    if (widget.onCameraIdle == null || _movingProgrammatically) {
+      return;
+    }
+    final GoogleMapController? controller = _controller;
+    if (controller == null) {
+      return;
+    }
+    final LatLngBounds bounds = await controller.getVisibleRegion();
+    final GeoPoint center = GeoPoint(
+      latitude: (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
+      longitude: (bounds.northeast.longitude + bounds.southwest.longitude) / 2,
+    );
+    widget.onCameraIdle!(center);
+  }
+
+  void _resumeFollow() {
+    _episode.follow.resume();
+    _lastFollowKey = '';
+    setState(() {});
+    if (_episode.inFlight) {
+      _episode.queueLatest();
+      return;
+    }
+    _syncCamera();
   }
 
   LatLngBounds _boundsOf(List<LatLng> points) {
@@ -338,11 +453,14 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
 
   @override
   Widget build(BuildContext context) {
-    const BorderRadius radius = AppRadius.xlAll;
+    final BorderRadius radius =
+        widget.navigationMode ? BorderRadius.zero : AppRadius.xlAll;
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: radius,
-        border: Border.all(color: widget.borderColor),
+        border: widget.navigationMode
+            ? null
+            : Border.all(color: widget.borderColor),
       ),
       child: ClipRRect(
         borderRadius: radius,
@@ -383,7 +501,18 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
                     ),
                   ),
                 ),
-              if (widget.statusMessage != null &&
+              if (widget.navigationMode && _episode.follow.paused)
+                Positioned(
+                  right: 12,
+                  bottom: 228,
+                  child: _MapControlButton(
+                    tooltip: 'Resume navigation',
+                    icon: Icons.navigation_rounded,
+                    onPressed: _resumeFollow,
+                  ),
+                ),
+              if (!widget.navigationMode &&
+                  widget.statusMessage != null &&
                   widget.statusMessage!.trim().isNotEmpty)
                 Positioned(
                   left: AppSpacing.sm,
@@ -430,15 +559,18 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
       initialCameraPosition: _initialCamera,
       markers: _markers,
       polylines: _polylines,
-      style: widget.navigationMode ? _navigationMapStyle : null,
       padding: widget.navigationMode
-          ? const EdgeInsets.fromLTRB(16, 108, 16, 196)
+          ? const EdgeInsets.fromLTRB(16, 128, 16, 210)
           : EdgeInsets.zero,
-      buildingsEnabled: !widget.navigationMode,
+      buildingsEnabled: true,
       myLocationEnabled: widget.myLocationEnabled,
       myLocationButtonEnabled: false,
       zoomControlsEnabled: false,
-      compassEnabled: false,
+      compassEnabled: widget.navigationMode,
+      rotateGesturesEnabled: true,
+      scrollGesturesEnabled: true,
+      tiltGesturesEnabled: true,
+      zoomGesturesEnabled: true,
       mapToolbarEnabled: false,
       liteModeEnabled: false,
       onMapCreated: (GoogleMapController controller) {
@@ -450,48 +582,42 @@ class _EmbeddedGoogleMapState extends State<EmbeddedGoogleMap> {
           : (LatLng value) => widget.onMapTap!(
                 GeoPoint(latitude: value.latitude, longitude: value.longitude),
               ),
+      onCameraMoveStarted:
+          widget.navigationMode ? _handleCameraMoveStarted : null,
       onCameraMove: widget.onCameraIdle == null
           ? null
           : (_) {
-              // Keep listener registered; idle is the commit point.
+              // Idle is the commit point for a rider-chosen map center.
             },
-      onCameraIdle: widget.onCameraIdle == null
-          ? null
-          : () async {
-              if (_movingProgrammatically) {
-                return;
-              }
-              final GoogleMapController? controller = _controller;
-              if (controller == null) {
-                return;
-              }
-              final LatLngBounds bounds = await controller.getVisibleRegion();
-              final GeoPoint center = GeoPoint(
-                latitude:
-                    (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
-                longitude:
-                    (bounds.northeast.longitude + bounds.southwest.longitude) /
-                        2,
-              );
-              widget.onCameraIdle!(center);
-            },
+      onCameraIdle: widget.navigationMode || widget.onCameraIdle != null
+          ? _handleCameraIdle
+          : null,
     );
   }
 }
 
-/// Light roads with visible strokes so the cased route stays readable.
-const String _navigationMapStyle = '''
-[
-  {"elementType":"geometry","stylers":[{"color":"#eef2f4"}]},
-  {"elementType":"labels.text.fill","stylers":[{"color":"#3d4a55"}]},
-  {"elementType":"labels.text.stroke","stylers":[{"color":"#f8fafb"}]},
-  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
-  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"#c5ced6"}]},
-  {"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"#ffffff"}]},
-  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#f4f6f8"}]},
-  {"featureType":"road.highway","elementType":"geometry.stroke","stylers":[{"color":"#b7c2cc"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#c5e4f3"}]},
-  {"featureType":"poi","elementType":"labels","stylers":[{"visibility":"simplified"}]},
-  {"featureType":"transit","stylers":[{"visibility":"off"}]}
-]
-''';
+class _MapControlButton extends StatelessWidget {
+  const _MapControlButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.white,
+      shape: const CircleBorder(),
+      elevation: 3,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon, color: const Color(0xFF1A73E8)),
+      ),
+    );
+  }
+}

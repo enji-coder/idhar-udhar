@@ -107,6 +107,8 @@ class MapsPlatform {
           accuracy: (map['accuracy'] as num?)?.toDouble(),
           bearingDegrees: (map['bearing'] as num?)?.toDouble(),
           speedMps: (map['speed'] as num?)?.toDouble(),
+          timeMillis: (map['timeMillis'] as num?)?.toInt(),
+          bearingAccuracyDegrees: (map['bearingAccuracy'] as num?)?.toDouble(),
         ),
       );
     } on MissingPluginException {

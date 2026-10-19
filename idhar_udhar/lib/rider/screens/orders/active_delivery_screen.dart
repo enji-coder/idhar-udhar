@@ -154,6 +154,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   BitmapDescriptor? _arrowIcon;
   bool _voiceMuted = false;
   bool _navRefreshInFlight = false;
+  bool _stopLocationPrompt = false;
   String? _paymentCacheOrderId;
   ApiOrderPaymentView? _paymentCache;
 
@@ -573,9 +574,10 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           // The navigation arrow is the position indicator; avoid a second dot.
           myLocationEnabled: false,
           follow: _navHere != null,
+          navigationBearing: _navHeading,
+          navigationSpeedMps: _pose.lastSpeedMps,
           accentColor: RiderColors.primary,
           borderColor: RiderColors.border,
-          statusMessage: _navStatus,
         ),
         vehicleName: _vehicleName(order),
         instruction: banner?.instruction ??
@@ -794,7 +796,11 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       final GeoPoint? destination = _stopPoint(order, toDrop);
       final LocationResult result = await ref
           .read(deviceLocationServiceProvider)
-          .currentLocation(requestPermission: true);
+          .currentLocation(requestPermission: !_stopLocationPrompt);
+      if (result.failure == LocationFailure.permissionDenied ||
+          result.failure == LocationFailure.permissionPermanentlyDenied) {
+        _stopLocationPrompt = true;
+      }
       if (!mounted || token != _routeToken) {
         return;
       }
@@ -822,7 +828,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           _routeRetry = false;
           _navStatus = destination == null
               ? 'This stop does not have usable coordinates.'
-              : (problem ?? 'Current location is unavailable.');
+              : (problem ??
+                  _pose.fixNotice ??
+                  'Current location is unavailable.');
         });
         return;
       }
@@ -845,6 +853,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           _navHere = here;
           _navHeading = _pose.current?.headingDegrees ?? _navHeading;
           _banner = banner;
+          _navStatus = _pose.fixNotice;
         });
         unawaited(_ensureArrowIcon());
         unawaited(_speakerCue(banner));
@@ -859,6 +868,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           _navHere = here;
           _navHeading = _pose.current?.headingDegrees ?? _navHeading;
           _banner = pendingBanner;
+          _navStatus = _pose.fixNotice ?? _navStatus;
         });
         unawaited(_ensureArrowIcon());
         unawaited(_speakerCue(pendingBanner));
@@ -895,8 +905,9 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
         }
         _banner = banner;
         _routeRetry = guided == null;
-        _navStatus =
-            guided == null ? routeGuidanceMessage(guidance.kind) : problem;
+        _navStatus = guided == null
+            ? routeGuidanceMessage(guidance.kind)
+            : (problem ?? _pose.fixNotice);
       });
       unawaited(_ensureArrowIcon());
       unawaited(_speakerCue(banner));

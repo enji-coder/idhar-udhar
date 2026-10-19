@@ -112,19 +112,36 @@ class DeviceLocation {
     this.accuracy,
     this.bearingDegrees,
     this.speedMps,
+    this.timeMillis,
+    this.bearingAccuracyDegrees,
   });
 
   final double latitude;
   final double longitude;
   final double? accuracy;
 
-  /// Clockwise degrees from true north, when the platform reports a bearing.
+  /// Clockwise degrees from true north. This is GPS course-over-ground when
+  /// the platform reports a bearing, not the phone compass.
   final double? bearingDegrees;
 
   /// Ground speed in meters per second, when the platform reports it.
   final double? speedMps;
 
+  /// Location fix time in Unix epoch milliseconds, when the platform reports it.
+  final int? timeMillis;
+
+  /// Uncertainty of [bearingDegrees], in degrees, when the platform reports it.
+  final double? bearingAccuracyDegrees;
+
   GeoPoint get point => GeoPoint(latitude: latitude, longitude: longitude);
+
+  DateTime? get capturedAt {
+    final int? millis = timeMillis;
+    if (millis == null || millis <= 0) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
+  }
 }
 
 class LocationResult {

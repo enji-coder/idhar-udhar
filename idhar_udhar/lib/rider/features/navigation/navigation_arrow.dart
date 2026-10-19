@@ -18,26 +18,36 @@ Future<Uint8List> navigationArrowPng({double devicePixelRatio = 3}) async {
   canvas.drawCircle(
     center,
     side * 0.34,
-    Paint()..color = const Color(0x5514A3C0),
+    Paint()
+      ..color = const Color(0x331A73E8)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, side * 0.03),
   );
   canvas.drawCircle(
     center,
-    side * 0.22,
-    Paint()..color = const Color(0xCCFFFFFF),
+    side * 0.30,
+    Paint()..color = const Color(0xFFF8FBFF),
+  );
+  canvas.drawCircle(
+    center,
+    side * 0.30,
+    Paint()
+      ..color = const Color(0xFF1A73E8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = side * 0.035,
   );
 
-  final double tipY = side * 0.16;
-  final double baseY = side * 0.78;
+  final double tipY = side * 0.18;
+  final double baseY = side * 0.74;
   final Path arrow = Path()
     ..moveTo(center.dx, tipY)
-    ..lineTo(side * 0.78, baseY)
-    ..lineTo(center.dx, side * 0.62)
-    ..lineTo(side * 0.22, baseY)
+    ..lineTo(side * 0.74, baseY)
+    ..lineTo(center.dx, side * 0.58)
+    ..lineTo(side * 0.26, baseY)
     ..close();
   canvas.drawPath(
     arrow,
     Paint()
-      ..color = const Color(0xFF0E8FA8)
+      ..color = const Color(0xFF1A73E8)
       ..style = PaintingStyle.fill,
   );
   canvas.drawPath(

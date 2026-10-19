@@ -162,12 +162,16 @@ internal class MapsBridge(private val context: Context) : MethodChannel.MethodCa
             "latitude" to location.latitude,
             "longitude" to location.longitude,
             "accuracy" to location.accuracy.toDouble(),
+            "timeMillis" to location.time,
         )
         if (location.hasBearing()) {
             payload["bearing"] = location.bearing.toDouble()
         }
         if (location.hasSpeed()) {
             payload["speed"] = location.speed.toDouble()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasBearingAccuracy()) {
+            payload["bearingAccuracy"] = location.bearingAccuracyDegrees.toDouble()
         }
         return payload
     }
