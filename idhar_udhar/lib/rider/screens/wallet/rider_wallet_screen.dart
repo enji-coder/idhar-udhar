@@ -197,12 +197,8 @@ Future<void> _amountSheet({
   required String confirmLabel,
   required FutureOr<void> Function(double amount) onConfirm,
   double? maxAmount,
-}) async {
-  final controller = TextEditingController();
-  String? error;
-  bool submitting = false;
-
-  await showModalBottomSheet<void>(
+}) {
+  return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: RiderColors.surface,
@@ -210,74 +206,113 @@ Future<void> _amountSheet({
       borderRadius: BorderRadius.vertical(top: Radius.circular(RiderRadius.xl)),
     ),
     builder: (context) {
-      return Padding(
-        padding: EdgeInsets.fromLTRB(
-          RiderSpacing.xl,
-          RiderSpacing.xl,
-          RiderSpacing.xl,
-          RiderSpacing.xl + MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: StatefulBuilder(
-          builder: (context, setModal) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(title, style: RiderTextStyles.title),
-                const SizedBox(height: RiderSpacing.sm),
-                Text(
-                  'Payments are confirmed by the server. COD Due is settled first on credit.',
-                  style: RiderTextStyles.caption,
-                ),
-                const SizedBox(height: RiderSpacing.lg),
-                RiderTextField(
-                  controller: controller,
-                  label: 'Amount (₹)',
-                  hint: '500',
-                  prefixIcon: Icons.currency_rupee_rounded,
-                  keyboardType: TextInputType.number,
-                  errorText: error,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                  ],
-                ),
-                const SizedBox(height: RiderSpacing.lg),
-                RiderPrimaryButton(
-                  label: submitting ? 'Please wait…' : confirmLabel,
-                  onPressed: submitting
-                      ? null
-                      : () async {
-                          final amount =
-                              double.tryParse(controller.text.trim());
-                          if (amount == null || amount <= 0) {
-                            setModal(() => error = 'Enter a valid amount');
-                            return;
-                          }
-                          if (maxAmount != null && amount > maxAmount) {
-                            setModal(
-                              () => error = 'Amount exceeds available balance',
-                            );
-                            return;
-                          }
-                          setModal(() => submitting = true);
-                          try {
-                            await onConfirm(amount);
-                            if (context.mounted) {
-                              Navigator.of(context).pop();
-                            }
-                          } finally {
-                            if (context.mounted) {
-                              setModal(() => submitting = false);
-                            }
-                          }
-                        },
-                ),
-              ],
-            );
-          },
-        ),
+      return _WalletAmountSheet(
+        title: title,
+        confirmLabel: confirmLabel,
+        onConfirm: onConfirm,
+        maxAmount: maxAmount,
       );
     },
   );
-  controller.dispose();
+}
+
+class _WalletAmountSheet extends StatefulWidget {
+  const _WalletAmountSheet({
+    required this.title,
+    required this.confirmLabel,
+    required this.onConfirm,
+    this.maxAmount,
+  });
+
+  final String title;
+  final String confirmLabel;
+  final FutureOr<void> Function(double amount) onConfirm;
+  final double? maxAmount;
+
+  @override
+  State<_WalletAmountSheet> createState() => _WalletAmountSheetState();
+}
+
+class _WalletAmountSheetState extends State<_WalletAmountSheet> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _amountFocus = FocusNode();
+  String? _error;
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _amountFocus.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final double? amount = double.tryParse(_controller.text.trim());
+    if (amount == null || amount <= 0) {
+      setState(() => _error = 'Enter a valid amount');
+      return;
+    }
+    final double? maxAmount = widget.maxAmount;
+    if (maxAmount != null && amount > maxAmount) {
+      setState(() => _error = 'Amount exceeds available balance');
+      return;
+    }
+    setState(() => _submitting = true);
+    var closeSheet = false;
+    try {
+      await widget.onConfirm(amount);
+      closeSheet = true;
+    } finally {
+      if (!closeSheet && mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+    if (!closeSheet || !mounted) {
+      return;
+    }
+    _amountFocus.unfocus();
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        RiderSpacing.xl,
+        RiderSpacing.xl,
+        RiderSpacing.xl,
+        RiderSpacing.xl + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.title, style: RiderTextStyles.title),
+          const SizedBox(height: RiderSpacing.sm),
+          Text(
+            'Payments are confirmed by the server. COD Due is settled first on credit.',
+            style: RiderTextStyles.caption,
+          ),
+          const SizedBox(height: RiderSpacing.lg),
+          RiderTextField(
+            controller: _controller,
+            focusNode: _amountFocus,
+            label: 'Amount (₹)',
+            hint: '500',
+            prefixIcon: Icons.currency_rupee_rounded,
+            keyboardType: TextInputType.number,
+            errorText: _error,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+          ),
+          const SizedBox(height: RiderSpacing.lg),
+          RiderPrimaryButton(
+            label: _submitting ? 'Please wait…' : widget.confirmLabel,
+            onPressed: _submitting ? null : _submit,
+          ),
+        ],
+      ),
+    );
+  }
 }
