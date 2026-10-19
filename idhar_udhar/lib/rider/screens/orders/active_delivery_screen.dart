@@ -1,9 +1,8 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
@@ -17,15 +16,12 @@ import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/navigation/drop_summary_view.dart';
-import '../../features/navigation/navigation_arrow.dart';
-import '../../features/navigation/navigation_pose.dart';
-import '../../features/navigation/navigation_speaker.dart';
 import '../../features/navigation/pickup_wait_view.dart';
 import '../../features/navigation/receiver_action_sheet.dart';
 import '../../features/navigation/rider_order_details_sheet.dart';
-import '../../features/navigation/route_guidance.dart';
-import '../../features/navigation/trip_navigation_view.dart';
 import '../../features/navigation/waiting_clock.dart';
+import '../../features/orders/external_navigation.dart';
+import '../../features/orders/rider_nav_overlay.dart';
 import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
@@ -133,37 +129,22 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   RiderOrder? _summaryOrder;
   String? _canonical;
   Timer? _waitTimer;
-  Timer? _gpsTimer;
   int _waitPollTick = 0;
   PickupWaitSnapshot? _wait;
   DateTime? _waitFetchedAt;
   String? _waitError;
   bool _waitLoading = false;
-  GuidedRoute? _guided;
-  GeoPoint? _navHere;
-  String? _navStatus;
-  bool _routeRetry = false;
-  String? _routeKey;
-  int _routeToken = 0;
-  bool _routeRequestInFlight = false;
-  final SequentialGuidance _guidance = SequentialGuidance();
-  String? _guidanceBindKey;
-  GuidanceBanner? _banner;
-  final NavigationPoseTracker _pose = NavigationPoseTracker();
-  double _navHeading = 0;
-  BitmapDescriptor? _arrowIcon;
-  bool _voiceMuted = false;
-  bool _navRefreshInFlight = false;
-  bool _stopLocationPrompt = false;
   String? _paymentCacheOrderId;
   ApiOrderPaymentView? _paymentCache;
+  final NavLaunchGate _navLaunchGate = NavLaunchGate();
+  bool _externalNavArmed = false;
+  bool _overlayDismissed = false;
+  bool _overlayPermissionExplained = false;
+  String? _launchedNavKey;
+  String? _pendingOverlayAction;
+  bool _phaseRestoreBusy = false;
 
-  /// Nav GPS poll interval. The platform exposes one-shot location, so the
-  /// timer reuses [DeviceLocationService.currentLocation]. An in-flight fix
-  /// is not cancelled by the next tick.
-  static const Duration _navGpsInterval = Duration(seconds: 1);
-
-  /// Waiting-charge API stays on an ~8s cadence while the nav timer is 1s.
+  /// Waiting-charge API stays on an ~8s cadence while the clock ticks each second.
   static const int _waitPollEveryTicks = 8;
 
   static const List<DeliveryLifecycleStatus> _happyPath = [
@@ -180,33 +161,27 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
   @override
   void initState() {
     super.initState();
+    RiderNavOverlay.bind(_onOverlayAction);
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
       _prepareTripChrome();
-      unawaited(_ensureArrowIcon());
-      if (!MapsRuntime.isFlutterTest) {
-        _gpsTimer = Timer.periodic(_navGpsInterval, (_) {
-          final RiderOrder? order = ref.read(activeOrderProvider);
-          final DeliveryLifecycleStatus status =
-              ref.read(deliveryStatusProvider);
-          if (order == null ||
-              _chrome(status) == _TripChrome.legacy ||
-              _chrome(status) == _TripChrome.dropSummary) {
-            return;
-          }
-          if (_chrome(status) == _TripChrome.waiting) {
-            _waitPollTick++;
-            if (_waitPollTick >= _waitPollEveryTicks) {
-              _waitPollTick = 0;
-              unawaited(_loadWait(order));
-            }
-            return;
-          }
-          unawaited(_refreshNavigation(order, status));
-        });
+      if (RiderNavSession.consumeRestore()) {
+        unawaited(_restorePhaseFromServer());
+      }
+      final RiderOrder? order = ref.read(activeOrderProvider);
+      if (order != null) {
+        unawaited(_syncOverlay(order, ref.read(deliveryStatusProvider)));
+        final AppLifecycleState? lifecycle =
+            WidgetsBinding.instance.lifecycleState;
+        if (!_overlayDismissed &&
+            (lifecycle == AppLifecycleState.paused ||
+                lifecycle == AppLifecycleState.hidden)) {
+          unawaited(RiderNavOverlay.noteBackground());
+        }
+        unawaited(_explainOverlayPermissionOnce());
       }
       if (!MapsRuntime.isFlutterTest) {
         _publisher = RiderLocationPublisher(
@@ -221,41 +196,81 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
 
   @override
   void dispose() {
+    RiderNavOverlay.unbind();
+    final AppLifecycleState? lifecycle = WidgetsBinding.instance.lifecycleState;
+    final bool leavingWhileVisible =
+        lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    if (leavingWhileVisible) {
+      unawaited(RiderNavOverlay.disarm());
+    }
     WidgetsBinding.instance.removeObserver(this);
     _waitTimer?.cancel();
-    _gpsTimer?.cancel();
     _publisher?.stop();
-    final NavigationSpeaker? speaker = _speaker;
-    if (speaker != null) {
-      unawaited(speaker.stop());
-    }
-    _guidance.reset();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !mounted) {
+    if (!mounted || state == AppLifecycleState.inactive) {
       return;
     }
-    final RiderOrder? order = ref.read(activeOrderProvider);
-    if (order == null) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(RiderNavOverlay.noteForeground());
+      final String? pending = _pendingOverlayAction;
+      _pendingOverlayAction = null;
+      if (pending == 'order_details') {
+        unawaited(_openOverlayOrderDetails());
+      } else if (!MapsRuntime.isFlutterTest) {
+        unawaited(_consumeNativeOverlayAction());
+      } else {
+        unawaited(_restorePhaseFromServer());
+      }
+      final RiderOrder? order = ref.read(activeOrderProvider);
+      if (order == null) {
+        return;
+      }
+      if (_chrome(ref.read(deliveryStatusProvider)) == _TripChrome.waiting) {
+        unawaited(_loadWait(order));
+      }
       return;
     }
-    final DeliveryLifecycleStatus status = ref.read(deliveryStatusProvider);
-    if (_chrome(status) == _TripChrome.waiting) {
-      unawaited(_loadWait(order));
-      return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      if (_externalNavArmed && !_overlayDismissed) {
+        unawaited(RiderNavOverlay.noteBackground());
+      }
     }
-    if (_chrome(status) == _TripChrome.legacy ||
-        _chrome(status) == _TripChrome.dropSummary) {
-      return;
-    }
-    unawaited(_refreshNavigation(order, status));
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<RiderOrder?>(activeOrderProvider,
+        (RiderOrder? previous, RiderOrder? next) {
+      if (!_externalNavArmed) {
+        return;
+      }
+      final String? previousId = previous?.backendOrderId ?? previous?.id;
+      final String? nextId = next?.backendOrderId ?? next?.id;
+      if (next == null || previousId != nextId) {
+        RiderNavSession.clear();
+        unawaited(_stopExternalOverlay());
+      }
+    });
+    ref.listen<DeliveryLifecycleStatus>(
+      deliveryStatusProvider,
+      (DeliveryLifecycleStatus? previous, DeliveryLifecycleStatus next) {
+        if (!_externalNavArmed) {
+          return;
+        }
+        final RiderOrder? current = ref.read(activeOrderProvider);
+        if (current == null || riderOverlayShouldStop(next)) {
+          RiderNavSession.clear();
+          unawaited(_stopExternalOverlay());
+          return;
+        }
+        unawaited(_syncOverlay(current, next));
+      },
+    );
     final RiderOrder? order = ref.watch(activeOrderProvider);
     if (order == null) {
       return RiderScaffold(
@@ -556,59 +571,90 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       );
     }
     final bool toDrop = chrome == _TripChrome.dropNav;
-    final GuidanceBanner? banner = _banner;
-    final String remaining = _guided == null
-        ? 'Route pending'
-        : '${_guided!.route.distanceLabel} · ${_guided!.route.etaLabel}';
     final bool tripStarted = status == DeliveryLifecycleStatus.goingToDrop;
+    final String primaryLabel = toDrop && tripStarted
+        ? 'ARRIVED AT DROP LOCATION'
+        : toDrop
+            ? 'START TRIP'
+            : 'ARRIVED AT PICKUP LOCATION';
+    final bool primaryEnabled = !_actionBusy && !_cashBusy && !_receiverBusy;
     return Scaffold(
       backgroundColor: RiderColors.background,
-      body: TripNavigationView(
-        map: EmbeddedGoogleMap(
-          expanded: true,
-          navigationMode: true,
-          initial:
-              _navHere ?? _stopPoint(order, toDrop) ?? MapsDefaults.cityCenter,
-          markers: _navMarkers(order, toDrop),
-          route: _guided?.route.points ?? const <GeoPoint>[],
-          // The navigation arrow is the position indicator; avoid a second dot.
-          myLocationEnabled: false,
-          follow: _navHere != null,
-          navigationBearing: _navHeading,
-          navigationSpeedMps: _pose.lastSpeedMps,
-          accentColor: RiderColors.primary,
-          borderColor: RiderColors.border,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(RiderSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Order ${order.id}',
+                      style: RiderTextStyles.title,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Order details',
+                    onPressed: () => _openOrderMenu(order, status),
+                    icon: const Icon(Icons.menu_rounded),
+                    color: RiderColors.textPrimary,
+                  ),
+                ],
+              ),
+              Text(status.label, style: RiderTextStyles.caption),
+              const SizedBox(height: RiderSpacing.md),
+              Text('Pickup', style: RiderTextStyles.caption),
+              Text(order.pickup, style: RiderTextStyles.bodyMedium),
+              const SizedBox(height: RiderSpacing.sm),
+              Text('Drop', style: RiderTextStyles.caption),
+              Text(order.drop, style: RiderTextStyles.bodyMedium),
+              const Spacer(),
+              if (tripStarted)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: () => _openReceiverActionSheet(order),
+                      child: const Text('View Details'),
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: () => unawaited(_openExternalNav(order, status)),
+                    child: Text(
+                      toDrop
+                          ? 'Start navigation to drop'
+                          : 'Start navigation to pickup',
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: 56,
+                child: FilledButton(
+                  onPressed: primaryEnabled
+                      ? () {
+                          if (toDrop && tripStarted) {
+                            unawaited(_arriveAtDrop(order));
+                          } else if (toDrop) {
+                            unawaited(_startTrip(order));
+                          } else {
+                            unawaited(_markArrivedPickup(order));
+                          }
+                        }
+                      : null,
+                  child: Text(primaryLabel),
+                ),
+              ),
+            ],
+          ),
         ),
-        vehicleName: _vehicleName(order),
-        instruction: banner?.instruction ??
-            (toDrop
-                ? 'Head to the drop location'
-                : 'Head to the pickup location'),
-        maneuverDistance: banner?.distanceLabel ?? '—',
-        remainingLabel: remaining,
-        primaryLabel: toDrop && tripStarted
-            ? 'ARRIVED AT DROP LOCATION'
-            : toDrop
-                ? 'START TRIP'
-                : 'ARRIVED AT PICKUP',
-        primaryEnabled: !_actionBusy && !_cashBusy && !_receiverBusy,
-        onPrimary: () {
-          if (toDrop && tripStarted) {
-            unawaited(_arriveAtDrop(order));
-          } else if (toDrop) {
-            unawaited(_startTrip(order));
-          } else {
-            unawaited(_markArrivedPickup(order));
-          }
-        },
-        onMenu: () => _openOrderMenu(order, status),
-        secondaryLabel: tripStarted ? 'Receiver Unavailable' : null,
-        onSecondary: tripStarted ? () => _openReceiverActionSheet(order) : null,
-        statusMessage: _navStatus,
-        onRetryRoute:
-            _routeRetry ? () => unawaited(_retryRoute(order, status)) : null,
-        voiceMuted: _voiceMuted,
-        onToggleVoice: () => unawaited(_toggleVoice()),
       ),
     );
   }
@@ -628,7 +674,6 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     if (chrome == _TripChrome.dropSummary || chrome == _TripChrome.legacy) {
       return;
     }
-    unawaited(_refreshNavigation(order, status));
   }
 
   void _ensureWaitTimer() {
@@ -636,9 +681,16 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       return;
     }
     _waitTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted &&
-          _chrome(ref.read(deliveryStatusProvider)) == _TripChrome.waiting) {
-        setState(() {});
+      if (!mounted ||
+          _chrome(ref.read(deliveryStatusProvider)) != _TripChrome.waiting) {
+        return;
+      }
+      final RiderOrder? order = ref.read(activeOrderProvider);
+      setState(() {});
+      _waitPollTick++;
+      if (order != null && _waitPollTick >= _waitPollEveryTicks) {
+        _waitPollTick = 0;
+        unawaited(_loadWait(order));
       }
     });
   }
@@ -770,272 +822,208 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     }
   }
 
-  Future<void> _retryRoute(
+  void _syncOverlayIfArmed(RiderOrder order) {
+    if (!_externalNavArmed || !mounted) {
+      return;
+    }
+    unawaited(_syncOverlay(order, ref.read(deliveryStatusProvider)));
+  }
+
+  Future<void> _openExternalNav(
     RiderOrder order,
     DeliveryLifecycleStatus status,
   ) async {
-    _routeKey = null;
-    await _refreshNavigation(order, status, force: true);
-  }
-
-  Future<void> _refreshNavigation(
-    RiderOrder order,
-    DeliveryLifecycleStatus status, {
-    bool force = false,
-  }) async {
-    if (_navRefreshInFlight && !force) {
-      return;
-    }
-    if (force) {
-      _routeToken++;
-    }
-    final int token = _routeToken;
-    _navRefreshInFlight = true;
-    try {
-      final bool toDrop = _chrome(status) == _TripChrome.dropNav;
-      final GeoPoint? destination = _stopPoint(order, toDrop);
-      final LocationResult result = await ref
-          .read(deviceLocationServiceProvider)
-          .currentLocation(requestPermission: !_stopLocationPrompt);
-      if (result.failure == LocationFailure.permissionDenied ||
-          result.failure == LocationFailure.permissionPermanentlyDenied) {
-        _stopLocationPrompt = true;
-      }
-      if (!mounted || token != _routeToken) {
-        return;
-      }
-      final GeoPoint? here = _acceptFix(result);
-      final String? problem = result.failure == null
-          ? null
-          : locationFailureMessage(result.failure!);
-      if (destination == null || here == null) {
-        final GuidanceBanner? banner = destination == null
-            ? null
-            : _guidance.update(
-                steps: _guided?.steps ?? const <RouteStep>[],
-                position: null,
-              );
-        if (destination == null) {
-          _resetGuidanceTracker();
-        }
-        setState(() {
-          if (here != null) {
-            _navHere = here;
-            _navHeading = _pose.current?.headingDegrees ?? _navHeading;
-          }
-          _guided = destination == null ? null : _guided;
-          _banner = banner;
-          _routeRetry = false;
-          _navStatus = destination == null
-              ? 'This stop does not have usable coordinates.'
-              : (problem ??
-                  _pose.fixNotice ??
-                  'Current location is unavailable.');
-        });
-        return;
-      }
-      final String bindKey = _guidanceBindingKey(order, destination);
-      final bool offRoute = _guided != null &&
-          shouldRecalculateRoute(
-            line: _guided!.route.points,
-            position: here,
-          );
-      final String key =
-          '${here.latitude.toStringAsFixed(3)},${here.longitude.toStringAsFixed(3)}>${destination.latitude.toStringAsFixed(3)},${destination.longitude.toStringAsFixed(3)}';
-      if (!force && !offRoute && key == _routeKey && _guided != null) {
-        _bindGuidance(bindKey);
-        _pose.alignToRoute(_guided!.route.points);
-        final GuidanceBanner? banner = _guidance.update(
-          steps: _guided!.steps,
-          position: here,
-        );
-        setState(() {
-          _navHere = here;
-          _navHeading = _pose.current?.headingDegrees ?? _navHeading;
-          _banner = banner;
-          _navStatus = _pose.fixNotice;
-        });
-        unawaited(_ensureArrowIcon());
-        unawaited(_speakerCue(banner));
-        return;
-      }
-      if (_routeRequestInFlight && !force && !offRoute) {
-        final GuidanceBanner? pendingBanner = _guidance.update(
-          steps: _guided?.steps ?? const <RouteStep>[],
-          position: here,
-        );
-        setState(() {
-          _navHere = here;
-          _navHeading = _pose.current?.headingDegrees ?? _navHeading;
-          _banner = pendingBanner;
-          _navStatus = _pose.fixNotice ?? _navStatus;
-        });
-        unawaited(_ensureArrowIcon());
-        unawaited(_speakerCue(pendingBanner));
-        return;
-      }
-      _routeKey = key;
-      _routeRequestInFlight = true;
-      final RouteGuidanceResult guidance;
-      try {
-        guidance = await ref.read(routesServiceProvider).computeGuidance(
-              origin: here,
-              destination: destination,
-            );
-      } finally {
-        _routeRequestInFlight = false;
-      }
-      if (!mounted || token != _routeToken) {
-        return;
-      }
-      final GuidedRoute? guided = guidance.route;
-      _bindGuidance(bindKey, routeReplaced: guided != null);
-      if (guided != null) {
-        _pose.alignToRoute(guided.route.points);
-      }
-      final GuidanceBanner? banner = _guidance.update(
-        steps: (guided ?? _guided)?.steps ?? const <RouteStep>[],
-        position: here,
-      );
-      setState(() {
-        _navHere = here;
-        _navHeading = _pose.current?.headingDegrees ?? _navHeading;
-        if (guided != null) {
-          _guided = guided;
-        }
-        _banner = banner;
-        _routeRetry = guided == null;
-        _navStatus = guided == null
-            ? routeGuidanceMessage(guidance.kind)
-            : (problem ?? _pose.fixNotice);
-      });
-      unawaited(_ensureArrowIcon());
-      unawaited(_speakerCue(banner));
-    } finally {
-      _navRefreshInFlight = false;
-    }
-  }
-
-  /// Applies one real GPS sample. Returns null when this read produced no fix.
-  GeoPoint? _acceptFix(LocationResult result) {
-    final DeviceLocation? sample = result.location;
-    if (!result.isOk || sample == null) {
-      return null;
-    }
-    _pose.update(sample);
-    if (_guided != null) {
-      _pose.alignToRoute(_guided!.route.points);
-    }
-    return _pose.current?.position;
-  }
-
-  /// Order + stop coordinates. Changes when the trip target genuinely changes.
-  String _guidanceBindingKey(RiderOrder order, GeoPoint destination) {
-    final String orderId = (order.backendOrderId ?? order.id).trim();
-    return '$orderId|'
-        '${destination.latitude.toStringAsFixed(5)},'
-        '${destination.longitude.toStringAsFixed(5)}';
-  }
-
-  void _bindGuidance(String bindKey, {bool routeReplaced = false}) {
-    if (_guidanceBindKey != bindKey || routeReplaced) {
-      _guidance.reset();
-      _guidanceBindKey = bindKey;
-    }
-  }
-
-  void _resetGuidanceTracker() {
-    _guidance.reset();
-    _guidanceBindKey = null;
-    _banner = null;
-  }
-
-  Future<void> _toggleVoice() async {
-    final bool muted = !_voiceMuted;
-    setState(() => _voiceMuted = muted);
-    if (MapsRuntime.isFlutterTest) {
-      return;
-    }
-    _speaker ??= NavigationSpeaker();
-    await _speaker!.setMuted(muted);
-    if (!muted) {
-      await _speakerCue(_banner);
-    }
-  }
-
-  Future<void> _speakerCue(GuidanceBanner? banner) async {
-    if (MapsRuntime.isFlutterTest || _voiceMuted) {
-      return;
-    }
-    // Speaker is created lazily so tests never touch the speech engine.
-    _speaker ??= NavigationSpeaker();
-    if (_speaker!.isMuted) {
-      return;
-    }
-    await _speaker!.cue(banner);
-  }
-
-  NavigationSpeaker? _speaker;
-
-  String _vehicleName(RiderOrder order) {
-    final String name = order.vehicleName.trim();
-    if (name.isNotEmpty) {
-      return name;
-    }
-    return _wait?.vehicleCategoryName.trim() ?? '';
-  }
-
-  GeoPoint? _stopPoint(RiderOrder order, bool toDrop) {
-    final double? latitude = toDrop ? order.dropLatitude : order.pickupLatitude;
-    final double? longitude =
-        toDrop ? order.dropLongitude : order.pickupLongitude;
-    if (latitude == null ||
-        longitude == null ||
-        !latitude.isFinite ||
-        !longitude.isFinite ||
-        latitude.abs() > 90 ||
-        longitude.abs() > 180) {
-      return null;
-    }
-    return GeoPoint(latitude: latitude, longitude: longitude);
-  }
-
-  List<MapMarkerSpec> _navMarkers(RiderOrder order, bool toDrop) {
-    final GeoPoint? stop = _stopPoint(order, toDrop);
-    return <MapMarkerSpec>[
-      if (_navHere != null && _arrowIcon != null)
-        MapMarkerSpec(
-          id: 'rider',
-          point: _navHere!,
-          icon: _arrowIcon,
-          rotation: _navHeading,
-          flat: true,
-          anchor: const Offset(0.5, 0.5),
-          zIndex: 4,
-        ),
-      if (stop != null)
-        MapMarkerSpec(
-          id: toDrop ? 'drop' : 'pickup',
-          point: stop,
-          hue: toDrop ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueOrange,
-          title: toDrop ? 'Drop' : 'Pickup',
-          snippet: toDrop ? order.drop : order.pickup,
-          zIndex: 1,
-        ),
-    ];
-  }
-
-  Future<void> _ensureArrowIcon() async {
-    if (_arrowIcon != null || MapsRuntime.isFlutterTest || !mounted) {
-      return;
-    }
-    final BitmapDescriptor icon = await navigationArrowMarker(
-      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+    final RiderNavTarget? target = riderNavTargetFor(
+      orderId: order.backendOrderId ?? order.id,
+      status: status,
+      pickupLatitude: order.pickupLatitude,
+      pickupLongitude: order.pickupLongitude,
+      dropLatitude: order.dropLatitude,
+      dropLongitude: order.dropLongitude,
     );
+    if (target == null) {
+      _navMessage(externalNavigationCoordinatesMessage);
+      return;
+    }
+    final String key =
+        '${target.orderId}|${target.toDrop}|${target.latitude}|${target.longitude}';
+    if (_launchedNavKey == key || !_navLaunchGate.tryBegin()) {
+      return;
+    }
+    bool? opened;
+    try {
+      final GeoPoint? origin = await readNavigationOrigin(
+        ref.read(deviceLocationServiceProvider),
+      );
+      final RiderNavigationLaunch? maps = riderNavigationLaunch(
+        destinationLatitude: target.latitude,
+        destinationLongitude: target.longitude,
+        originLatitude: origin?.latitude,
+        originLongitude: origin?.longitude,
+      );
+      if (maps == null) {
+        _navMessage(externalNavigationCoordinatesMessage);
+        return;
+      }
+      final Uri navigation = maps.navigation;
+      final Uri fallback = maps.fallback;
+      if (MapsRuntime.isFlutterTest) {
+        opened = await launchMappedNavigation(
+          navigation: navigation,
+          fallback: fallback,
+        );
+      } else {
+        final String mode = await RiderNavOverlay.launch(
+          navigationUri: navigation.toString(),
+          fallbackUri: fallback.toString(),
+        );
+        opened = mode == 'maps' || mode == 'browser';
+      }
+    } finally {
+      _navLaunchGate.end();
+    }
+    if (opened != true) {
+      if (opened == false) {
+        _navMessage(externalNavigationFailedMessage);
+      }
+      return;
+    }
+    _launchedNavKey = key;
+    _overlayDismissed = false;
+    _externalNavArmed = true;
+    RiderNavSession.noteHandoff();
+    await _syncOverlay(order, status);
+  }
+
+  Future<void> _explainOverlayPermission() async {
+    final bool? allow = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          backgroundColor: RiderColors.surface,
+          title: Text(
+            'Trip controls over Maps',
+            style: RiderTextStyles.title,
+          ),
+          content: Text(
+            'Allow IDHAR UDHAR to show its icon and an Options Menu over Google Maps. Arrival and trip actions stay in the app. Navigation still opens if you skip this.',
+            style: RiderTextStyles.body,
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Not now'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Allow'),
+            ),
+          ],
+        );
+      },
+    );
+    if (allow == true) {
+      await RiderNavOverlay.openOverlaySettings();
+    }
+  }
+
+  void _navMessage(String message) {
     if (!mounted) {
       return;
     }
-    setState(() => _arrowIcon = icon);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _explainOverlayPermissionOnce() async {
+    if (MapsRuntime.isFlutterTest || _overlayPermissionExplained || !mounted) {
+      return;
+    }
+    final bool allowed = await RiderNavOverlay.canDrawOverlays();
+    if (allowed || !mounted) {
+      return;
+    }
+    _overlayPermissionExplained = true;
+    await _explainOverlayPermission();
+  }
+
+  Future<void> _syncOverlay(
+    RiderOrder order,
+    DeliveryLifecycleStatus status,
+  ) async {
+    if (!mounted) {
+      return;
+    }
+    if (riderOverlayShouldStop(status)) {
+      await _stopExternalOverlay();
+      return;
+    }
+    if (_overlayDismissed) {
+      return;
+    }
+    _externalNavArmed = true;
+    await RiderNavOverlay.arm();
+  }
+
+  Future<void> _stopExternalOverlay() async {
+    _externalNavArmed = false;
+    _launchedNavKey = null;
+    await RiderNavOverlay.disarm();
+  }
+
+  void _onOverlayAction(String action) {
+    if (!mounted) {
+      return;
+    }
+    if (action == 'return_to_app' || riderOverlayStatusAction(action)) {
+      return;
+    }
+    if (action == 'dismiss') {
+      _overlayDismissed = true;
+      unawaited(_stopExternalOverlay());
+      return;
+    }
+    if (action != 'order_details') {
+      return;
+    }
+    final AppLifecycleState? lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.inactive) {
+      _pendingOverlayAction ??= action;
+      return;
+    }
+    _openOverlayOrderDetails();
+  }
+
+  Future<void> _consumeNativeOverlayAction() async {
+    final String? action = await RiderNavOverlay.consumeAction();
+    if (!mounted) {
+      return;
+    }
+    if (action == 'dismiss') {
+      _overlayDismissed = true;
+      await _stopExternalOverlay();
+      return;
+    }
+    if (action == 'order_details') {
+      await _openOverlayOrderDetails();
+      return;
+    }
+    if (action == null ||
+        action == 'return_to_app' ||
+        riderOverlayStatusAction(action)) {
+      await _restorePhaseFromServer();
+    }
+  }
+
+  Future<void> _openOverlayOrderDetails() async {
+    final RiderOrder? order = ref.read(activeOrderProvider);
+    if (order == null || !mounted) {
+      return;
+    }
+    await _openOrderMenu(order, ref.read(deliveryStatusProvider));
   }
 
   Future<void> _openOrderMenu(
@@ -1047,13 +1035,67 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       isScrollControlled: true,
       backgroundColor: RiderColors.surface,
       builder: (BuildContext sheetContext) {
-        return RiderOrderDetailsSheet(
-          order: order,
-          statusLabel: status.label,
-          waiting: _wait,
+        final double top = MediaQuery.paddingOf(sheetContext).top;
+        return Padding(
+          padding: EdgeInsets.only(top: top + 12),
+          child: RiderOrderDetailsSheet(
+            order: order,
+            statusLabel: status.label,
+            waiting: _wait,
+          ),
         );
       },
     );
+    if (mounted) {
+      await _restorePhaseFromServer();
+    }
+  }
+
+  /// Reads the server order and shows that phase. Does not transition status
+  /// and does not launch navigation.
+  Future<void> _restorePhaseFromServer() async {
+    if (_phaseRestoreBusy || _actionBusy || _cashBusy || _receiverBusy) {
+      return;
+    }
+    final RiderOrder? order = ref.read(activeOrderProvider);
+    final String orderId = (order?.backendOrderId ?? '').trim();
+    if (order == null || orderId.isEmpty || !mounted) {
+      return;
+    }
+    _phaseRestoreBusy = true;
+    try {
+      final String canonical =
+          (await ref.read(riderApiProvider).getOrder(orderId)).canonicalStatus;
+      if (!mounted) {
+        return;
+      }
+      final DeliveryLifecycleStatus local = ref.read(deliveryStatusProvider);
+      final DeliveryLifecycleStatus? restored = restoredDeliveryPhase(
+        local: local,
+        canonicalStatus: canonical,
+      );
+      if (restored == null) {
+        return;
+      }
+      setState(() {
+        _canonical = canonical;
+        if (riderServerDropArrival(canonical) &&
+            restored == DeliveryLifecycleStatus.goingToDrop) {
+          _dropSummaryOpen = true;
+        }
+      });
+      if (restored != local) {
+        ref.read(deliveryStatusProvider.notifier).state = restored;
+      }
+      if (_chrome(ref.read(deliveryStatusProvider)) == _TripChrome.waiting) {
+        _ensureWaitTimer();
+        await _loadWait(order);
+      }
+    } catch (_) {
+      // Keep the phase already on screen.
+    } finally {
+      _phaseRestoreBusy = false;
+    }
   }
 
   Future<void> _markArrivedPickup(RiderOrder order) async {
@@ -1061,6 +1103,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       return;
     }
     _actionBusy = true;
+    _syncOverlayIfArmed(order);
     try {
       await _advanceTo(DeliveryLifecycleStatus.arrivedAtPickup, order);
       if (!mounted) {
@@ -1073,6 +1116,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       }
     } finally {
       _actionBusy = false;
+      _syncOverlayIfArmed(order);
     }
   }
 
@@ -1081,17 +1125,19 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       return;
     }
     _actionBusy = true;
+    _syncOverlayIfArmed(order);
     try {
       await _advanceTo(DeliveryLifecycleStatus.goingToDrop, order);
       if (!mounted) {
         return;
       }
-      if (_chrome(ref.read(deliveryStatusProvider)) == _TripChrome.dropNav) {
-        _routeKey = null;
-        await _refreshNavigation(order, DeliveryLifecycleStatus.goingToDrop);
+      if (ref.read(deliveryStatusProvider) ==
+          DeliveryLifecycleStatus.goingToDrop) {
+        await _openExternalNav(order, DeliveryLifecycleStatus.goingToDrop);
       }
     } finally {
       _actionBusy = false;
+      _syncOverlayIfArmed(order);
     }
   }
 
@@ -1112,6 +1158,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           return;
         }
         setState(() => _dropSummaryOpen = false);
+        _syncOverlayIfArmed(order);
       },
       onMarkDelivered: () => unawaited(_confirmCashBeforeDelivery(order)),
     );
@@ -1160,6 +1207,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       return;
     }
     _actionBusy = true;
+    _syncOverlayIfArmed(order);
     try {
       final String? orderId = order.backendOrderId;
       if (orderId == null || orderId.isEmpty) {
@@ -1206,9 +1254,11 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
       if (serverStatus == 'NEAR_DROP' || serverStatus == 'DELIVERY_ATTEMPT') {
         setState(() => _dropSummaryOpen = true);
         unawaited(_refreshSummaryOrder(order));
+        _syncOverlayIfArmed(order);
       }
     } finally {
       _actionBusy = false;
+      _syncOverlayIfArmed(order);
     }
   }
 

@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:idhar_udhar/shared/maps/maps.dart';
 import 'package:idhar_udhar/shared/phone/native_dialer.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/models/rider_order.dart';
+import '../../features/orders/external_navigation.dart';
+import '../../features/orders/rider_nav_overlay.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -158,8 +163,125 @@ class OrderDetailsScreen extends ConsumerWidget {
   }
 }
 
-class _StartDeliveryButton extends StatelessWidget {
+class _StartDeliveryButton extends ConsumerStatefulWidget {
   const _StartDeliveryButton();
+
+  @override
+  ConsumerState<_StartDeliveryButton> createState() =>
+      _StartDeliveryButtonState();
+}
+
+class _StartDeliveryButtonState extends ConsumerState<_StartDeliveryButton>
+    with WidgetsBindingObserver {
+  final NavLaunchGate _gate = NavLaunchGate();
+  bool _starting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) {
+      return;
+    }
+    final GoRouter? router = GoRouter.maybeOf(context);
+    if (router == null) {
+      return;
+    }
+    final bool onOrderDetails =
+        router.routerDelegate.currentConfiguration.uri.path ==
+            RiderRoutes.orderDetails;
+    if (!shouldResumeActiveDelivery(
+      handoffActive: RiderNavSession.handoffActive,
+      status: ref.read(deliveryStatusProvider),
+      hasOrder: ref.read(activeOrderProvider) != null,
+      onOrderDetails: onOrderDetails,
+    )) {
+      return;
+    }
+    RiderNavSession.requestRestore();
+    unawaited(context.push(RiderRoutes.activeDelivery));
+  }
+
+  Future<void> _start() async {
+    if (_starting) {
+      return;
+    }
+    _starting = true;
+    try {
+      await _openAndLeave();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _openAndLeave() async {
+    final RiderOrder? order = ref.read(activeOrderProvider);
+    final DeliveryLifecycleStatus status = ref.read(deliveryStatusProvider);
+    RiderNavTarget? target;
+    if (order != null) {
+      target = riderNavTargetFor(
+        orderId: order.backendOrderId ?? order.id,
+        status: status,
+        pickupLatitude: order.pickupLatitude,
+        pickupLongitude: order.pickupLongitude,
+        dropLatitude: order.dropLatitude,
+        dropLongitude: order.dropLongitude,
+      );
+      final bool phaseNavigates = status == DeliveryLifecycleStatus.accepted ||
+          status == DeliveryLifecycleStatus.goingToPickup ||
+          status == DeliveryLifecycleStatus.packagePickedUp ||
+          status == DeliveryLifecycleStatus.goingToDrop;
+      if (phaseNavigates && target == null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(externalNavigationCoordinatesMessage)),
+        );
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    unawaited(context.push(RiderRoutes.activeDelivery));
+    RiderNavSession.noteHandoff();
+    if (target != null) {
+      final GeoPoint? origin = await readNavigationOrigin(
+        ref.read(deviceLocationServiceProvider),
+      );
+      final bool opened = await launchRiderNavigationTarget(
+        target: target,
+        gate: _gate,
+        originLatitude: origin?.latitude,
+        originLongitude: origin?.longitude,
+        launch: (Uri navigation, Uri fallback) async {
+          if (MapsRuntime.isFlutterTest) {
+            return launchMappedNavigation(
+              navigation: navigation,
+              fallback: fallback,
+            );
+          }
+          final String mode = await RiderNavOverlay.launch(
+            navigationUri: navigation.toString(),
+            fallbackUri: fallback.toString(),
+          );
+          return mode == 'maps' || mode == 'browser';
+        },
+      );
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(externalNavigationFailedMessage)),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +290,7 @@ class _StartDeliveryButton extends StatelessWidget {
       children: [
         RiderPrimaryButton(
           label: 'Start Delivery',
-          onPressed: () => context.push(RiderRoutes.activeDelivery),
+          onPressed: () => unawaited(_start()),
         ),
         // const Positioned(
         //   right: 22,

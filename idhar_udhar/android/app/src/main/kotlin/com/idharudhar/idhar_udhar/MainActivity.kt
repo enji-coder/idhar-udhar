@@ -22,6 +22,7 @@ class MainActivity: FlutterActivity() {
         MapsBridge.register(flutterEngine, this)
         RiderOfferBridge.register(flutterEngine, this)
         RiderPresenceBridge.register(flutterEngine, this)
+        RiderNavOverlay.register(flutterEngine, this)
         registerCustomerOtp(flutterEngine)
     }
 

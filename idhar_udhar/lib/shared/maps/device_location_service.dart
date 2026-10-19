@@ -13,6 +13,7 @@ class DeviceLocationService {
 
   Future<LocationResult> currentLocation({
     bool requestPermission = true,
+    Duration timeout = const Duration(seconds: 12),
   }) async {
     PermissionStatus status = await Permission.locationWhenInUse.status;
     if (status.isPermanentlyDenied || status.isRestricted) {
@@ -39,7 +40,7 @@ class DeviceLocationService {
     if (!enabled) {
       return const LocationResult.fail(LocationFailure.serviceDisabled);
     }
-    return _platform.getCurrentLocation();
+    return _platform.getCurrentLocation(timeout: timeout);
   }
 
   Future<ResolvedAddress?> reverse(GeoPoint point) =>

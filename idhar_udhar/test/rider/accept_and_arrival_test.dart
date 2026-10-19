@@ -196,7 +196,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await tester.tap(find.text('ARRIVED AT PICKUP'));
+    await tester.tap(find.text('ARRIVED AT PICKUP LOCATION'));
     await tester.pump();
     await tester.pump();
 
@@ -224,7 +224,7 @@ void main() {
     await tester.pumpWidget(_app(container, router));
     await tester.pump();
     await tester.pump();
-    await tester.tap(find.text('ARRIVED AT PICKUP'));
+    await tester.tap(find.text('ARRIVED AT PICKUP LOCATION'));
     await tester.pump();
     await tester.pump();
 
