@@ -248,6 +248,37 @@ void main() {
     );
   });
 
+  test('prepared navigation launches turn-by-turn without a GPS wait', () async {
+    final Stopwatch watch = Stopwatch()..start();
+    final bool opened = await launchPreparedNavigation(
+      Uri.parse('google.navigation:q=23.0225,72.5714&mode=d'),
+      Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=23.0225,72.5714',
+      ),
+    );
+    watch.stop();
+    expect(opened, isTrue);
+    expect(watch.elapsed, lessThan(navigationLaunchBudget));
+    expect(lastNavigationLaunchElapsed, isNotNull);
+    expect(lastNavigationLaunchElapsed!, lessThan(navigationLaunchBudget));
+    expect(
+      launched.single.toString(),
+      'google.navigation:q=23.0225,72.5714&mode=d',
+    );
+
+    launched.clear();
+    externalMapLauncher = (Uri uri) async {
+      launched.add(uri);
+      throw StateError('maps missing');
+    };
+    final bool failed = await launchPreparedNavigation(
+      Uri.parse('google.navigation:q=1.0,2.0&mode=d'),
+      Uri.parse('https://www.google.com/maps/dir/?api=1&destination=1.0,2.0'),
+    );
+    expect(failed, isFalse);
+    expect(launched, hasLength(2));
+  });
+
   test('a second navigation tap does not launch twice', () async {
     final NavLaunchGate gate = NavLaunchGate();
     var calls = 0;
@@ -941,7 +972,7 @@ void main() {
     await resumeAt(
       status: DeliveryLifecycleStatus.arrivedAtPickup,
       serverStatus: 'ARRIVED_PICKUP',
-      visible: 'Confirm Pickup & Start Trip',
+      visible: 'Package Picked Up',
     );
     await resumeAt(
       status: DeliveryLifecycleStatus.packagePickedUp,
@@ -970,7 +1001,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('ARRIVED AT DROP LOCATION'), findsOneWidget);
-    expect(find.text('View Details'), findsOneWidget);
+    expect(find.text('Receiver not available?'), findsOneWidget);
+    expect(find.text('View Details'), findsNothing);
     expect(find.text('ARRIVED AT PICKUP LOCATION'), findsNothing);
     expect(
       container.read(deliveryStatusProvider),
@@ -995,7 +1027,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('ARRIVED AT DROP LOCATION'), findsOneWidget);
-    expect(find.text('View Details'), findsOneWidget);
+    expect(find.text('Receiver not available?'), findsOneWidget);
+    expect(find.text('View Details'), findsNothing);
     expect(find.text('ARRIVED AT PICKUP LOCATION'), findsNothing);
     expect(
       container.read(deliveryStatusProvider),
@@ -1004,7 +1037,7 @@ void main() {
     expect(api.transitions, isEmpty);
     expect(launched, isEmpty);
 
-    await tester.tap(find.text('View Details'));
+    await tester.tap(find.text('Receiver not available?'));
     await tester.pumpAndSettle();
     expect(find.text('Receiver Unavailable'), findsOneWidget);
     expect(api.transitions, isEmpty);
@@ -1059,7 +1092,8 @@ void main() {
 
     expect(methods, isNot(contains('moveToBack')));
     expect(find.text('ARRIVED AT DROP LOCATION'), findsOneWidget);
-    expect(find.text('View Details'), findsOneWidget);
+    expect(find.text('Receiver not available?'), findsOneWidget);
+    expect(find.text('View Details'), findsNothing);
     expect(find.text('Order details'), findsNothing);
     expect(
       container.read(deliveryStatusProvider),
@@ -1080,7 +1114,7 @@ void main() {
       status: DeliveryLifecycleStatus.arrivedAtPickup,
     );
 
-    await tester.tap(find.text('Confirm Pickup & Start Trip'));
+    await tester.tap(find.text('Package Picked Up'));
     await tester.pumpAndSettle();
 
     expect(api.transitions, <String>['PICKED_UP', 'IN_TRANSIT']);

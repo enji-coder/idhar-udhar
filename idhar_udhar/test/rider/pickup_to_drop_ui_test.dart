@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
+import 'package:idhar_udhar/rider/features/navigation/arrived_drop_view.dart';
 import 'package:idhar_udhar/rider/features/navigation/pickup_wait_view.dart';
 import 'package:idhar_udhar/rider/features/navigation/rider_order_details_sheet.dart';
 import 'package:idhar_udhar/rider/features/navigation/trip_navigation_view.dart';
@@ -38,7 +39,8 @@ void main() {
     expect(find.text('No waiting fee during this time'), findsOneWidget);
     expect(find.text('₹ 2.50 / min'), findsOneWidget);
     expect(find.text('₹0.00'), findsOneWidget);
-    expect(find.text('Confirm Pickup & Start Trip'), findsOneWidget);
+    expect(find.text('Package Picked Up'), findsOneWidget);
+    expect(find.text('Start Trip'), findsOneWidget);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -161,7 +163,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('Confirm Pickup & Start Trip'));
+    await tester.tap(find.text('Package Picked Up'));
     await tester.pump();
     expect(taps, 0);
   });
@@ -232,8 +234,9 @@ void main() {
       find.text('Waiting details for this order are not available.'),
       findsOneWidget,
     );
-    expect(find.text('Rider at Pickup'), findsOneWidget);
-    expect(find.text('Confirm Pickup & Start Trip'), findsOneWidget);
+    expect(find.text("You've arrived at the pickup location!"), findsOneWidget);
+    expect(find.text('Package Picked Up'), findsOneWidget);
+    expect(find.text('Start Trip'), findsOneWidget);
   });
 
   testWidgets(
@@ -288,6 +291,59 @@ void main() {
     expect(find.text('Unavailable'), findsNWidgets(2));
     expect(find.text('₹0.00'), findsNothing);
     expect(find.text('₹ 0.00 / min'), findsNothing);
+  });
+
+  testWidgets('drop arrival keeps the receiver action off delivery', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var receiverTaps = 0;
+    var arrivedTaps = 0;
+    var navigations = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ArrivedDropView(
+            orderTitle: 'IU-AMD-0000000157',
+            pickup: 'Sonal Complex, Vastrapur',
+            drop: '212, Drive In Rd, Ahmedabad',
+            packageLabel: '1 Item',
+            distanceLabel: '12.5 km',
+            etaLabel: '18 min',
+            onMenu: () {},
+            onNavigate: () => navigations += 1,
+            onReceiverUnavailable: () => receiverTaps += 1,
+            onArrived: () => arrivedTaps += 1,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Drop Location'), findsOneWidget);
+    expect(find.text('Receiver not available?'), findsOneWidget);
+    expect(find.text('ARRIVED AT DROP LOCATION'), findsOneWidget);
+    expect(find.text('View Details'), findsNothing);
+    expect(find.text('212, Drive In Rd, Ahmedabad'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Receiver not available?'));
+    await tester.pump();
+    expect(receiverTaps, 1);
+    expect(arrivedTaps, 0);
+    expect(navigations, 0);
+
+    await tester.tap(find.text('Start navigation to drop'));
+    await tester.pump();
+    expect(navigations, 1);
+    expect(arrivedTaps, 0);
+
+    await tester.tap(find.text('ARRIVED AT DROP LOCATION'));
+    await tester.pump();
+    expect(arrivedTaps, 1);
+    expect(receiverTaps, 1);
   });
 }
 

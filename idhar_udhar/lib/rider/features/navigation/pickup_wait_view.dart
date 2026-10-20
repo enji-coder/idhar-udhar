@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../theme/rider_colors.dart';
-import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 import 'waiting_clock.dart';
 
@@ -21,6 +20,13 @@ class PickupWaitView extends StatelessWidget {
     this.primaryEnabled = true,
     this.error,
     this.arrivalMissing = false,
+    this.orderTitle = '',
+    this.pickupAddress = '',
+    this.dropAddress = '',
+    this.packageLabel = '',
+    this.distanceLabel = '',
+    this.etaLabel = '',
+    this.onBack,
     super.key,
   });
 
@@ -36,6 +42,13 @@ class PickupWaitView extends StatelessWidget {
   final bool primaryEnabled;
   final String? error;
   final bool arrivalMissing;
+  final String orderTitle;
+  final String pickupAddress;
+  final String dropAddress;
+  final String packageLabel;
+  final String distanceLabel;
+  final String etaLabel;
+  final VoidCallback? onBack;
 
   bool get _counting =>
       rulesLoaded && !arrivalMissing && elapsedSeconds != null;
@@ -94,61 +107,52 @@ class PickupWaitView extends StatelessWidget {
             : '₹ $perMinute / min';
     final String charge = !rateAvailable ? 'Unavailable' : '₹$amount';
 
+    final String title = orderTitle.trim().isEmpty
+        ? 'Arrived at Pickup'
+        : 'Order ${orderTitle.trim()}';
+    final bool showRoute =
+        pickupAddress.trim().isNotEmpty || dropAddress.trim().isNotEmpty;
+
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          RiderSpacing.screenH,
-          RiderSpacing.md,
-          RiderSpacing.screenH,
-          RiderSpacing.lg,
-        ),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Rider at Pickup',
-                    style: RiderTextStyles.heading.copyWith(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      height: 1.15,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Order details',
-                  onPressed: onMenu,
-                  icon: const Icon(Icons.menu_rounded, size: 28),
-                  color: RiderColors.textPrimary,
-                ),
-              ],
-            ),
-            Text(
-              'Waiting for customer',
-              style: RiderTextStyles.bodyMedium.copyWith(
-                fontSize: 16,
-                color: RiderColors.textPrimary,
-              ),
+            _PhaseHeader(
+              title: title,
+              onMenu: onMenu,
+              onBack: onBack,
             ),
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 child: Column(
                   children: [
-                    const SizedBox(height: RiderSpacing.lg),
-                    const SizedBox(
-                      height: 168,
-                      width: 220,
-                      child: CustomPaint(
-                        painter: _PickupWaitHeroPainter(),
-                      ),
+                    const SizedBox(height: 8),
+                    const _LocationBanner(
+                      title: 'Pickup Location',
+                      icon: Icons.location_on_rounded,
+                      iconColor: RiderColors.primary,
                     ),
-                    const SizedBox(height: RiderSpacing.lg),
+                    if (showRoute) ...[
+                      const SizedBox(height: 12),
+                      _RouteCard(
+                        pickup: pickupAddress,
+                        drop: dropAddress,
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _StatsRow(
+                      packageLabel: packageLabel,
+                      distanceLabel: distanceLabel,
+                      etaLabel: etaLabel,
+                    ),
+                    const SizedBox(height: 12),
+                    const _ArrivalMessage(),
+                    const SizedBox(height: 12),
                     _InfoCard(title: infoTitle, body: infoBody),
-                    const SizedBox(height: RiderSpacing.md),
+                    const SizedBox(height: 12),
                     _WaitingCard(
                       charging: charging,
                       clock: _clock,
@@ -156,7 +160,7 @@ class PickupWaitView extends StatelessWidget {
                       charge: charge,
                     ),
                     if (error != null && error!.isNotEmpty) ...[
-                      const SizedBox(height: RiderSpacing.sm),
+                      const SizedBox(height: 8),
                       Text(
                         error!,
                         textAlign: TextAlign.center,
@@ -165,37 +169,64 @@ class PickupWaitView extends StatelessWidget {
                         ),
                       ),
                     ],
-                    const SizedBox(height: RiderSpacing.lg),
+                    const SizedBox(height: 12),
                   ],
                 ),
               ),
             ),
-            SizedBox(
-              height: 56,
-              child: FilledButton(
-                onPressed: primaryEnabled ? onStartTrip : null,
-                style: FilledButton.styleFrom(
-                  backgroundColor: RiderColors.primary,
-                  foregroundColor: RiderColors.textOnPrimary,
-                  disabledBackgroundColor:
-                      RiderColors.primary.withValues(alpha: 0.4),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                  ),
-                  textStyle: RiderTextStyles.button.copyWith(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
+            FilledButton(
+              onPressed: primaryEnabled ? onStartTrip : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: RiderColors.primary,
+                foregroundColor: RiderColors.textOnPrimary,
+                disabledBackgroundColor:
+                    RiderColors.primary.withValues(alpha: 0.4),
+                minimumSize: const Size.fromHeight(64),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
                 ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    Text('Confirm Pickup & Start Trip'),
-                    SizedBox(width: 8),
-                    Icon(Icons.arrow_forward_rounded, size: 20),
-                  ],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                textStyle: RiderTextStyles.button.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
               ),
+              child: const Row(
+                children: <Widget>[
+                  _ButtonIcon(icon: Icons.inventory_2_rounded),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          'Package Picked Up',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Start Trip',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xE6FFFFFF),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, size: 26),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Once you reach the pickup location, select the button above.',
+              textAlign: TextAlign.center,
+              style: RiderTextStyles.caption.copyWith(fontSize: 12),
             ),
           ],
         ),
@@ -203,6 +234,428 @@ class PickupWaitView extends StatelessWidget {
     );
   }
 }
+
+class _PhaseHeader extends StatelessWidget {
+  const _PhaseHeader({
+    required this.title,
+    required this.onMenu,
+    this.onBack,
+  });
+
+  final String title;
+  final VoidCallback onMenu;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: [
+          if (onBack != null)
+            IconButton(
+              tooltip: 'Back',
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back_rounded),
+              color: RiderColors.textPrimary,
+            )
+          else
+            const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: RiderTextStyles.title.copyWith(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Order details',
+            onPressed: onMenu,
+            icon: const Icon(Icons.menu_rounded),
+            color: RiderColors.textPrimary,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocationBanner extends StatelessWidget {
+  const _LocationBanner({
+    required this.title,
+    required this.icon,
+    required this.iconColor,
+  });
+
+  final String title;
+  final IconData icon;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: _cardDecoration,
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 26),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              style: RiderTextStyles.title.copyWith(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: RiderColors.primary,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE5F6EF),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  size: 16,
+                  color: Color(0xFF16A34A),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Arrived',
+                  style: RiderTextStyles.caption.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF15803D),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RouteCard extends StatelessWidget {
+  const _RouteCard({required this.pickup, required this.drop});
+
+  final String pickup;
+  final String drop;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: _cardDecoration,
+      child: Column(
+        children: [
+          _AddressBlock(
+            icon: Icons.warehouse_rounded,
+            iconColor: RiderColors.primary,
+            title: 'Pickup Location',
+            address: pickup,
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 16),
+            child: _RouteConnector(),
+          ),
+          _AddressBlock(
+            icon: Icons.location_on_rounded,
+            iconColor: const Color(0xFFF59E0B),
+            title: 'Drop Location',
+            address: drop,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddressBlock extends StatelessWidget {
+  const _AddressBlock({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.address,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    final String shown = address.trim().isEmpty ? '—' : address.trim();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: iconColor.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 18, color: iconColor),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: RiderTextStyles.title.copyWith(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: RiderColors.primary,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                shown,
+                style: RiderTextStyles.body.copyWith(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: RiderColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RouteConnector extends StatelessWidget {
+  const _RouteConnector();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 36,
+      child: Column(
+        children: <Widget>[
+          _Dash(),
+          _Dash(),
+          _Dash(),
+          Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 16,
+            color: RiderColors.hint,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Dash extends StatelessWidget {
+  const _Dash();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 2,
+      height: 4,
+      margin: const EdgeInsets.symmetric(vertical: 1.5),
+      color: RiderColors.border,
+    );
+  }
+}
+
+class _StatsRow extends StatelessWidget {
+  const _StatsRow({
+    required this.packageLabel,
+    required this.distanceLabel,
+    required this.etaLabel,
+  });
+
+  final String packageLabel;
+  final String distanceLabel;
+  final String etaLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: _cardDecoration,
+      child: Row(
+        children: [
+          Expanded(
+            child: _Stat(
+              icon: Icons.inventory_2_outlined,
+              label: 'Package',
+              value: _shown(packageLabel, empty: '—'),
+            ),
+          ),
+          const _StatDivider(),
+          Expanded(
+            child: _Stat(
+              icon: Icons.location_on_outlined,
+              label: 'Distance',
+              value: _approx(distanceLabel),
+            ),
+          ),
+          const _StatDivider(),
+          Expanded(
+            child: _Stat(
+              icon: Icons.schedule_rounded,
+              label: 'Est. Time',
+              value: _shown(etaLabel, empty: '—'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Icon(icon, size: 20, color: RiderColors.primary),
+        const SizedBox(height: 4),
+        Text(label, style: RiderTextStyles.caption.copyWith(fontSize: 11)),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: RiderTextStyles.bodyMedium.copyWith(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatDivider extends StatelessWidget {
+  const _StatDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 1, height: 42, color: const Color(0xFFE3EEEC));
+  }
+}
+
+class _ArrivalMessage extends StatelessWidget {
+  const _ArrivalMessage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
+      decoration: _cardDecoration,
+      child: Row(
+        children: <Widget>[
+          const SizedBox(
+            width: 108,
+            height: 88,
+            child: CustomPaint(painter: _PickupWaitHeroPainter()),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  "You've arrived at the pickup location!",
+                  style: RiderTextStyles.title.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: RiderColors.primary,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Please collect the package and confirm to start the trip.',
+                  style: RiderTextStyles.caption.copyWith(
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ButtonIcon extends StatelessWidget {
+  const _ButtonIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.18),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icon, size: 20, color: Colors.white),
+    );
+  }
+}
+
+String _shown(String value, {required String empty}) {
+  final String text = value.trim();
+  return text.isEmpty ? empty : text;
+}
+
+String _approx(String value) {
+  final String text = value.trim();
+  if (text.isEmpty || text == '—') {
+    return '—';
+  }
+  return text.startsWith('~') ? text : '~ $text';
+}
+
+BoxDecoration get _cardDecoration => BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      boxShadow: const <BoxShadow>[
+        BoxShadow(
+          color: Color(0x140F3D3E),
+          blurRadius: 16,
+          offset: Offset(0, 6),
+        ),
+      ],
+    );
 
 class _InfoCard extends StatelessWidget {
   const _InfoCard({required this.title, required this.body});

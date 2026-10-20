@@ -15,6 +15,7 @@ import 'package:intl/intl.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
+import '../../features/navigation/arrived_drop_view.dart';
 import '../../features/navigation/drop_summary_view.dart';
 import '../../features/navigation/pickup_wait_view.dart';
 import '../../features/navigation/receiver_action_sheet.dart';
@@ -565,6 +566,15 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           arrivalMissing: _wait == null || _wait!.arrivalMissing,
           error: _waitError,
           primaryEnabled: !_actionBusy,
+          orderTitle: order.id,
+          pickupAddress: order.pickup,
+          dropAddress: order.drop,
+          packageLabel: order.packageLabel,
+          distanceLabel: order.distanceLabel,
+          etaLabel: order.etaLabel,
+          onBack: Navigator.canPop(context)
+              ? () => Navigator.of(context).pop()
+              : null,
           onMenu: () => _openOrderMenu(order, status),
           onStartTrip: () => unawaited(_startTrip(order)),
         ),
@@ -578,6 +588,27 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
             ? 'START TRIP'
             : 'ARRIVED AT PICKUP LOCATION';
     final bool primaryEnabled = !_actionBusy && !_cashBusy && !_receiverBusy;
+    if (toDrop && tripStarted) {
+      return Scaffold(
+        backgroundColor: RiderColors.background,
+        body: ArrivedDropView(
+          orderTitle: order.id,
+          pickup: order.pickup,
+          drop: order.drop,
+          packageLabel: order.packageLabel,
+          distanceLabel: order.distanceLabel,
+          etaLabel: order.etaLabel,
+          primaryEnabled: primaryEnabled,
+          onBack: Navigator.canPop(context)
+              ? () => Navigator.of(context).pop()
+              : null,
+          onMenu: () => _openOrderMenu(order, status),
+          onNavigate: () => unawaited(_openExternalNav(order, status)),
+          onReceiverUnavailable: () => _openReceiverActionSheet(order),
+          onArrived: () => unawaited(_arriveAtDrop(order)),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: RiderColors.background,
       body: SafeArea(
@@ -610,17 +641,6 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
               Text('Drop', style: RiderTextStyles.caption),
               Text(order.drop, style: RiderTextStyles.bodyMedium),
               const Spacer(),
-              if (tripStarted)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton(
-                      onPressed: () => _openReceiverActionSheet(order),
-                      child: const Text('View Details'),
-                    ),
-                  ),
-                ),
               Padding(
                 padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
                 child: SizedBox(
@@ -852,33 +872,15 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
     }
     bool? opened;
     try {
-      final GeoPoint? origin = await readNavigationOrigin(
-        ref.read(deviceLocationServiceProvider),
-      );
       final RiderNavigationLaunch? maps = riderNavigationLaunch(
         destinationLatitude: target.latitude,
         destinationLongitude: target.longitude,
-        originLatitude: origin?.latitude,
-        originLongitude: origin?.longitude,
       );
       if (maps == null) {
         _navMessage(externalNavigationCoordinatesMessage);
         return;
       }
-      final Uri navigation = maps.navigation;
-      final Uri fallback = maps.fallback;
-      if (MapsRuntime.isFlutterTest) {
-        opened = await launchMappedNavigation(
-          navigation: navigation,
-          fallback: fallback,
-        );
-      } else {
-        final String mode = await RiderNavOverlay.launch(
-          navigationUri: navigation.toString(),
-          fallbackUri: fallback.toString(),
-        );
-        opened = mode == 'maps' || mode == 'browser';
-      }
+      opened = await launchPreparedNavigation(maps.navigation, maps.fallback);
     } finally {
       _navLaunchGate.end();
     }

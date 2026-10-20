@@ -73,7 +73,7 @@ void main() {
   }
 
   Future<void> openReceiverUnavailableAction(WidgetTester tester) async {
-    await tester.tap(find.textContaining('View Details'));
+    await tester.tap(find.text('Receiver not available?'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Receiver Unavailable'));
     await tester.pumpAndSettle();
@@ -103,7 +103,8 @@ void main() {
       api: _ScriptedRiderApi(),
       status: DeliveryLifecycleStatus.goingToDrop,
     );
-    await tester.tap(find.textContaining('View Details'));
+    expect(find.text('View Details'), findsNothing);
+    await tester.tap(find.text('Receiver not available?'));
     await tester.pumpAndSettle();
 
     expect(find.text('WhatsApp'), findsNothing);
@@ -111,7 +112,7 @@ void main() {
     expect(find.text('Call'), findsWidgets);
     expect(find.text('Receiver Unavailable'), findsOneWidget);
     expect(find.text('Pickup Location'), findsOneWidget);
-    expect(find.text('Drop Location'), findsOneWidget);
+    expect(find.text('Drop Location'), findsAtLeastNWidgets(1));
   });
 
   testWidgets('the action opens a confirmation dialog', (tester) async {

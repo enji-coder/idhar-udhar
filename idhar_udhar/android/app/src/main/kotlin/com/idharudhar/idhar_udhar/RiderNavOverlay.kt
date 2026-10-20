@@ -111,6 +111,9 @@ internal object RiderNavOverlay {
         val app = context.applicationContext as Application
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
+                if (activity is MainActivity) {
+                    activityRef = WeakReference(activity)
+                }
                 startedActivities += 1
                 if (startedActivities == 1) {
                     appInBackground = false
@@ -131,7 +134,11 @@ internal object RiderNavOverlay {
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
-            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityResumed(activity: Activity) {
+                if (activity is MainActivity) {
+                    activityRef = WeakReference(activity)
+                }
+            }
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
@@ -267,8 +274,10 @@ internal object RiderNavOverlay {
             x = (screen.first - bubblePx - margin * 3).coerceAtLeast(margin)
             y = (screen.second / 2).coerceAtLeast(margin)
         }
-        bubbleWrap.setOnTouchListener(dragListener(manager, layout, column, margin))
         bubbleWrap.setOnClickListener { bringForward(context) }
+        bubbleWrap.setOnTouchListener(
+            dragListener(manager, layout, column, margin),
+        )
         if (addOverlay(manager, column, layout)) {
             bubbleRoot = column
             bubbleParams = layout
@@ -353,7 +362,7 @@ internal object RiderNavOverlay {
         var startX = 0
         var startY = 0
         var dragging = false
-        return View.OnTouchListener { _, event ->
+        return View.OnTouchListener { touched, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     dragging = false
@@ -384,9 +393,15 @@ internal object RiderNavOverlay {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
+                    // A drag must not open the app. performClick runs the
+                    // listener on the bubble, not on the window column.
                     if (!dragging) {
-                        view.performClick()
+                        touched.performClick()
                     }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    dragging = false
                     true
                 }
                 else -> false
@@ -426,15 +441,19 @@ internal object RiderNavOverlay {
     }
 
     private fun bringForward(context: Context) {
-        val intent = Intent(context, MainActivity::class.java).addFlags(
+        val existing = activityRef?.get()
+        val host = if (existing != null && !existing.isFinishing) existing else context
+        val intent = Intent(host, MainActivity::class.java).addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP or
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
         )
         try {
-            context.startActivity(intent)
+            host.startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            // The overlay action is still stored for the next resume.
+            // The delivery screen stays where it was.
+        } catch (_: RuntimeException) {
+            // Background-start restrictions must not crash the overlay.
         }
     }
 

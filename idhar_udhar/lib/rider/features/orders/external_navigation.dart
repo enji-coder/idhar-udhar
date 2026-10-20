@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/rider_order.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_text_styles.dart';
+import 'rider_nav_overlay.dart';
 
 typedef ExternalMapLauncher = Future<bool> Function(Uri uri);
 
@@ -17,6 +18,13 @@ const String externalNavigationFailedMessage =
 
 /// Production opener. Tests replace [externalMapLauncher].
 ExternalMapLauncher externalMapLauncher = launchExternalMapUrl;
+
+/// In-app time from a prepared navigation call until the launcher returns.
+/// This does not include Google Maps drawing the route on a device.
+Duration? lastNavigationLaunchElapsed;
+
+/// Budget for the in-app handoff. A device still has to open Maps itself.
+const Duration navigationLaunchBudget = Duration(seconds: 3);
 
 Future<bool> launchExternalMapUrl(Uri uri) {
   return launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -149,8 +157,9 @@ RiderNavigationLaunch? riderNavigationLaunch({
   return RiderNavigationLaunch(navigation: navigation, fallback: fallback);
 }
 
-/// Short GPS read for the directions fallback. Native navigation still uses
-/// the device GPS when this returns null. Flutter tests skip the platform read.
+/// Optional GPS read for a directions URL. Start Delivery does not call this.
+/// The turn-by-turn intent cannot carry an origin; Google Maps uses the
+/// phone's live location, so waiting here only delays the launch.
 Future<GeoPoint?> readNavigationOrigin(DeviceLocationService service) async {
   if (MapsRuntime.isFlutterTest) {
     return null;
@@ -380,6 +389,30 @@ Future<bool> launchRiderNavigationTarget({
     return await launch(navigation, fallback);
   } finally {
     gate.end();
+  }
+}
+
+/// Opens turn-by-turn navigation, then the HTTPS fallback, without reading GPS.
+/// Destination coordinates must already be validated by the caller.
+Future<bool> launchPreparedNavigation(Uri navigation, Uri fallback) async {
+  final Stopwatch watch = Stopwatch()..start();
+  try {
+    if (MapsRuntime.isFlutterTest) {
+      return await launchMappedNavigation(
+        navigation: navigation,
+        fallback: fallback,
+      );
+    }
+    final String mode = await RiderNavOverlay.launch(
+      navigationUri: navigation.toString(),
+      fallbackUri: fallback.toString(),
+    );
+    return mode == 'maps' || mode == 'browser';
+  } catch (_) {
+    return false;
+  } finally {
+    watch.stop();
+    lastNavigationLaunchElapsed = watch.elapsed;
   }
 }
 

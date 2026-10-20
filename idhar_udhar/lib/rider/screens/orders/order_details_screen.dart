@@ -3,14 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:idhar_udhar/shared/maps/maps.dart';
 import 'package:idhar_udhar/shared/phone/native_dialer.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/orders/external_navigation.dart';
-import '../../features/orders/rider_nav_overlay.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -253,27 +251,10 @@ class _StartDeliveryButtonState extends ConsumerState<_StartDeliveryButton>
     unawaited(context.push(RiderRoutes.activeDelivery));
     RiderNavSession.noteHandoff();
     if (target != null) {
-      final GeoPoint? origin = await readNavigationOrigin(
-        ref.read(deviceLocationServiceProvider),
-      );
       final bool opened = await launchRiderNavigationTarget(
         target: target,
         gate: _gate,
-        originLatitude: origin?.latitude,
-        originLongitude: origin?.longitude,
-        launch: (Uri navigation, Uri fallback) async {
-          if (MapsRuntime.isFlutterTest) {
-            return launchMappedNavigation(
-              navigation: navigation,
-              fallback: fallback,
-            );
-          }
-          final String mode = await RiderNavOverlay.launch(
-            navigationUri: navigation.toString(),
-            fallbackUri: fallback.toString(),
-          );
-          return mode == 'maps' || mode == 'browser';
-        },
+        launch: launchPreparedNavigation,
       );
       if (!opened && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
