@@ -60,8 +60,16 @@ class RiderHistoryScreen extends ConsumerWidget {
       );
     }
     return RiderScaffold(
+      padding: EdgeInsets.zero,
       appBar: AppBar(
-        title: const Text('Trip History'),
+        backgroundColor: RiderColors.background,
+        foregroundColor: RiderColors.textPrimary,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(
+          'Trip History',
+          style: RiderTextStyles.title.copyWith(fontWeight: FontWeight.w700),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back',
@@ -78,31 +86,27 @@ class _TripHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: RiderColors.textPrimary,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          RiderSpacing.screenH,
-          RiderSpacing.md,
-          RiderSpacing.screenH,
-          RiderSpacing.md,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Trip History',
-              style: RiderTextStyles.heading.copyWith(color: Colors.white),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Trip History',
+            style: RiderTextStyles.heading.copyWith(
+              fontSize: 22,
+              height: 1.15,
             ),
-            const SizedBox(height: 2),
-            Text(
-              'Completed and cancelled trips',
-              style: RiderTextStyles.caption.copyWith(
-                color: Colors.white.withValues(alpha: 0.8),
-              ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Completed and cancelled trips',
+            style: RiderTextStyles.caption.copyWith(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -147,13 +151,10 @@ class _HistoryListState extends State<_HistoryList> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            RiderSpacing.screenH,
-            RiderSpacing.md,
-            RiderSpacing.screenH,
-            RiderSpacing.sm,
-          ),
+        const SizedBox(height: 10),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Row(
             children: [
               for (final RiderHistoryFilter filter in _filters) ...[
@@ -162,14 +163,14 @@ class _HistoryListState extends State<_HistoryList> {
                   selected: _filter == filter,
                   onTap: () => setState(() => _filter = filter),
                 ),
-                const SizedBox(width: RiderSpacing.sm),
+                const SizedBox(width: 8),
               ],
             ],
           ),
         ),
         if (widget.snapshot.failedDetails > 0)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: RiderSpacing.screenH),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Text(
               'Some trip details could not be loaded.',
               style: RiderTextStyles.caption,
@@ -189,15 +190,11 @@ class _HistoryListState extends State<_HistoryList> {
               : RefreshIndicator(
                   onRefresh: widget.onRefresh,
                   child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(
-                    RiderSpacing.screenH,
-                    RiderSpacing.sm,
-                    RiderSpacing.screenH,
-                    RiderSpacing.xl,
-                  ),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
                   itemCount: visible.length + (widget.onLoadMore == null ? 0 : 1),
                   separatorBuilder: (BuildContext context, int index) =>
-                      const SizedBox(height: RiderSpacing.sm),
+                      const SizedBox(height: 8),
                   itemBuilder: (BuildContext context, int index) {
                     if (index >= visible.length) {
                       return TextButton(
@@ -254,19 +251,19 @@ class _FilterPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? RiderColors.textPrimary : Colors.white,
+      color: selected ? RiderColors.primary : Colors.white,
       borderRadius: BorderRadius.circular(20),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 36),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          constraints: const BoxConstraints(minHeight: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected ? RiderColors.textPrimary : const Color(0xFFD5E4E2),
+              color: selected ? RiderColors.primary : const Color(0xFFD5E4E2),
             ),
           ),
           child: Text(
@@ -302,18 +299,28 @@ class _TripCard extends StatelessWidget {
     final String id = record.displayId.trim().isEmpty
         ? record.orderId
         : record.displayId.trim();
+    final bool finished = record.canonicalStatus == 'DELIVERED' ||
+        record.canonicalStatus == 'RESEND_COMPLETED';
     return Material(
       color: Colors.white,
       elevation: 0,
-      borderRadius: BorderRadius.circular(16),
+      shadowColor: const Color(0x140F3D3E),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(RiderSpacing.md),
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: const Color(0xFFE3EEEC)),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color(0x0C0F3D3E),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -323,54 +330,39 @@ class _TripCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       id,
-                      style: RiderTextStyles.title,
+                      style: RiderTextStyles.title.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (status.isNotEmpty) _StatusPill(label: status, cancelled: cancelled),
-                ],
-              ),
-              const SizedBox(height: RiderSpacing.sm),
-              _PlaceRow(
-                icon: Icons.storefront_outlined,
-                text: record.pickup,
-              ),
-              const SizedBox(height: RiderSpacing.xs),
-              _PlaceRow(
-                icon: Icons.location_on_outlined,
-                text: record.drop,
-              ),
-              const SizedBox(height: RiderSpacing.sm),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: record.when == null
-                        ? const SizedBox.shrink()
-                        : Row(
-                            children: [
-                              const Icon(
-                                Icons.calendar_today_outlined,
-                                size: 14,
-                                color: RiderColors.textPrimary,
-                              ),
-                              const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  stamp.format(record.when!.toLocal()),
-                                  style: RiderTextStyles.caption,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
+                  if (status.isNotEmpty)
+                    _StatusPill(
+                      label: status,
+                      cancelled: cancelled,
+                      finished: finished,
+                    ),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: RiderColors.hint,
                   ),
-                  const SizedBox(width: RiderSpacing.sm),
-                  _MoneyColumn(record: record, currency: currency),
                 ],
               ),
+              if (record.when != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  stamp.format(record.when!.toLocal()),
+                  style: RiderTextStyles.caption,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const SizedBox(height: 8),
+              _RouteSummary(pickup: record.pickup, drop: record.drop),
+              _CardFooter(record: record, currency: currency),
             ],
           ),
         ),
@@ -379,38 +371,99 @@ class _TripCard extends StatelessWidget {
   }
 }
 
-class _PlaceRow extends StatelessWidget {
-  const _PlaceRow({required this.icon, required this.text});
+class _RouteSummary extends StatelessWidget {
+  const _RouteSummary({required this.pickup, required this.drop});
 
-  final IconData icon;
-  final String? text;
+  final String? pickup;
+  final String? drop;
 
   @override
   Widget build(BuildContext context) {
-    final String shown = (text ?? '').trim();
-    if (shown.isEmpty) {
+    final String from = (pickup ?? '').trim();
+    final String to = (drop ?? '').trim();
+    if (from.isEmpty && to.isEmpty) {
       return const SizedBox.shrink();
     }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
       children: [
-        Icon(icon, size: 16, color: RiderColors.textPrimary),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            shown,
-            style: RiderTextStyles.bodyMedium,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+        if (from.isNotEmpty)
+          _StopLine(
+            color: RiderColors.primary,
+            text: from,
+            drawTail: to.isNotEmpty,
           ),
-        ),
+        if (to.isNotEmpty)
+          _StopLine(
+            color: const Color(0xFFE08A12),
+            text: to,
+            drawTail: false,
+          ),
       ],
     );
   }
 }
 
-class _MoneyColumn extends StatelessWidget {
-  const _MoneyColumn({required this.record, required this.currency});
+class _StopLine extends StatelessWidget {
+  const _StopLine({
+    required this.color,
+    required this.text,
+    required this.drawTail,
+  });
+
+  final Color color;
+  final String text;
+  final bool drawTail;
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 14,
+            child: Column(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ),
+                if (drawTail)
+                  Expanded(
+                    child: Container(
+                      width: 1.5,
+                      margin: const EdgeInsets.only(top: 2, bottom: 2),
+                      color: const Color(0xFFD5E4E2),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: drawTail ? 2 : 0),
+              child: Text(
+                text,
+                style: RiderTextStyles.bodyMedium.copyWith(
+                  fontSize: 13,
+                  height: 1.3,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CardFooter extends StatelessWidget {
+  const _CardFooter({required this.record, required this.currency});
 
   final RiderHistoryRecord record;
   final NumberFormat currency;
@@ -419,56 +472,102 @@ class _MoneyColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final double? fare = record.tripFare;
     final double? earning = record.riderAmount;
-    final String? method = record.paymentLabel?.trim();
-    if (fare == null && earning == null && (method == null || method.isEmpty)) {
+    final String method = (record.paymentLabel ?? '').trim();
+    if (fare == null && earning == null && method.isEmpty) {
       return const SizedBox.shrink();
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        if (fare != null)
-          Text(
-            currency.format(fare),
-            style: RiderTextStyles.title,
-          ),
-        if (earning != null)
-          Text(
-            'Earning ${currency.format(earning)}',
-            style: RiderTextStyles.caption,
-          ),
-        if (method != null && method.isNotEmpty)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                method.contains('Online') && !method.contains('Cash')
-                    ? Icons.account_balance_wallet_outlined
-                    : Icons.payments_outlined,
-                size: 14,
-                color: RiderColors.textPrimary,
+    final bool onlineOnly =
+        method.contains('Online') && !method.contains('Cash');
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (method.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: onlineOnly
+                    ? const Color(0xFFE7F4F7)
+                    : const Color(0xFFFFF6E8),
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(width: 4),
-              Text(method, style: RiderTextStyles.caption),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    onlineOnly
+                        ? Icons.account_balance_wallet_outlined
+                        : Icons.payments_outlined,
+                    size: 13,
+                    color: onlineOnly
+                        ? RiderColors.primary
+                        : const Color(0xFFB45309),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    method,
+                    style: RiderTextStyles.caption.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: onlineOnly
+                          ? RiderColors.primary
+                          : const Color(0xFFB45309),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const Spacer(),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (fare != null)
+                Text(
+                  currency.format(fare),
+                  style: RiderTextStyles.title.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              if (earning != null)
+                Text(
+                  'Earning ${currency.format(earning)}',
+                  style: RiderTextStyles.caption,
+                ),
             ],
           ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.cancelled});
+  const _StatusPill({
+    required this.label,
+    required this.cancelled,
+    required this.finished,
+  });
 
   final String label;
   final bool cancelled;
+  final bool finished;
 
   @override
   Widget build(BuildContext context) {
-    final Color background =
-        cancelled ? const Color(0xFFFDECEC) : const Color(0xFFE7F8EE);
-    final Color foreground = cancelled ? RiderColors.error : const Color(0xFF157A3A);
+    final Color background = cancelled
+        ? const Color(0xFFFDECEC)
+        : finished
+            ? const Color(0xFFE7F8EE)
+            : const Color(0xFFE7F4F7);
+    final Color foreground = cancelled
+        ? RiderColors.error
+        : finished
+            ? const Color(0xFF157A3A)
+            : RiderColors.primary;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      margin: const EdgeInsets.only(right: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(20),

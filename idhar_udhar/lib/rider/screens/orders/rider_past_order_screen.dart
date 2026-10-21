@@ -101,8 +101,16 @@ class _RiderPastOrderScreenState extends ConsumerState<RiderPastOrderScreen> {
   @override
   Widget build(BuildContext context) {
     return RiderScaffold(
+      padding: EdgeInsets.zero,
       appBar: AppBar(
-        title: const Text('Order Details'),
+        backgroundColor: RiderColors.background,
+        foregroundColor: RiderColors.textPrimary,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(
+          'Order Details',
+          style: RiderTextStyles.title.copyWith(fontWeight: FontWeight.w700),
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back',
@@ -170,65 +178,50 @@ class _PastBody extends StatelessWidget {
     final ApiStop? drop = _stop(order, 'DROP');
     final String pickupAddress = _text(order.pickupAddress, pickup?.addressText);
     final String dropAddress = _text(order.dropAddress, drop?.addressText);
+    final bool finished = order.canonicalStatus == 'DELIVERED' ||
+        order.canonicalStatus == 'RESEND_COMPLETED';
+    final String vehicle = (order.vehicleCategoryName ?? '').trim();
+    final bool hasTripFacts = order.distanceKm != null ||
+        order.packageWeightKg != null ||
+        vehicle.isNotEmpty ||
+        order.waitingAmount != null ||
+        ((order.crn ?? '').trim().isNotEmpty);
+    final bool hasPayment = trip.paymentLabel != null ||
+        trip.riderAmount != null ||
+        trip.customerBill != null;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        RiderSpacing.screenH,
-        RiderSpacing.md,
-        RiderSpacing.screenH,
-        RiderSpacing.xl,
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        _Banner(label: status, cancelled: cancelled),
-        const SizedBox(height: RiderSpacing.md),
-        _Panel(
-          children: [
-            _CopyRow(label: 'Order ID', value: display),
-            if ((order.crn ?? '').trim().isNotEmpty)
-              _Line(label: 'CRN', value: order.crn!.trim()),
-            _Line(label: 'Date & Time', value: stamp.format(order.createdAt.toLocal())),
-            if (order.updatedAt != null)
-              _Line(
-                label: 'Last update',
-                value: stamp.format(order.updatedAt!.toLocal()),
-              ),
-            if (trip.paymentLabel != null)
-              _Line(label: 'Payment Type', value: trip.paymentLabel!),
-            if (trip.tripFare != null)
-              _Line(label: 'Trip fare', value: currency.format(trip.tripFare)),
-            if (trip.riderAmount != null)
-              _Line(label: 'Rider earning', value: currency.format(trip.riderAmount)),
-            if (trip.customerBill != null)
-              _Line(
-                label: 'Customer bill',
-                value: currency.format(trip.customerBill),
-              ),
-          ],
+        _HeaderCard(
+          display: display,
+          status: status,
+          cancelled: cancelled,
+          finished: finished,
+          when: stamp.format(order.createdAt.toLocal()),
+          updated: order.updatedAt == null
+              ? null
+              : stamp.format(order.updatedAt!.toLocal()),
+          fare: trip.tripFare == null ? null : currency.format(trip.tripFare),
         ),
-        const SizedBox(height: RiderSpacing.md),
-        _PlacePanel(
-          title: 'Pickup Details',
-          icon: Icons.storefront_outlined,
-          accent: const Color(0xFF157A3A),
-          name: _text(pickup?.contactName, order.customerName),
-          address: pickupAddress,
-          phone: _text(pickup?.contactPhone, order.customerPhone),
-          point: pickup,
+        const SizedBox(height: 8),
+        _RouteCard(
+          pickupName: _text(pickup?.contactName, order.customerName),
+          pickupAddress: pickupAddress,
+          pickupPhone: _text(pickup?.contactPhone, order.customerPhone),
+          pickupPoint: pickup,
+          dropName: _text(drop?.contactName, null),
+          dropAddress: dropAddress,
+          dropPhone: _text(drop?.contactPhone, null),
+          dropPoint: drop,
         ),
-        const SizedBox(height: RiderSpacing.md),
-        _PlacePanel(
-          title: 'Drop Details',
-          icon: Icons.location_on_outlined,
-          accent: RiderColors.error,
-          name: _text(drop?.contactName, null),
-          address: dropAddress,
-          phone: _text(drop?.contactPhone, null),
-          point: drop,
-        ),
-        if (order.distanceKm != null || order.packageWeightKg != null) ...[
-          const SizedBox(height: RiderSpacing.md),
+        if (hasTripFacts) ...[
+          const SizedBox(height: 8),
           _Panel(
-            title: 'Delivery Summary',
+            title: 'Trip',
             children: [
+              if ((order.crn ?? '').trim().isNotEmpty)
+                _Line(label: 'CRN', value: order.crn!.trim()),
+              if (vehicle.isNotEmpty) _Line(label: 'Vehicle', value: vehicle),
               if (order.distanceKm != null)
                 _Line(
                   label: 'Distance',
@@ -239,6 +232,31 @@ class _PastBody extends StatelessWidget {
                   label: 'Package weight',
                   value: '${order.packageWeightKg} kg',
                 ),
+              if (order.waitingAmount != null)
+                _Line(
+                  label: 'Waiting charge',
+                  value: currency.format(order.waitingAmount),
+                ),
+            ],
+          ),
+        ],
+        if (hasPayment) ...[
+          const SizedBox(height: 8),
+          _Panel(
+            title: 'Payment',
+            children: [
+              if (trip.paymentLabel != null)
+                _Line(label: 'Payment Type', value: trip.paymentLabel!),
+              if (trip.riderAmount != null)
+                _Line(
+                  label: 'Rider earning',
+                  value: currency.format(trip.riderAmount),
+                ),
+              if (trip.customerBill != null)
+                _Line(
+                  label: 'Customer bill',
+                  value: currency.format(trip.customerBill),
+                ),
             ],
           ),
         ],
@@ -247,39 +265,281 @@ class _PastBody extends StatelessWidget {
   }
 }
 
-class _Banner extends StatelessWidget {
-  const _Banner({required this.label, required this.cancelled});
+class _HeaderCard extends StatelessWidget {
+  const _HeaderCard({
+    required this.display,
+    required this.status,
+    required this.cancelled,
+    required this.finished,
+    required this.when,
+    required this.updated,
+    required this.fare,
+  });
 
-  final String label;
+  final String display;
+  final String status;
   final bool cancelled;
+  final bool finished;
+  final String when;
+  final String? updated;
+  final String? fare;
 
   @override
   Widget build(BuildContext context) {
-    final String shown = label.isEmpty ? 'Order' : label;
-    return Container(
-      padding: const EdgeInsets.all(RiderSpacing.md),
-      decoration: BoxDecoration(
-        color: cancelled ? const Color(0xFFFDECEC) : const Color(0xFFE7F8EE),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            cancelled ? Icons.cancel_rounded : Icons.check_circle_rounded,
-            color: cancelled ? RiderColors.error : const Color(0xFF157A3A),
-          ),
-          const SizedBox(width: RiderSpacing.sm),
-          Expanded(
-            child: Text(
-              shown,
-              style: RiderTextStyles.title.copyWith(
-                color: cancelled ? RiderColors.error : const Color(0xFF157A3A),
+    final Color tone = cancelled
+        ? RiderColors.error
+        : finished
+            ? const Color(0xFF157A3A)
+            : RiderColors.primary;
+    final Color wash = cancelled
+        ? const Color(0xFFFDECEC)
+        : finished
+            ? const Color(0xFFE7F8EE)
+            : const Color(0xFFE7F4F7);
+    return _Panel(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Order ID', style: RiderTextStyles.caption),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          display,
+                          style: RiderTextStyles.title.copyWith(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Copy order id',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: display));
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
+            if (status.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: wash,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  status,
+                  style: RiderTextStyles.caption.copyWith(
+                    color: tone,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(when, style: RiderTextStyles.caption),
+                  if (updated != null)
+                    Text(
+                      'Last update $updated',
+                      style: RiderTextStyles.caption,
+                    ),
+                ],
+              ),
+            ),
+            if (fare != null)
+              Text(
+                fare!,
+                style: RiderTextStyles.heading.copyWith(
+                  fontSize: 20,
+                  color: RiderColors.primary,
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _RouteCard extends StatelessWidget {
+  const _RouteCard({
+    required this.pickupName,
+    required this.pickupAddress,
+    required this.pickupPhone,
+    required this.pickupPoint,
+    required this.dropName,
+    required this.dropAddress,
+    required this.dropPhone,
+    required this.dropPoint,
+  });
+
+  final String pickupName;
+  final String pickupAddress;
+  final String pickupPhone;
+  final ApiStop? pickupPoint;
+  final String dropName;
+  final String dropAddress;
+  final String dropPhone;
+  final ApiStop? dropPoint;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Panel(
+      title: 'Route',
+      children: [
+        _StopBlock(
+          label: 'Pickup',
+          color: RiderColors.primary,
+          name: pickupName,
+          address: pickupAddress,
+          phone: pickupPhone,
+          point: pickupPoint,
+          drawTail: true,
+        ),
+        _StopBlock(
+          label: 'Drop',
+          color: const Color(0xFFE08A12),
+          name: dropName,
+          address: dropAddress,
+          phone: dropPhone,
+          point: dropPoint,
+          drawTail: false,
+        ),
+      ],
+    );
+  }
+}
+
+class _StopBlock extends StatelessWidget {
+  const _StopBlock({
+    required this.label,
+    required this.color,
+    required this.name,
+    required this.address,
+    required this.phone,
+    required this.point,
+    required this.drawTail,
+  });
+
+  final String label;
+  final Color color;
+  final String name;
+  final String address;
+  final String phone;
+  final ApiStop? point;
+  final bool drawTail;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool canMap =
+        point != null && (point!.latitude != 0 || point!.longitude != 0);
+    return IntrinsicHeight(
+      child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 16,
+          child: Column(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(top: 4),
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              if (drawTail)
+                Expanded(
+                  child: Container(
+                    width: 1.5,
+                    margin: const EdgeInsets.only(top: 2, bottom: 2),
+                    color: const Color(0xFFD5E4E2),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: drawTail ? 8 : 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: RiderTextStyles.caption.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (name.isNotEmpty)
+                  Text(
+                    name,
+                    style: RiderTextStyles.bodyMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                if (address.isNotEmpty)
+                  Text(
+                    address,
+                    style: RiderTextStyles.body.copyWith(fontSize: 13, height: 1.35),
+                  ),
+                if (phone.isNotEmpty)
+                  Text(phone, style: RiderTextStyles.caption),
+                if (canMap)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 28),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => _openMap(
+                      point!.latitude,
+                      point!.longitude,
+                    ),
+                    icon: const Icon(Icons.near_me_outlined, size: 14),
+                    label: const Text('View on Map'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
       ),
     );
+  }
+
+  Future<void> _openMap(double latitude, double longitude) async {
+    final Uri uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 }
 
@@ -292,123 +552,25 @@ class _Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(RiderSpacing.md),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE3EEEC)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (title != null) ...[
-            Text(title!, style: RiderTextStyles.title),
-            const SizedBox(height: RiderSpacing.sm),
+            Text(
+              title!,
+              style: RiderTextStyles.bodyMedium.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
           ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _PlacePanel extends StatelessWidget {
-  const _PlacePanel({
-    required this.title,
-    required this.icon,
-    required this.accent,
-    required this.name,
-    required this.address,
-    required this.phone,
-    required this.point,
-  });
-
-  final String title;
-  final IconData icon;
-  final Color accent;
-  final String name;
-  final String address;
-  final String phone;
-  final ApiStop? point;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool canMap = point != null &&
-        (point!.latitude != 0 || point!.longitude != 0);
-    return _Panel(
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: accent, size: 20),
-            const SizedBox(width: RiderSpacing.sm),
-            Expanded(child: Text(title, style: RiderTextStyles.title)),
-          ],
-        ),
-        if (name.isNotEmpty) ...[
-          const SizedBox(height: RiderSpacing.sm),
-          Text(name, style: RiderTextStyles.bodyMedium),
-        ],
-        if (address.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text(address, style: RiderTextStyles.body),
-        ],
-        if (phone.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text(phone, style: RiderTextStyles.caption),
-        ],
-        if (canMap)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => _openMap(point!.latitude, point!.longitude),
-              icon: const Icon(Icons.near_me_outlined, size: 16),
-              label: const Text('View on Map'),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Future<void> _openMap(double latitude, double longitude) async {
-    final Uri uri = Uri.parse(
-      'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-}
-
-class _CopyRow extends StatelessWidget {
-  const _CopyRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: RiderSpacing.xs),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(label, style: RiderTextStyles.caption),
-          ),
-          Flexible(
-            child: Text(
-              value,
-              style: RiderTextStyles.bodyMedium,
-              textAlign: TextAlign.end,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Copy order id',
-            visualDensity: VisualDensity.compact,
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: value));
-            },
-            icon: const Icon(Icons.copy_rounded, size: 16),
-          ),
         ],
       ),
     );
@@ -424,16 +586,16 @@ class _Line extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: RiderSpacing.xs),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(child: Text(label, style: RiderTextStyles.caption)),
-          const SizedBox(width: RiderSpacing.sm),
+          const SizedBox(width: 8),
           Flexible(
             child: Text(
               value,
-              style: RiderTextStyles.bodyMedium,
+              style: RiderTextStyles.bodyMedium.copyWith(fontSize: 13),
               textAlign: TextAlign.end,
             ),
           ),
