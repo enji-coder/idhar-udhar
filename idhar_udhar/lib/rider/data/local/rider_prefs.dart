@@ -6,6 +6,7 @@ abstract final class RiderPrefs {
   static const String _termsKey = 'rider_terms_accepted_v1';
   static const String loggedInKey = 'rider_logged_in_v1';
   static const String _onlineKey = 'rider_online_v1';
+  static const String _liveOrderKey = 'rider_live_order_id_v1';
 
   static Future<bool> isInitialSetupComplete() async {
     final prefs = await SharedPreferences.getInstance();
@@ -62,5 +63,51 @@ abstract final class RiderPrefs {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(loggedInKey, false);
     await prefs.setBool(_onlineKey, false);
+    await prefs.remove(_liveOrderKey);
+  }
+
+  /// Last order id this install was delivering. The server status is authoritative.
+  static Future<String?> liveOrderId() async {
+    final prefs = await _prefs();
+    final String? id = prefs.getString(_liveOrderKey)?.trim();
+    if (id == null || id.isEmpty) {
+      return null;
+    }
+    return id;
+  }
+
+  static Future<void> setLiveOrderId(String orderId) async {
+    final String id = orderId.trim();
+    if (id.isEmpty) {
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_liveOrderKey, id);
+  }
+
+  static Future<void> clearLiveOrderId() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_liveOrderKey);
+  }
+}
+
+/// Saves or clears the live order id. Plugin failures are ignored so a
+/// missing preferences store cannot block accept or delivery.
+Future<void> rememberLiveOrderId(String? orderId) async {
+  try {
+    final String id = (orderId ?? '').trim();
+    if (id.isEmpty) {
+      await RiderPrefs.clearLiveOrderId();
+    } else {
+      await RiderPrefs.setLiveOrderId(id);
+    }
+  } catch (_) {}
+}
+
+Future<String?> readRememberedLiveOrderId() async {
+  try {
+    return await RiderPrefs.liveOrderId();
+  } catch (_) {
+    return null;
   }
 }

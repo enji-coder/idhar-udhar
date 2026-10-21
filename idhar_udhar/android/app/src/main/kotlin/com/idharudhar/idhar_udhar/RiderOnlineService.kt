@@ -212,7 +212,7 @@ class RiderOnlineService : Service() {
             val code = connection.responseCode
             code in 200..299
         } catch (error: Exception) {
-            Log.w(TAG, "presence_http_failed", error)
+            Log.w(TAG, "presence_http_failed type=${error.javaClass.simpleName}")
             false
         } finally {
             connection?.disconnect()

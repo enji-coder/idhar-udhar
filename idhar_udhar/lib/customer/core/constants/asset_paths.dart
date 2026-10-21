@@ -77,8 +77,10 @@ abstract final class AssetPaths {
   static const String car = 'assets/customer/images/3d/idhar_udhar_car.png';
 
   /// Small flatbed / pickup logistics truck.
+  /// The shipped file is `idhar_udhar_pickup_truck_1.png`. The unsuffixed
+  /// path is not in the asset folder, so Mini Truck was failing to decode.
   static const String pickupTruck =
-      'assets/customer/images/3d/idhar_udhar_pickup_truck.png';
+      'assets/customer/images/3d/idhar_udhar_pickup_truck_1.png';
 
   /// Single branded parcel box.
   static const String parcel = 'assets/customer/images/3d/idhar_udhar_parcel.png';

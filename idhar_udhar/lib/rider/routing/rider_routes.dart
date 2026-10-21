@@ -33,6 +33,8 @@ abstract final class RiderRoutes {
   static const String wallet = '/rider/wallet';
   static const String income = '/rider/income';
   static const String history = '/rider/history';
+  static const String ledger = '/rider/ledger';
+  static const String pastOrder = '/rider/orders/past';
   static const String settings = '/rider/settings';
   static const String notifications = '/rider/notifications';
 }

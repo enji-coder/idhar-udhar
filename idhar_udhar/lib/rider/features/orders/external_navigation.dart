@@ -334,7 +334,8 @@ bool riderOverlayWindowVisible({
 }
 
 /// The bubble itself returns to the current Rider activity. A drag does not.
-/// Options Menu and Close are separate controls and are never fired by a drag.
+/// Close is a separate control and is never fired by a drag. The top-right
+/// Options Menu is not attached; its order-details handler remains.
 String? riderBubbleTapAction({required bool dragged}) {
   if (dragged) {
     return null;

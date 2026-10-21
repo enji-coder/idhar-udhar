@@ -27,6 +27,7 @@ class RiderLocationPublisher {
   final TokenStore _tokens;
   Timer? _timer;
   bool _started = false;
+  bool _tickInFlight = false;
   bool _askedForPermission = false;
   bool _loggedPermissionSkip = false;
   double? _lastLat;
@@ -83,6 +84,18 @@ class RiderLocationPublisher {
   }
 
   Future<void> _tick() async {
+    if (!_started || _tickInFlight) {
+      return;
+    }
+    _tickInFlight = true;
+    try {
+      await _publishTick();
+    } finally {
+      _tickInFlight = false;
+    }
+  }
+
+  Future<void> _publishTick() async {
     if (!_started) {
       return;
     }

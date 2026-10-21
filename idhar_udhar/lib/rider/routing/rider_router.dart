@@ -11,6 +11,8 @@ import '../screens/orders/delivery_complete_screen.dart';
 import '../screens/orders/incoming_order_screen.dart';
 import '../screens/orders/order_details_screen.dart';
 import '../screens/orders/rider_history_screen.dart';
+import '../screens/orders/rider_ledger_screen.dart';
+import '../screens/orders/rider_past_order_screen.dart';
 import '../screens/profile/rider_profile_screen.dart';
 import '../screens/profile/rider_upi_details_screen.dart';
 import '../screens/registration/documents_screen.dart';
@@ -324,6 +326,24 @@ abstract final class RiderRouter {
         pageBuilder: (context, state) => _fadePage(
           state: state,
           child: const RiderHistoryScreen(),
+        ),
+      ),
+      GoRoute(
+        path: RiderRoutes.ledger,
+        name: 'riderLedger',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const RiderLedgerScreen(),
+        ),
+      ),
+      GoRoute(
+        path: RiderRoutes.pastOrder,
+        name: 'riderPastOrder',
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: RiderPastOrderScreen(
+            orderId: state.uri.queryParameters['id'] ?? '',
+          ),
         ),
       ),
       GoRoute(

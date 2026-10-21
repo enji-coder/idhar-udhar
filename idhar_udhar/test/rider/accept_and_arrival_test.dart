@@ -23,12 +23,16 @@ import 'package:idhar_udhar/shared/api/profiles_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/api/token_store.dart';
 import 'package:idhar_udhar/shared/api/wallet_api.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const String _orderId = '11111111-1111-4111-8111-111111111111';
 const String _offerId = '22222222-2222-4222-8222-222222222222';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
 
   testWidgets('popup accept opens order details once after confirmation', (
     tester,
@@ -143,6 +147,50 @@ void main() {
     );
     addTearDown(router.dispose);
     await tester.pumpWidget(_app(container, router));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('History'), findsNothing);
+    expect(find.text('Orders'), findsWidgets);
+    expect(find.text('Ledger'), findsOneWidget);
+    expect(find.text('Earnings'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Home'), findsWidgets);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Orders'),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Trip History'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Ledger'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Ledger'),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Ledger Board'), findsOneWidget);
+    expect(find.text('No ledger entries yet'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Home'),
+      ),
+    );
     await tester.pump();
     await tester.pump();
 
@@ -361,6 +409,16 @@ class _QuietWallet extends WalletApi {
   Future<RiderCod> cod() async {
     return const RiderCod(codDue: 0, suspendThreshold: 100, suspended: false);
   }
+
+  @override
+  Future<List<RiderEarningRow>> earnings() async {
+    return const <RiderEarningRow>[];
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> walletLedger() async {
+    return const <Map<String, Object?>>[];
+  }
 }
 
 class _QuietProfiles extends ProfilesApi {
@@ -393,6 +451,14 @@ class _ScriptedRiderApi extends RiderApi {
   @override
   Future<List<RiderOffer>> listOffers() async {
     return <RiderOffer>[_offer()];
+  }
+
+  @override
+  Future<RiderHistoryPage> listRiderOrders({
+    int limit = 20,
+    String? cursor,
+  }) async {
+    return const RiderHistoryPage(orders: <RiderHistoryOrder>[]);
   }
 
   @override

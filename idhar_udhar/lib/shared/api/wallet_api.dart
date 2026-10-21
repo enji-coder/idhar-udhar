@@ -49,14 +49,16 @@ class RiderEarningRow {
     required this.displayId,
     required this.tripFare,
     required this.riderAmount,
-    required this.frozenAt,
+    this.frozenAt,
   });
 
   final String orderId;
   final String displayId;
   final double tripFare;
   final double riderAmount;
-  final DateTime frozenAt;
+
+  /// `frozen_at` from the earnings snapshot. Null when the payload omits it.
+  final DateTime? frozenAt;
 
   factory RiderEarningRow.fromJson(Map<String, Object?> json) {
     return RiderEarningRow(
@@ -64,7 +66,7 @@ class RiderEarningRow {
       displayId: jsonString(json['display_id']) ?? '',
       tripFare: jsonDouble(json['trip_fare']),
       riderAmount: jsonDouble(json['rider_amount']),
-      frozenAt: jsonDate(json['frozen_at']) ?? DateTime.now(),
+      frozenAt: jsonDate(json['frozen_at']),
     );
   }
 }

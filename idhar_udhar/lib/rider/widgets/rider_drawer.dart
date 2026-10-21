@@ -101,7 +101,7 @@ class RiderDrawer extends ConsumerWidget {
                   _item(
                     context,
                     Icons.history_rounded,
-                    'History',
+                    'Trip History',
                     RiderRoutes.history,
                   ),
                   _item(

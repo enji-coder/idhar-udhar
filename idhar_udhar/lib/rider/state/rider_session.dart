@@ -338,7 +338,9 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
               (row) => RecentEarningItem(
                 label: row.displayId.isEmpty ? row.orderId : row.displayId,
                 amount: row.riderAmount,
-                timeLabel: stamp.format(row.frozenAt.toLocal()),
+                timeLabel: row.frozenAt == null
+                    ? ''
+                    : stamp.format(row.frozenAt!.toLocal()),
               ),
             )
             .toList(growable: false),

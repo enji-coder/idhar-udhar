@@ -5,6 +5,7 @@ import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 
 import '../data/dummy/dummy_rider_repository.dart';
+import '../data/local/rider_prefs.dart';
 import '../data/models/rider_order.dart';
 import '../routing/rider_routes.dart';
 import '../state/rider_session.dart';
@@ -56,6 +57,7 @@ Future<String> publishAcceptedOrder({
   ref.read(activeOrderProvider.notifier).state = order;
   ref.read(deliveryStatusProvider.notifier).state =
       DeliveryLifecycleStatus.accepted;
+  await rememberLiveOrderId(order.backendOrderId);
   try {
     await ref.read(riderSessionProvider.notifier).refreshOffers();
   } catch (_) {

@@ -364,6 +364,8 @@ void main() {
     );
 
     expect(find.text('ARRIVED AT PICKUP LOCATION'), findsOneWidget);
+    expect(find.text('Going to Pickup'), findsNWidgets(2));
+    expect(find.text('Pickup Location'), findsOneWidget);
     expect(find.text('Pickup lane'), findsOneWidget);
     expect(find.text('Head to the pickup location'), findsNothing);
     expect(launched, isEmpty);
@@ -397,6 +399,7 @@ void main() {
 
     expect(find.text('ARRIVED AT DROP LOCATION'), findsOneWidget);
     expect(find.text('Drop lane'), findsOneWidget);
+    expect(find.text('Going to Pickup'), findsNothing);
     expect(find.text('Head to the drop location'), findsNothing);
     expect(launched, isEmpty);
 

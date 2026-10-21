@@ -40,8 +40,10 @@ class RiderOnlinePresence {
       }
     } on MissingPluginException {
       // Customer flavor / desktop — no FGS plugin.
-    } catch (error, stack) {
-      debugPrint('rider_online_presence_start_failed $error\n$stack');
+    } catch (error) {
+      debugPrint(
+        'rider_online_presence_start_failed type=${error.runtimeType}',
+      );
     }
   }
 

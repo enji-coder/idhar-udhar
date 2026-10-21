@@ -159,9 +159,11 @@ internal object RiderNavOverlay {
         if (bubbleRoot == null) {
             attachBubble(context, manager)
         }
-        if (optionsRoot == null) {
-            attachOptions(context, manager)
-        }
+        // Top-right Options Menu is hidden. attachOptions() stays so the
+        // control can be restored without rewriting the overlay.
+        // if (optionsRoot == null) {
+        //     attachOptions(context, manager)
+        // }
     }
 
     private fun disarm() {
@@ -284,6 +286,7 @@ internal object RiderNavOverlay {
         }
     }
 
+    @Suppress("unused")
     private fun attachOptions(context: Context, manager: WindowManager) {
         val density = context.resources.displayMetrics.density
         val margin = (12 * density).toInt()

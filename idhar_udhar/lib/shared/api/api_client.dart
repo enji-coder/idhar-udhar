@@ -1,7 +1,7 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
-import 'package:logger/logger.dart';
 
 import 'api_config.dart';
 import 'api_exception.dart';
@@ -16,7 +16,9 @@ class ApiClient {
     required TokenStore tokenStore,
     Dio? dio,
     this.onSessionInvalid,
+    void Function(String message)? diagnosticLog,
   })  : _tokenStore = tokenStore,
+        _diagnosticLog = diagnosticLog ?? _defaultDiagnosticLog,
         _dio = dio ??
             Dio(
               BaseOptions(
@@ -36,26 +38,20 @@ class ApiClient {
         onError: _onError,
       ),
     );
-    if (ApiConfig.enableRequestLogging) {
-      _dio.interceptors.add(
-        LogInterceptor(
-          requestBody: true,
-          responseBody: true,
-          logPrint: (Object object) {
-            _log.d(object);
-          },
-        ),
-      );
-    }
+    _dio.interceptors.add(_SafeApiLog(_diagnosticLog));
   }
 
   final TokenStore _tokenStore;
   final Dio _dio;
-  final Logger _log = Logger(
-    printer: PrettyPrinter(methodCount: 0, errorMethodCount: 0),
-  );
+  final void Function(String message) _diagnosticLog;
+  final Map<String, Future<Map<String, Object?>>> _inFlightGets =
+      <String, Future<Map<String, Object?>>>{};
   SessionInvalidCallback? onSessionInvalid;
   Future<void>? _refreshing;
+
+  static void _defaultDiagnosticLog(String message) {
+    developer.log(message, name: 'idhar_udhar.api');
+  }
 
   Dio get raw => _dio;
 
@@ -63,7 +59,21 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? query,
   }) {
-    return _send(() => _dio.get<dynamic>(path, queryParameters: query));
+    final String key = _getKey(path, query);
+    final Future<Map<String, Object?>>? inFlight = _inFlightGets[key];
+    if (inFlight != null) {
+      return inFlight;
+    }
+    late final Future<Map<String, Object?>> tracked;
+    tracked = _send(
+      () => _dio.get<dynamic>(path, queryParameters: query),
+    ).whenComplete(() {
+      if (identical(_inFlightGets[key], tracked)) {
+        _inFlightGets.remove(key);
+      }
+    });
+    _inFlightGets[key] = tracked;
+    return tracked;
   }
 
   Future<Map<String, Object?>> post(
@@ -215,24 +225,50 @@ class ApiClient {
   }
 
   ApiException _mapDio(DioException error) {
-    if (error.type == DioExceptionType.connectionTimeout ||
-        error.type == DioExceptionType.receiveTimeout ||
-        error.type == DioExceptionType.sendTimeout) {
-      return const ApiException(
-        code: 'INTERNAL_ERROR',
-        message: 'The server took too long. Try again.',
-      );
-    }
-    if (error.type == DioExceptionType.connectionError) {
-      return const ApiException(
-        code: 'DATABASE_UNAVAILABLE',
-        message: 'Cannot reach the server. Check your connection.',
-      );
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+        return const ApiException(
+          code: 'CONNECTION_TIMEOUT',
+          message: 'Could not connect to the server. Try again.',
+        );
+      case DioExceptionType.sendTimeout:
+        return const ApiException(
+          code: 'SEND_TIMEOUT',
+          message: 'The request could not be sent. Try again.',
+        );
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.transformTimeout:
+        return const ApiException(
+          code: 'RECEIVE_TIMEOUT',
+          message: 'The server took too long to respond. Try again.',
+        );
+      case DioExceptionType.connectionError:
+        return const ApiException(
+          code: 'CONNECTION_ERROR',
+          message: 'Cannot reach the server. Check your connection.',
+        );
+      case DioExceptionType.badCertificate:
+      case DioExceptionType.badResponse:
+      case DioExceptionType.cancel:
+      case DioExceptionType.unknown:
+        break;
     }
     return ApiErrorMapper.fromBody(
       error.response?.data,
       statusCode: error.response?.statusCode,
     );
+  }
+
+  String _getKey(String path, Map<String, dynamic>? query) {
+    if (query == null || query.isEmpty) {
+      return 'GET $path';
+    }
+    final List<String> keys = query.keys.map((dynamic key) => '$key').toList()
+      ..sort();
+    final String encoded = keys
+        .map((String key) => '$key=${query[key]}')
+        .join('&');
+    return 'GET $path?$encoded';
   }
 
   bool _isPublic(String path) {
@@ -247,5 +283,79 @@ class ApiClient {
     return path.contains('/v1/auth/otp/') ||
         path.contains('/v1/auth/token/refresh') ||
         path.contains('/v1/auth/dev/otp-capture');
+  }
+}
+
+/// One completion line per request. Headers, tokens, and bodies are omitted.
+class _SafeApiLog extends Interceptor {
+  _SafeApiLog(this._emit);
+
+  final void Function(String message) _emit;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    options.extra['iu_started_ms'] = DateTime.now().millisecondsSinceEpoch;
+    handler.next(options);
+  }
+
+  @override
+  void onResponse(
+    Response<dynamic> response,
+    ResponseInterceptorHandler handler,
+  ) {
+    _emit(
+      _line(
+        response.requestOptions,
+        response.statusCode,
+        null,
+        response.headers.value('x-request-id'),
+      ),
+    );
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    _emit(
+      _line(
+        err.requestOptions,
+        err.response?.statusCode,
+        err.type.name,
+        err.response?.headers.value('x-request-id'),
+      ),
+    );
+    handler.next(err);
+  }
+
+  String _line(
+    RequestOptions options,
+    int? status,
+    String? errorType,
+    String? requestId,
+  ) {
+    final Object? started = options.extra['iu_started_ms'];
+    final int durationMs = started is int
+        ? DateTime.now().millisecondsSinceEpoch - started
+        : -1;
+    final StringBuffer line = StringBuffer(
+      'api method=${options.method} path=${_path(options)} '
+      'status=${status ?? 'none'} duration_ms=$durationMs',
+    );
+    if (errorType != null && errorType.isNotEmpty) {
+      line.write(' error=$errorType');
+    }
+    final String id = requestId?.trim() ?? '';
+    if (id.isNotEmpty && !id.contains(' ') && id.length <= 80) {
+      line.write(' request_id=$id');
+    }
+    return line.toString();
+  }
+
+  String _path(RequestOptions options) {
+    final String path = options.uri.path;
+    if (path.isEmpty) {
+      return options.path.split('?').first;
+    }
+    return path;
   }
 }

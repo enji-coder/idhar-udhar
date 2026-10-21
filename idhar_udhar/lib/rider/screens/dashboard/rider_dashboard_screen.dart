@@ -19,12 +19,14 @@ import '../../data/models/recent_activity.dart';
 import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
+import '../../features/orders/rider_order_board_providers.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
 import '../../push/rider_accept_flow.dart';
 import '../../push/rider_offer_rules.dart';
 import '../../routing/rider_routes.dart';
 import '../../screens/earnings/rider_income_screen.dart';
 import '../../screens/orders/rider_history_screen.dart';
+import '../../screens/orders/rider_ledger_screen.dart';
 import '../../screens/profile/rider_profile_screen.dart';
 import '../../screens/wallet/rider_wallet_screen.dart';
 import '../../state/rider_onboarding.dart';
@@ -39,6 +41,7 @@ import '../../widgets/rider_primary_button.dart';
 import '../../widgets/rider_secondary_button.dart';
 import '../../widgets/rider_section_header.dart';
 import '../../widgets/rider_stat_card.dart';
+import 'rider_active_delivery_section.dart';
 
 /// Dashboard-only: ~1pt smaller than shared Rider text styles.
 TextStyle _d(TextStyle style) {
@@ -50,7 +53,7 @@ TextStyle _d(TextStyle style) {
 const EdgeInsets _dashCardPad = EdgeInsets.all(RiderSpacing.xl - 1);
 const double _dashElevation = 10;
 
-/// Main rider shell: Home / Orders / History / Earnings / Profile.
+/// Main rider shell: Home / Orders / Ledger / Earnings / Profile.
 class RiderDashboardScreen extends ConsumerStatefulWidget {
   const RiderDashboardScreen({super.key});
 
@@ -59,15 +62,19 @@ class RiderDashboardScreen extends ConsumerStatefulWidget {
       _RiderDashboardScreenState();
 }
 
-class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
+class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
+    with WidgetsBindingObserver {
   int _tab = 0;
+  final Set<int> _visitedTabs = <int>{0};
   Timer? _offerPoll;
   RiderLocationPublisher? _locationPublisher;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      refreshRiderRunningDeliveries(ref);
       unawaited(() async {
         await ref.read(riderSessionProvider.notifier).refreshProfile();
         if (!mounted) return;
@@ -120,9 +127,24 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _offerPoll?.cancel();
     _locationPublisher?.stop();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      refreshRiderRunningDeliveries(ref);
+    }
+  }
+
+  Widget _shellTab(int index, Widget child) {
+    if (!_visitedTabs.contains(index)) {
+      return const SizedBox.shrink();
+    }
+    return child;
   }
 
   @override
@@ -139,22 +161,30 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
         child: SafeArea(
           child: IndexedStack(
             index: _tab,
-            children: const [
-              _HomeTab(),
-              _OrdersTab(),
-              RiderHistoryScreen(showAppBar: false),
-              RiderIncomeScreen(showAppBar: false),
-              RiderProfileScreen(showAppBar: false),
+            children: [
+              _shellTab(0, const _HomeTab()),
+              _shellTab(1, const RiderHistoryScreen(showAppBar: false)),
+              _shellTab(2, const RiderLedgerScreen(showAppBar: false)),
+              _shellTab(3, const RiderIncomeScreen(showAppBar: false)),
+              _shellTab(4, const RiderProfileScreen(showAppBar: false)),
             ],
           ),
         ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (int i) {
+          setState(() {
+            _tab = i;
+            _visitedTabs.add(i);
+          });
+          if (i == 0) {
+            refreshRiderRunningDeliveries(ref);
+          }
+        },
         backgroundColor: RiderColors.surfaceGlass,
         indicatorColor: RiderColors.primary.withValues(alpha: 0.15),
-        labelBehavior: MediaQuery.sizeOf(context).width < 360
+        labelBehavior: MediaQuery.sizeOf(context).width < 400
             ? NavigationDestinationLabelBehavior.onlyShowSelected
             : NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
@@ -170,10 +200,10 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen> {
             label: 'Orders',
           ),
           NavigationDestination(
-            icon: Icon(Icons.history_rounded),
+            icon: Icon(Icons.menu_book_outlined),
             selectedIcon:
-                Icon(Icons.history_rounded, color: RiderColors.primary),
-            label: 'History',
+                Icon(Icons.menu_book_rounded, color: RiderColors.primary),
+            label: 'Ledger',
           ),
           NavigationDestination(
             icon: Icon(Icons.account_balance_wallet_outlined),
@@ -343,6 +373,7 @@ class _HomeTab extends ConsumerWidget {
                   }
                 },
               ),
+              const RiderActiveDeliverySection(),
               if (approved && online && !suspended && order != null) ...[
                 const SizedBox(height: RiderSpacing.md),
                 _IncomingOrderCard(
@@ -1134,47 +1165,6 @@ class _ActivityRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _OrdersTab extends ConsumerWidget {
-  const _OrdersTab();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final activity = ref.watch(riderDeliveryHistoryProvider);
-    final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(RiderSpacing.screenH),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('Orders', style: _d(RiderTextStyles.heading)),
-          const SizedBox(height: RiderSpacing.sm),
-          Text(
-            'Recent completed deliveries',
-            style: _d(RiderTextStyles.caption),
-          ),
-          const SizedBox(height: RiderSpacing.xl),
-          if (activity.isEmpty)
-            Text(
-              'No completed deliveries yet',
-              style: _d(RiderTextStyles.caption),
-            )
-          else
-            for (final item in activity) ...[
-              RiderGlassCard(
-                elevation: _dashElevation,
-                padding: _dashCardPad,
-                child: _ActivityRow(item: item, currency: currency),
-              ),
-              const SizedBox(height: RiderSpacing.md),
-            ],
-        ],
-      ),
     );
   }
 }

@@ -11,6 +11,7 @@ import 'package:intl/intl.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
+import '../../routing/rider_routes.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -127,6 +128,11 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
                 }
               },
             ),
+          ),
+          const SizedBox(height: RiderSpacing.md),
+          RiderSecondaryButton(
+            label: 'Transaction History',
+            onPressed: () => context.push(RiderRoutes.ledger),
           ),
           const SizedBox(height: RiderSpacing.md),
           RiderSecondaryButton(

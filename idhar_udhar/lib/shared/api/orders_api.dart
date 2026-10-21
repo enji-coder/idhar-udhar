@@ -168,6 +168,7 @@ class ApiOrder {
     this.receivableOutstanding,
     this.customerName,
     this.customerPhone,
+    this.updatedAt,
   });
 
   final String orderId;
@@ -202,6 +203,9 @@ class ApiOrder {
   final String? customerName;
   final String? customerPhone;
 
+  /// Server `updated_at` when the order payload includes it.
+  final DateTime? updatedAt;
+
   factory ApiOrder.fromJson(Map<String, Object?> json) {
     final Map<String, Object?> snapshot = jsonObject(json['fare_snapshot']);
     final Map<String, Object?> waiting = jsonObject(json['waiting']);
@@ -214,6 +218,7 @@ class ApiOrder {
       displayId: jsonString(json['display_id']) ?? '',
       canonicalStatus: jsonString(json['canonical_status']) ?? 'CREATED',
       createdAt: jsonDate(json['created_at']) ?? DateTime.now(),
+      updatedAt: jsonDate(json['updated_at']),
       cityCode: jsonString(json['city_code']),
       vehicleCategoryName: jsonString(json['vehicle_category_name']),
       vehicleCategoryId: jsonString(json['vehicle_category_id']),

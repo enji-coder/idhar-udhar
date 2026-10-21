@@ -83,6 +83,75 @@ VehicleType vehicleTypeForCategory(VehicleCategory category) {
   return VehicleType.truck;
 }
 
+/// Display order for Select Vehicle. Catalog codes are the size source:
+/// two-wheelers, then three-wheelers, then trucks as mini_truck, tempo,
+/// large_tempo, truck. A copy is sorted; [source] is left unchanged.
+List<VehicleCategory> sortedVehicleCategoriesForDisplay(
+  List<VehicleCategory> source,
+) {
+  final List<VehicleCategory> copy = List<VehicleCategory>.of(source);
+  copy.sort(_compareVehicleCategoryDisplay);
+  return copy;
+}
+
+int _compareVehicleCategoryDisplay(VehicleCategory a, VehicleCategory b) {
+  final int family = _displayFamilyRank(a).compareTo(_displayFamilyRank(b));
+  if (family != 0) {
+    return family;
+  }
+  if (_displayFamilyRank(a) != 2) {
+    return 0;
+  }
+  return _truckSizeRank(a).compareTo(_truckSizeRank(b));
+}
+
+int _displayFamilyRank(VehicleCategory category) {
+  switch ((category.vehicleTypeCode ?? '').trim().toLowerCase()) {
+    case 'two_wheeler':
+      return 0;
+    case 'three_wheeler':
+      return 1;
+    case 'truck':
+      return 2;
+  }
+  switch (serviceFamilyForCategory(category)) {
+    case ServiceFamily.twoWheeler:
+      return 0;
+    case ServiceFamily.threeWheeler:
+      return 1;
+    case ServiceFamily.truck:
+      return 2;
+    case null:
+      return 3;
+  }
+}
+
+/// Matches backend `VEHICLES_FOR_TYPE.truck`: smallest to largest.
+int _truckSizeRank(VehicleCategory category) {
+  switch ((category.vehicleCode ?? '').trim().toLowerCase()) {
+    case 'mini_truck':
+      return 0;
+    case 'tempo':
+      return 1;
+    case 'large_tempo':
+      return 2;
+    case 'truck':
+      return 3;
+  }
+  switch (category.name.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim()) {
+    case 'mini truck':
+      return 0;
+    case 'tempo':
+      return 1;
+    case 'large tempo':
+      return 2;
+    case 'truck':
+      return 3;
+    default:
+      return 4;
+  }
+}
+
 List<MockVehicle> vehiclesForBookingFamily(
   List<MockVehicle> vehicles,
   ServiceFamily? family,
@@ -145,8 +214,10 @@ class VehicleSelectionScreen extends ConsumerWidget {
     final AsyncValue<Map<String, String>> farePreview =
         ref.watch(vehicleFarePreviewProvider);
     final List<MockVehicle> options = catalog.maybeWhen(
-      data: (rows) => vehiclesForBookingFamily(
-        rows.map(customerVehicleFromCategory).toList(growable: false),
+      data: (List<VehicleCategory> rows) => vehiclesForBookingFamily(
+        sortedVehicleCategoriesForDisplay(rows)
+            .map(customerVehicleFromCategory)
+            .toList(growable: false),
         draft.serviceFamily,
       ),
       orElse: () => const <MockVehicle>[],

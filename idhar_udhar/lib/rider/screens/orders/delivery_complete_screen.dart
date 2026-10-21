@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../data/local/rider_prefs.dart';
 import '../../data/models/rider_order.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
@@ -106,6 +107,7 @@ class DeliveryCompleteScreen extends ConsumerWidget {
     ref.read(activeOrderProvider.notifier).state = null;
     ref.read(deliveryStatusProvider.notifier).state =
         DeliveryLifecycleStatus.accepted;
+    rememberLiveOrderId(null);
     context.go(RiderRoutes.dashboard);
   }
 }

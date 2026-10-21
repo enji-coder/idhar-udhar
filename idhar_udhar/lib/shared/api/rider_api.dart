@@ -1,4 +1,5 @@
 import 'api_client.dart';
+import 'api_exception.dart';
 import 'json_codec.dart';
 import 'orders_api.dart';
 
@@ -243,6 +244,91 @@ DateTime? _time(Object? value) {
   return DateTime.tryParse(text)?.toUtc();
 }
 
+class RiderHistoryOrder {
+  const RiderHistoryOrder({
+    required this.orderId,
+    required this.displayId,
+    required this.canonicalStatus,
+    this.crn,
+    this.createdAt,
+    this.updatedAt,
+    this.pickupAddress,
+    this.dropAddress,
+  });
+
+  factory RiderHistoryOrder.fromJson(Map<String, Object?> json) {
+    final String orderId = jsonString(json['order_id'])?.trim() ?? '';
+    final String status = jsonString(json['canonical_status'])?.trim() ?? '';
+    if (orderId.isEmpty || status.isEmpty) {
+      throw const ApiException(
+        code: 'INVALID_RESPONSE',
+        message: 'Trip history could not be loaded.',
+      );
+    }
+    return RiderHistoryOrder(
+      orderId: orderId,
+      displayId: jsonString(json['display_id'])?.trim() ?? '',
+      canonicalStatus: status,
+      crn: _blank(json['crn']),
+      createdAt: jsonDate(json['created_at']),
+      updatedAt: jsonDate(json['updated_at']),
+      pickupAddress: _blank(json['pickup_address']),
+      dropAddress: _blank(json['drop_address']),
+    );
+  }
+
+  final String orderId;
+  final String displayId;
+  final String canonicalStatus;
+  final String? crn;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final String? pickupAddress;
+  final String? dropAddress;
+}
+
+class RiderHistoryPage {
+  const RiderHistoryPage({
+    required this.orders,
+    this.nextCursor,
+  });
+
+  factory RiderHistoryPage.fromJson(Map<String, Object?> json) {
+    final Object? raw = json['orders'];
+    if (raw is! List) {
+      throw const ApiException(
+        code: 'INVALID_RESPONSE',
+        message: 'Trip history could not be loaded.',
+      );
+    }
+    final Object? cursorRaw = json['next_cursor'];
+    if (cursorRaw != null && cursorRaw is! String) {
+      throw const ApiException(
+        code: 'INVALID_RESPONSE',
+        message: 'Trip history could not be loaded.',
+      );
+    }
+    final String? cursor = cursorRaw is String ? cursorRaw.trim() : null;
+    return RiderHistoryPage(
+      orders: raw
+          .map((Object? item) => RiderHistoryOrder.fromJson(jsonObject(item)))
+          .toList(growable: false),
+      nextCursor: cursor == null || cursor.isEmpty ? null : cursor,
+    );
+  }
+
+  final List<RiderHistoryOrder> orders;
+  final String? nextCursor;
+}
+
+String? _blank(Object? value) {
+  final String? text = jsonString(value)?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  return text;
+}
+
 class RiderApi {
   RiderApi(this._client);
 
@@ -273,6 +359,21 @@ class RiderApi {
 
   Future<ApiOrder> getOrder(String orderId) async {
     return ApiOrder.fromJson(await _client.get('/v1/rider/orders/$orderId'));
+  }
+
+  /// `GET /v1/rider/orders`. One page of this rider's terminal trips.
+  Future<RiderHistoryPage> listRiderOrders({
+    int limit = 20,
+    String? cursor,
+  }) async {
+    final Map<String, Object?> body = await _client.get(
+      '/v1/rider/orders',
+      query: <String, dynamic>{
+        'limit': '$limit',
+        if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      },
+    );
+    return RiderHistoryPage.fromJson(body);
   }
 
   Future<PickupWaitSnapshot> getPickupWait(String orderId) async {

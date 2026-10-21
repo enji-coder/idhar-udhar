@@ -13,6 +13,7 @@ import 'package:idhar_udhar/shared/maps/maps.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../data/local/rider_prefs.dart';
 import '../../data/location/rider_location_publisher.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/navigation/arrived_drop_view.dart';
@@ -387,6 +388,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
                 ref.read(activeOrderProvider.notifier).state = null;
                 ref.read(deliveryStatusProvider.notifier).state =
                     DeliveryLifecycleStatus.accepted;
+                unawaited(rememberLiveOrderId(null));
                 context.go(RiderRoutes.dashboard);
                 return;
               }
@@ -635,12 +637,26 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
               ),
               Text(status.label, style: RiderTextStyles.caption),
               const SizedBox(height: RiderSpacing.md),
-              Text('Pickup', style: RiderTextStyles.caption),
-              Text(order.pickup, style: RiderTextStyles.bodyMedium),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (!toDrop) ...<Widget>[
+                        _PickupDestinationCard(address: order.pickup),
+                        const SizedBox(height: RiderSpacing.md),
+                      ] else ...<Widget>[
+                        Text('Pickup', style: RiderTextStyles.caption),
+                        Text(order.pickup, style: RiderTextStyles.bodyMedium),
+                        const SizedBox(height: RiderSpacing.sm),
+                      ],
+                      Text('Drop', style: RiderTextStyles.caption),
+                      Text(order.drop, style: RiderTextStyles.bodyMedium),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: RiderSpacing.sm),
-              Text('Drop', style: RiderTextStyles.caption),
-              Text(order.drop, style: RiderTextStyles.bodyMedium),
-              const Spacer(),
               Padding(
                 padding: const EdgeInsets.only(bottom: RiderSpacing.sm),
                 child: SizedBox(
@@ -908,7 +924,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
             style: RiderTextStyles.title,
           ),
           content: Text(
-            'Allow IDHAR UDHAR to show its icon and an Options Menu over Google Maps. Arrival and trip actions stay in the app. Navigation still opens if you skip this.',
+            'Allow IDHAR UDHAR to show its icon over Google Maps. Arrival and trip actions stay in the app. Navigation still opens if you skip this.',
             style: RiderTextStyles.body,
           ),
           actions: <Widget>[
@@ -1577,6 +1593,48 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
           Expanded(child: Text(label, style: RiderTextStyles.caption)),
           Text(currency.format(amount), style: RiderTextStyles.bodyMedium),
         ],
+      ),
+    );
+  }
+}
+
+class _PickupDestinationCard extends StatelessWidget {
+  const _PickupDestinationCard({required this.address});
+
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    final String shown = address.trim().isEmpty ? '—' : address.trim();
+    return Semantics(
+      label: 'Going to Pickup. Pickup Location. $shown',
+      child: RiderGlassCard(
+        elevation: 2,
+        padding: const EdgeInsets.all(RiderSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.storefront_rounded,
+                  color: RiderColors.primary,
+                ),
+                const SizedBox(width: RiderSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'Going to Pickup',
+                    style: RiderTextStyles.title,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: RiderSpacing.sm),
+            Text('Pickup Location', style: RiderTextStyles.caption),
+            const SizedBox(height: RiderSpacing.xs),
+            Text(shown, style: RiderTextStyles.bodyMedium),
+          ],
+        ),
       ),
     );
   }
