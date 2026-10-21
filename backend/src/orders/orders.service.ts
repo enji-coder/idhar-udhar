@@ -48,6 +48,7 @@ import {
   OrdersRepository,
   RiderOfferListRow,
 } from './orders.repository';
+import { listRiderOrderHistory } from './rider-order-history';
 
 export type OrderActor = AuthContext;
 
@@ -1869,6 +1870,10 @@ export class OrdersService {
         created_at: row.created_at.toISOString(),
       })),
     };
+  }
+
+  listRiderHistory(auth: OrderActor, limit?: string, cursor?: string) {
+    return listRiderOrderHistory(auth, this.orders, limit, cursor);
   }
 
   private serializeRating(

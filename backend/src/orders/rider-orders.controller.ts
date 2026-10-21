@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -48,6 +49,16 @@ export class RiderOrdersController {
     @Param('id', UuidParamPipe) id: string,
   ) {
     return this.orders.rejectOffer(auth, id);
+  }
+
+  @Roles('RIDER')
+  @Get('orders')
+  listOrders(
+    @CurrentAuth() auth: AuthContext,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.orders.listRiderHistory(auth, limit, cursor);
   }
 
   @Roles('RIDER')

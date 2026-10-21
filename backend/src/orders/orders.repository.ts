@@ -1074,4 +1074,70 @@ export class OrdersRepository {
       ratings: ratings.rows,
     };
   }
+
+  /**
+   * Terminal orders owned by one rider, newest first.
+   * Cursor is exclusive on `(created_at, order_id)`.
+   */
+  async listRiderHistory(
+    input: {
+      riderProfileId: string;
+      limit: number;
+      cursorCreatedAt?: Date;
+      cursorOrderId?: string;
+    },
+    db: Queryable = this.postgres,
+  ): Promise<RiderHistoryOrderRow[]> {
+    const params: unknown[] = [input.riderProfileId, input.limit];
+    let cursorSql = '';
+    if (input.cursorCreatedAt && input.cursorOrderId) {
+      params.push(input.cursorCreatedAt.toISOString(), input.cursorOrderId);
+      cursorSql =
+        'AND (o.created_at, o.order_id) < ($3::timestamptz, $4::uuid)';
+    }
+    const result = await db.query<RiderHistoryOrderRow>(
+      `
+      SELECT
+        o.order_id,
+        o.display_id,
+        o.crn,
+        o.canonical_status,
+        o.created_at,
+        o.updated_at,
+        (
+          SELECT s.address_text
+          FROM order_stops s
+          WHERE s.order_id = o.order_id AND s.stop_type = 'PICKUP'
+          ORDER BY s.sequence
+          LIMIT 1
+        ) AS pickup_address,
+        (
+          SELECT s.address_text
+          FROM order_stops s
+          WHERE s.order_id = o.order_id AND s.stop_type = 'DROP'
+          ORDER BY s.sequence
+          LIMIT 1
+        ) AS drop_address
+      FROM orders o
+      WHERE o.rider_profile_id = $1
+        AND o.canonical_status IN ('DELIVERED', 'CANCELLED', 'RESEND_COMPLETED')
+        ${cursorSql}
+      ORDER BY o.created_at DESC, o.order_id DESC
+      LIMIT $2
+      `,
+      params,
+    );
+    return result.rows;
+  }
 }
+
+export type RiderHistoryOrderRow = {
+  order_id: string;
+  display_id: string;
+  crn: string | null;
+  canonical_status: string;
+  created_at: Date;
+  updated_at: Date;
+  pickup_address: string | null;
+  drop_address: string | null;
+};
