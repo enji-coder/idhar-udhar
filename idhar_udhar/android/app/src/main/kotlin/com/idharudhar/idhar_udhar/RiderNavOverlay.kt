@@ -218,12 +218,8 @@ internal object RiderNavOverlay {
         val margin = (16 * density).toInt()
         val bubble = ImageView(context).apply {
             val icon = context.resources.getIdentifier(
-                "ic_launcher_rider",
-                "mipmap",
-                context.packageName,
-            ).takeIf { it != 0 } ?: context.resources.getIdentifier(
-                "ic_launcher_idhar",
-                "mipmap",
+                "ic_nav_bubble_partner",
+                "drawable",
                 context.packageName,
             )
             if (icon != 0) {
