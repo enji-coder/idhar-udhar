@@ -25,7 +25,10 @@ import { SetPlanDto } from './dto/set-plan.dto';
 import { SetResponsibilityDto } from './dto/set-responsibility.dto';
 import { PAYMENT_PROVIDER, PaymentProvider } from './payment-provider';
 import { PaymentGatewayRepository } from './payment-gateway.repository';
-import { merchantRefundId } from './cashfree-webhook.parse';
+import {
+  decideChargeTransition,
+  merchantRefundId,
+} from './cashfree-webhook.parse';
 import {
   deriveAggregateStatus,
   PaymentDirection,
@@ -39,6 +42,7 @@ import { SettlementService } from '../settlement/settlement.service';
 import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 import { PaymentNotificationDispatcher } from '../notifications/payment-notification.dispatcher';
 import { IdentityRepository } from '../auth/identity/identity.repository';
+import { GatewayAttemptRow } from './payment-gateway.repository';
 
 @Injectable()
 export class PaymentsService {
@@ -747,45 +751,205 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * Server-side Cashfree order retrieve. When Cashfree reports a terminal
+   * status with a matching INR amount, settles the local charge the same way
+   * as a verified webhook so a delayed webhook cannot leave the client stuck.
+   *
+   * Cashfree HTTP runs outside the settle transaction so a slow gateway cannot
+   * hold DB locks. Local rows are re-read inside the transaction before any
+   * status transition so concurrent webhook settlement cannot be overwritten.
+   */
   async verifyOnlinePayment(
     auth: AuthContext,
     orderId: string,
     transactionId: string,
   ) {
+    const order = await this.requireReadableOrder(auth, orderId, this.postgres);
+    const row = await this.payments.findTransaction(transactionId, this.postgres);
+    if (!row || row.order_id !== order.order_id) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Payment was not found', 404);
+    }
+    const attempt = await this.gateway.findByTransaction(
+      transactionId,
+      this.postgres,
+    );
+    const base = {
+      payment_transaction_id: row.payment_transaction_id,
+      transaction_status: row.transaction_status,
+      cashfree_order_id: attempt?.gateway_order_id ?? null,
+      gateway_status: attempt?.gateway_status ?? null,
+      authoritative: false as const,
+    };
+    if (!attempt || !this.provider.retrieveOnlineOrder) {
+      return base;
+    }
+    const remote = await this.provider.retrieveOnlineOrder(attempt.gateway_order_id);
+
     return this.postgres.transaction(async (tx) => {
-      const order = await this.requireReadableOrder(auth, orderId, tx);
-      const row = await this.payments.findTransaction(transactionId, tx);
-      if (!row || row.order_id !== order.order_id) {
+      const freshOrder = await this.requireReadableOrder(auth, orderId, tx);
+      const freshRow = await this.payments.findTransaction(transactionId, tx);
+      if (!freshRow || freshRow.order_id !== freshOrder.order_id) {
         throw new ApiError(ErrorCodes.NOT_FOUND, 'Payment was not found', 404);
       }
-      const attempt = await this.gateway.findByTransaction(transactionId, tx);
-      const base = {
-        payment_transaction_id: row.payment_transaction_id,
-        transaction_status: row.transaction_status,
-        cashfree_order_id: attempt?.gateway_order_id ?? null,
-        gateway_status: attempt?.gateway_status ?? null,
+      const freshAttempt = await this.gateway.findByTransaction(transactionId, tx);
+      const freshBase = {
+        payment_transaction_id: freshRow.payment_transaction_id,
+        transaction_status: freshRow.transaction_status,
+        cashfree_order_id: freshAttempt?.gateway_order_id ?? null,
+        gateway_status: freshAttempt?.gateway_status ?? null,
         authoritative: false as const,
       };
-      if (!attempt || !this.provider.retrieveOnlineOrder) {
-        return base;
+      if (
+        !freshAttempt ||
+        freshAttempt.gateway_order_id !== attempt.gateway_order_id
+      ) {
+        return freshBase;
       }
-      const remote = await this.provider.retrieveOnlineOrder(attempt.gateway_order_id);
       const amountMatches =
         remote.orderCurrency === 'INR' &&
-        (await this.payments.amountsEqual(remote.orderAmount, row.amount, tx));
-      if (amountMatches) {
-        await this.gateway.updateGatewayStatus(
-          attempt.payment_gateway_attempt_id,
-          remote.orderStatus,
+        (await this.payments.amountsEqual(
+          remote.orderAmount,
+          freshRow.amount,
           tx,
-        );
+        ));
+      if (!amountMatches) {
+        return {
+          ...freshBase,
+          gateway_status: freshAttempt.gateway_status,
+          amount_matches: false,
+        };
       }
+      await this.gateway.updateGatewayStatus(
+        freshAttempt.payment_gateway_attempt_id,
+        remote.orderStatus,
+        tx,
+      );
+      const settled = await this.settleVerifiedOnlineCharge({
+        attempt: freshAttempt,
+        order: freshOrder,
+        outcome: cashfreeOrderOutcome(remote.orderStatus),
+        amountMatches: true,
+        tx,
+      });
+      const refreshed =
+        (await this.payments.findTransaction(transactionId, tx)) ?? freshRow;
+      const refreshedAttempt =
+        (await this.gateway.findByTransaction(transactionId, tx)) ??
+        freshAttempt;
       return {
-        ...base,
-        gateway_status: amountMatches ? remote.orderStatus : attempt.gateway_status,
-        amount_matches: amountMatches,
+        payment_transaction_id: refreshed.payment_transaction_id,
+        transaction_status: refreshed.transaction_status,
+        cashfree_order_id: refreshedAttempt.gateway_order_id,
+        gateway_status: refreshedAttempt.gateway_status,
+        amount_matches: true,
+        authoritative: settled,
       };
     });
+  }
+
+  /**
+   * Shared settlement used by client-triggered verify. Webhooks keep their
+   * own apply path so event-id idempotency stays unchanged.
+   */
+  private async settleVerifiedOnlineCharge(input: {
+    attempt: GatewayAttemptRow;
+    order: OrderRow;
+    outcome: 'success' | 'failed' | 'pending';
+    amountMatches: boolean;
+    tx: Queryable;
+  }): Promise<boolean> {
+    const decision = decideChargeTransition({
+      currentStatus: input.attempt.transaction_status,
+      outcome: input.outcome,
+      amountMatches: input.amountMatches,
+    });
+    if (decision === 'reject' || decision === 'ignore') {
+      return false;
+    }
+    if (
+      decision === 'apply-paid' &&
+      input.attempt.charge_purpose === 'WALLET_TOPUP' &&
+      !input.attempt.rider_profile_id
+    ) {
+      return false;
+    }
+    const nextStatus = decision === 'apply-paid' ? 'PAID' : 'FAILED';
+    const updated = await input.tx.query<{ payment_transaction_id: string }>(
+      decision === 'apply-paid'
+        ? `
+      UPDATE payment_transactions
+      SET transaction_status = 'PAID'
+      WHERE payment_transaction_id = $1
+        AND transaction_status IN ('PENDING', 'FAILED')
+      RETURNING payment_transaction_id
+      `
+        : `
+      UPDATE payment_transactions
+      SET transaction_status = 'FAILED'
+      WHERE payment_transaction_id = $1
+        AND transaction_status = 'PENDING'
+      RETURNING payment_transaction_id
+      `,
+      [input.attempt.payment_transaction_id],
+    );
+    if (!updated.rows[0]) {
+      return false;
+    }
+    await this.gateway.updateAttempt(
+      {
+        paymentGatewayAttemptId: input.attempt.payment_gateway_attempt_id,
+        gatewayPaymentId: null,
+        gatewayStatus: nextStatus === 'PAID' ? 'SUCCESS' : 'FAILED',
+        failureReason: null,
+      },
+      input.tx,
+    );
+    if (
+      nextStatus === 'PAID' &&
+      input.attempt.charge_purpose === 'WALLET_TOPUP' &&
+      input.attempt.rider_profile_id
+    ) {
+      await this.walletCod.applyVerifiedWalletTopUp(
+        {
+          paymentTransactionId: input.attempt.payment_transaction_id,
+          riderProfileId: input.attempt.rider_profile_id,
+          amount: input.attempt.transaction_amount,
+        },
+        input.tx,
+      );
+    } else if (
+      nextStatus === 'PAID' &&
+      input.attempt.charge_purpose === 'RECEIVABLE_CLEARANCE'
+    ) {
+      await this.settlement.creditOnlineClearance(
+        {
+          orderId: input.order.order_id,
+          customerProfileId: input.order.customer_profile_id,
+          amount: input.attempt.transaction_amount,
+          paymentTransactionId: input.attempt.payment_transaction_id,
+        },
+        input.tx,
+      );
+    } else if (
+      nextStatus === 'PAID' &&
+      input.attempt.charge_purpose === 'BOOKING'
+    ) {
+      await this.walletCod.syncOrderFinance(input.order, input.tx);
+    }
+    await this.paymentNotifications.onTransactionRecorded(
+      {
+        orderId: input.order.order_id,
+        displayId: input.order.display_id,
+        customerProfileId: input.order.customer_profile_id,
+        transactionId: input.attempt.payment_transaction_id,
+        status: nextStatus,
+        direction: 'CHARGE',
+        amount: input.attempt.transaction_amount,
+      },
+      input.tx,
+    );
+    return true;
   }
 
   /**
@@ -1382,4 +1546,24 @@ function clearanceGatewayUnusable(status: string | null): boolean {
     status.toUpperCase() === 'TERMINATED' ||
     status.toUpperCase() === 'USER_DROPPED'
   );
+}
+
+/** Maps Cashfree GET /orders order_status into the webhook charge outcome. */
+export function cashfreeOrderOutcome(
+  orderStatus: string,
+): 'success' | 'failed' | 'pending' {
+  const status = orderStatus.trim().toUpperCase();
+  if (status === 'PAID') {
+    return 'success';
+  }
+  if (
+    status === 'EXPIRED' ||
+    status === 'CANCELLED' ||
+    status === 'TERMINATED' ||
+    status === 'FAILED' ||
+    status === 'USER_DROPPED'
+  ) {
+    return 'failed';
+  }
+  return 'pending';
 }

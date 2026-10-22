@@ -178,6 +178,7 @@ class _ScriptedLocation extends DeviceLocationService {
   @override
   Future<LocationResult> currentLocation({
     bool requestPermission = true,
+ Duration timeout = const Duration(seconds: 12),
   }) async {
     final _Gate? pending = gate;
     if (pending != null) {

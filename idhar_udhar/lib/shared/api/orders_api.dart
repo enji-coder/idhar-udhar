@@ -389,10 +389,10 @@ class OnlineTripPaymentStatus {
 
   final String paymentTransactionId;
 
-  /// Database status. PAID only after the Cashfree webhook settles the row.
+  /// Database status. PAID only after server-side settlement (verify or webhook).
   final String transactionStatus;
 
-  /// The verify endpoint is a refresh. It does not settle the charge.
+  /// True when verify retrieved Cashfree and applied a terminal settlement.
   final bool authoritative;
 
   factory OnlineTripPaymentStatus.fromJson(Map<String, Object?> json) {

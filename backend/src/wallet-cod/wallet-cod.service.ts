@@ -166,17 +166,25 @@ export class WalletCodService {
     },
     db: Queryable,
   ) {
-    const existing = await this.repo.findWalletLedgerByPaymentTransactionId(
+    const sourceTxnId = `wallet-topup:${input.paymentTransactionId}`;
+    const existingWallet = await this.repo.findWalletLedgerByPaymentTransactionId(
       input.paymentTransactionId,
       db,
     );
-    if (existing) {
-      const finance = await this.repo.lockAccounts(input.riderProfileId, db);
+    const finance = await this.repo.lockAccounts(input.riderProfileId, db);
+    // All-COD top-ups create no wallet ledger row; COD source_txn_id is the
+    // durable idempotency key for that case (cod_ledger_source_txn_unique).
+    const existingCod = await this.repo.hasDigitalEarningSettlement(
+      finance.cod.cod_account_id,
+      sourceTxnId,
+      db,
+    );
+    if (existingWallet || existingCod) {
       return {
         rider_profile_id: input.riderProfileId,
         available_balance: formatInr(finance.wallet.available_balance),
         cod_due: formatInr(finance.cod.cod_due),
-        wallet_ledger_id: existing.wallet_ledger_id,
+        wallet_ledger_id: existingWallet?.wallet_ledger_id ?? null,
         idempotent_replay: true,
       };
     }
@@ -185,11 +193,12 @@ export class WalletCodService {
       amount: input.amount,
       walletEntryType: 'RECHARGE',
       codSource: 'RECHARGE_SETTLEMENT',
-      sourceTxnId: `wallet-topup:${input.paymentTransactionId}`,
+      sourceTxnId,
       actorType: 'WEBHOOK',
       actorProfileId: null,
       allowWalletCredit: true,
       relatedPaymentTransactionId: input.paymentTransactionId,
+      locked: finance,
     });
     return { ...result, idempotent_replay: false };
   }
