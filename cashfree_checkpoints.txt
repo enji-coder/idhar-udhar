@@ -1,0 +1,76 @@
+Checkpoint 1 — Existing system ka safety audit
+First step
+- Existing backend, Flutter apps aur Admin Panel inspect karna.
+- Database schema, wallet, transactions aur payment tables verify karna.
+- Current production configuration aur credentials ki mapping samajhna.
+- Git status aur backup/recovery plan verify karna.
+  
+  Pass condition: existing production setup documented ho; koi production change nahi.
+
+
+
+
+Checkpoint 2 — Staging database aur configuration
+- Existing schema/migrations reuse karna.
+- Staging ke liye alag database ya isolated database instance taiyar karna.
+- Wallet, order aur transaction tables ko required test data ke saath setup karna.
+- Production database aur credentials se strict separation.
+  
+  Pass condition: test transactions production records ko touch na kar saken.
+
+
+
+
+Checkpoint 3 — Separate staging backend
+- Alag staging deployment aur API configuration.
+- Cashfree Sandbox credentials secure server-side storage mein.
+- Payment session, webhook, verification aur settlement flow test karna.
+- Existing production ECS service aur secrets ko unchanged rakhna.
+  
+  Pass condition: staging API Sandbox se baat kare, production API apni existing configuration par rahe.
+
+
+
+
+Checkpoint 4 — Customer aur Rider apps
+- Staging API ke liye separate development builds/configuration.
+- Customer trip payment aur Rider wallet top-up Sandbox mein test karna.
+- Existing app IDs, flavors, signing aur production build settings ko bina zaroorat change nahi karna.
+- SDK environment backend ke payment session ke saath match karna.
+  
+  Pass condition: development builds test payments karein; production builds apne existing API par hi rahein.
+
+
+
+
+Checkpoint 5 — Admin Panel aur wallet verification
+- Test payment records aur transaction statuses verify karna.
+- Rider wallet balance, duplicate webhook protection aur settlement verify karna.
+- Admin reports aur wallet transaction history check karna.
+- Confirm karna ki test balances aur transactions production admin/data mein mix na hon.
+  
+  Pass condition: payment, wallet aur admin records aapas mein consistent hon.
+
+
+
+
+Checkpoint 6 — Complete testing aur sign-off
+- Successful payment.
+- Failed/cancelled payment.
+- Delayed ya duplicate webhook.
+- Wallet credit exactly once.
+- Order/payment status reconciliation.
+- Regression tests aur production isolation checks.
+  
+  Pass condition: saare critical tests pass hone ke baad hi production switch plan approve ho.
+
+
+
+
+Checkpoint 7 — Future Production activation
+- Approved production Cashfree credentials aur webhook configuration verify karna.
+- Production API aur database configuration ko separate, controlled deployment se maintain karna.
+- Customer aur Rider builds mein production API/environment select karna.
+- Real-payment smoke test, monitoring aur rollback plan.
+  
+  Pass condition: production payments verified hon aur rollback path ready ho.
