@@ -106,8 +106,8 @@ export class PaymentsService {
           purpose: 'WALLET_TOPUP',
         });
         // Never persist a PENDING top-up / ledger-visible charge unless the
-        // gateway actually returned a checkout session. Wallet credit still
-        // happens only after a verified PAID webhook.
+        // gateway actually returned a checkout session. Wallet credit happens
+        // only after verified PAID (webhook and/or rider verify retrieve).
         if (
           !onlineRefs.paymentSessionId ||
           !onlineRefs.gatewayOrderId ||
@@ -849,12 +849,114 @@ export class PaymentsService {
   }
 
   /**
+   * Rider-owned wallet top-up verify. Order-scoped verify cannot own these
+   * charges because WALLET_TOPUP rows have null order_id.
+   *
+   * Cashfree retrieve runs outside the settle transaction; local rows are
+   * re-read inside the transaction before any status transition.
+   */
+  async verifyRiderWalletTopUp(auth: AuthContext, transactionId: string) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider role required', 403);
+    }
+    const row = await this.payments.findTransaction(transactionId, this.postgres);
+    const attempt = await this.gateway.findByTransaction(
+      transactionId,
+      this.postgres,
+    );
+    if (
+      !row ||
+      !attempt ||
+      attempt.charge_purpose !== 'WALLET_TOPUP' ||
+      attempt.rider_profile_id !== auth.profileId ||
+      row.rider_profile_id !== auth.profileId
+    ) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Payment was not found', 404);
+    }
+    const base = {
+      payment_transaction_id: row.payment_transaction_id,
+      transaction_status: row.transaction_status,
+      cashfree_order_id: attempt.gateway_order_id,
+      gateway_status: attempt.gateway_status,
+      authoritative: false as const,
+    };
+    if (!this.provider.retrieveOnlineOrder) {
+      return base;
+    }
+    const remote = await this.provider.retrieveOnlineOrder(attempt.gateway_order_id);
+
+    return this.postgres.transaction(async (tx) => {
+      const freshRow = await this.payments.findTransaction(transactionId, tx);
+      const freshAttempt = await this.gateway.findByTransaction(transactionId, tx);
+      if (
+        !freshRow ||
+        !freshAttempt ||
+        freshAttempt.charge_purpose !== 'WALLET_TOPUP' ||
+        freshAttempt.rider_profile_id !== auth.profileId ||
+        freshRow.rider_profile_id !== auth.profileId
+      ) {
+        throw new ApiError(ErrorCodes.NOT_FOUND, 'Payment was not found', 404);
+      }
+      const freshBase = {
+        payment_transaction_id: freshRow.payment_transaction_id,
+        transaction_status: freshRow.transaction_status,
+        cashfree_order_id: freshAttempt.gateway_order_id,
+        gateway_status: freshAttempt.gateway_status,
+        authoritative: false as const,
+      };
+      if (freshAttempt.gateway_order_id !== attempt.gateway_order_id) {
+        return freshBase;
+      }
+      const amountMatches =
+        remote.orderCurrency === 'INR' &&
+        (await this.payments.amountsEqual(
+          remote.orderAmount,
+          freshRow.amount,
+          tx,
+        ));
+      if (!amountMatches) {
+        return {
+          ...freshBase,
+          gateway_status: freshAttempt.gateway_status,
+          amount_matches: false,
+        };
+      }
+      await this.gateway.updateGatewayStatus(
+        freshAttempt.payment_gateway_attempt_id,
+        remote.orderStatus,
+        tx,
+      );
+      const settled = await this.settleVerifiedOnlineCharge({
+        attempt: freshAttempt,
+        order: null,
+        outcome: cashfreeOrderOutcome(remote.orderStatus),
+        amountMatches: true,
+        tx,
+      });
+      const refreshed =
+        (await this.payments.findTransaction(transactionId, tx)) ?? freshRow;
+      const refreshedAttempt =
+        (await this.gateway.findByTransaction(transactionId, tx)) ??
+        freshAttempt;
+      return {
+        payment_transaction_id: refreshed.payment_transaction_id,
+        transaction_status: refreshed.transaction_status,
+        cashfree_order_id: refreshedAttempt.gateway_order_id,
+        gateway_status: refreshedAttempt.gateway_status,
+        amount_matches: true,
+        authoritative: settled,
+      };
+    });
+  }
+
+  /**
    * Shared settlement used by client-triggered verify. Webhooks keep their
    * own apply path so event-id idempotency stays unchanged.
+   * `order` may be null for order-less WALLET_TOPUP charges.
    */
   private async settleVerifiedOnlineCharge(input: {
     attempt: GatewayAttemptRow;
-    order: OrderRow;
+    order: OrderRow | null;
     outcome: 'success' | 'failed' | 'pending';
     amountMatches: boolean;
     tx: Queryable;
@@ -871,6 +973,14 @@ export class PaymentsService {
       decision === 'apply-paid' &&
       input.attempt.charge_purpose === 'WALLET_TOPUP' &&
       !input.attempt.rider_profile_id
+    ) {
+      return false;
+    }
+    if (
+      decision === 'apply-paid' &&
+      (input.attempt.charge_purpose === 'BOOKING' ||
+        input.attempt.charge_purpose === 'RECEIVABLE_CLEARANCE') &&
+      !input.order
     ) {
       return false;
     }
@@ -920,7 +1030,8 @@ export class PaymentsService {
       );
     } else if (
       nextStatus === 'PAID' &&
-      input.attempt.charge_purpose === 'RECEIVABLE_CLEARANCE'
+      input.attempt.charge_purpose === 'RECEIVABLE_CLEARANCE' &&
+      input.order
     ) {
       await this.settlement.creditOnlineClearance(
         {
@@ -933,22 +1044,25 @@ export class PaymentsService {
       );
     } else if (
       nextStatus === 'PAID' &&
-      input.attempt.charge_purpose === 'BOOKING'
+      input.attempt.charge_purpose === 'BOOKING' &&
+      input.order
     ) {
       await this.walletCod.syncOrderFinance(input.order, input.tx);
     }
-    await this.paymentNotifications.onTransactionRecorded(
-      {
-        orderId: input.order.order_id,
-        displayId: input.order.display_id,
-        customerProfileId: input.order.customer_profile_id,
-        transactionId: input.attempt.payment_transaction_id,
-        status: nextStatus,
-        direction: 'CHARGE',
-        amount: input.attempt.transaction_amount,
-      },
-      input.tx,
-    );
+    if (input.order) {
+      await this.paymentNotifications.onTransactionRecorded(
+        {
+          orderId: input.order.order_id,
+          displayId: input.order.display_id,
+          customerProfileId: input.order.customer_profile_id,
+          transactionId: input.attempt.payment_transaction_id,
+          status: nextStatus,
+          direction: 'CHARGE',
+          amount: input.attempt.transaction_amount,
+        },
+        input.tx,
+      );
+    }
     return true;
   }
 

@@ -7,7 +7,12 @@
  *
  * Does not print passwords, SQL, or connection strings.
  * Apply mode requires MIGRATE_CONFIRM=apply-missing.
- * MIGRATE_DRY_RUN=1 prints SKIP/APPLY only.
+ * MIGRATE_DRY_RUN=1 prints SKIP/APPLY only and never creates schema objects
+ * (including schema_migrations).
+ *
+ * Duplicate numeric prefixes (e.g. two 0026_*.sql files) are refused before
+ * any database connection. Do not rename production-applied files until the
+ * live schema_migrations history is manually verified.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -20,6 +25,39 @@ const FILENAME_PATTERN = /^(\d{4}_.+)\.sql$/;
 export function migrationVersion(filename) {
   const match = FILENAME_PATTERN.exec(filename);
   return match ? match[1] : null;
+}
+
+export function migrationNumericPrefix(filename) {
+  const version = migrationVersion(filename);
+  return version ? version.slice(0, 4) : null;
+}
+
+/**
+ * Refuses ambiguous migration sets where two files share the same 4-digit
+ * prefix. Version identity is the full stem, so both would otherwise apply.
+ */
+export function assertUniqueNumericPrefixes(filenames) {
+  const byPrefix = new Map();
+  for (const filename of filenames) {
+    const prefix = migrationNumericPrefix(filename);
+    if (!prefix) {
+      continue;
+    }
+    const list = byPrefix.get(prefix) ?? [];
+    list.push(filename);
+    byPrefix.set(prefix, list);
+  }
+  const conflicts = [...byPrefix.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(
+      ([prefix, list]) =>
+        `${prefix}: ${list.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(', ')}`,
+    );
+  if (conflicts.length > 0) {
+    throw new Error(
+      `Duplicate migration numeric prefixes (resolve after verifying production schema_migrations; do not rename applied files blindly):\n${conflicts.join('\n')}`,
+    );
+  }
 }
 
 export function listMigrationFiles(directory) {
@@ -95,7 +133,7 @@ function migrationsDirectory() {
   return resolve(scriptDir, '..', '..', 'records_database', 'migrations');
 }
 
-async function appliedVersions(client) {
+async function ensureSchemaMigrationsTable(client) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version     TEXT PRIMARY KEY,
@@ -104,8 +142,23 @@ async function appliedVersions(client) {
       applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
-  const result = await client.query('SELECT version FROM schema_migrations');
-  return result.rows.map((row) => String(row.version));
+}
+
+async function appliedVersions(client, { allowCreate }) {
+  if (allowCreate) {
+    await ensureSchemaMigrationsTable(client);
+  }
+  try {
+    const result = await client.query('SELECT version FROM schema_migrations');
+    return result.rows.map((row) => String(row.version));
+  } catch (error) {
+    const code = error && typeof error === 'object' ? error.code : null;
+    // undefined_table — dry-run must not CREATE; treat as empty history.
+    if (!allowCreate && code === '42P01') {
+      return [];
+    }
+    throw error;
+  }
 }
 
 async function applyFile(client, directory, item) {
@@ -143,6 +196,7 @@ export async function runMigrations({ dryRun }) {
   if (filenames.length === 0) {
     throw new Error('No SQL migrations were found');
   }
+  assertUniqueNumericPrefixes(filenames);
 
   const port = Number.parseInt(requireEnv('DATABASE_PORT'), 10);
   if (!Number.isInteger(port)) {
@@ -160,7 +214,7 @@ export async function runMigrations({ dryRun }) {
   });
   await client.connect();
   try {
-    const applied = await appliedVersions(client);
+    const applied = await appliedVersions(client, { allowCreate: !dryRun });
     const plan = planMigrations(filenames, applied);
     for (const item of plan.skip) {
       process.stdout.write(`SKIP already applied: ${item.filename}\n`);

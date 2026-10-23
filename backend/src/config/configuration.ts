@@ -375,6 +375,30 @@ export function loadAppConfig(): AppConfig {
       'PAYMENT_PROVIDER=cashfree requires CASHFREE_CLIENT_ID and CASHFREE_CLIENT_SECRET',
     );
   }
+  // Staging isolation guard: set IU_DEPLOYMENT_TIER=staging on staging ECS/local
+  // only. Production tasks must omit this or set production. Prevents Sandbox
+  // stacks from silently using live Cashfree hosts if secrets are mis-wired.
+  const deploymentTier = (process.env.IU_DEPLOYMENT_TIER ?? '')
+    .trim()
+    .toLowerCase();
+  if (deploymentTier && deploymentTier !== 'staging' && deploymentTier !== 'production') {
+    throw new Error('IU_DEPLOYMENT_TIER must be staging, production, or unset');
+  }
+  if (deploymentTier === 'staging') {
+    if (cashfreeEnvironment !== 'sandbox') {
+      throw new Error(
+        'IU_DEPLOYMENT_TIER=staging requires CASHFREE_ENVIRONMENT=sandbox (refusing production Cashfree hosts)',
+      );
+    }
+    if (paymentProvider === 'cashfree') {
+      const pgHost = cashfreeApiBaseUrl(cashfreeEnvironment);
+      if (!pgHost.includes('sandbox.cashfree.com')) {
+        throw new Error(
+          'IU_DEPLOYMENT_TIER=staging refused a non-sandbox Cashfree PG host',
+        );
+      }
+    }
+  }
   const payoutReconcileWorkerEnabled = booleanFlag(
     'PAYOUT_RECONCILE_WORKER_ENABLED',
     false,

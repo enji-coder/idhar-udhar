@@ -11,7 +11,7 @@ import 'package:idhar_udhar/shared/api/wallet_api.dart';
 /// Opens Cashfree checkout for a server-created rider wallet top-up.
 ///
 /// The SDK callback only means the rider left checkout. The wallet is credited
-/// only after the Cashfree webhook is verified by the backend.
+/// only after server-side settlement (rider verify and/or Cashfree webhook).
 Future<void> openRiderWalletTopUpCheckout(WalletTopUpSession session) {
   if (!session.canOpenCheckout) {
     throw const ApiException(
@@ -50,4 +50,16 @@ Future<void> openRiderWalletTopUpCheckout(WalletTopUpSession session) {
   );
   gateway.doPayment(payment);
   return done.future;
+}
+
+/// Asks the backend to retrieve Cashfree and settle. SDK success is ignored.
+Future<WalletTopUpPaymentStatus?> verifyRiderWalletTopUpAfterCheckout({
+  required WalletApi walletApi,
+  required String paymentTransactionId,
+}) async {
+  try {
+    return await walletApi.verifyTopUp(paymentTransactionId);
+  } on ApiException {
+    return null;
+  }
 }

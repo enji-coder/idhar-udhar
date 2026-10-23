@@ -550,3 +550,206 @@ describe('PaymentsService.verifyOnlinePayment', () => {
     expect(paymentNotifications.onTransactionRecorded).toHaveBeenCalledTimes(1);
   });
 });
+
+const riderAuth: AuthContext = {
+  identityId: '22222222-2222-2222-2222-222222222222',
+  sessionId: '33333333-3333-3333-3333-333333333333',
+  role: 'RIDER',
+  profileId: RIDER_PROFILE_ID,
+};
+
+describe('PaymentsService.verifyRiderWalletTopUp', () => {
+  function makeRiderTopUpVerify(opts: {
+    orderStatus: string;
+    orderAmount?: string;
+    currentStatus?: 'PENDING' | 'PAID' | 'FAILED';
+    riderProfileId?: string | null;
+    chargePurpose?: 'BOOKING' | 'RECEIVABLE_CLEARANCE' | 'WALLET_TOPUP';
+  }) {
+    let transactionStatus = opts.currentStatus ?? 'PENDING';
+    let gatewayStatus = 'ACTIVE';
+    let casGate = Promise.resolve();
+    async function withCasGate<T>(work: () => T | Promise<T>): Promise<T> {
+      const previous = casGate;
+      let release!: () => void;
+      casGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await work();
+      } finally {
+        release();
+      }
+    }
+    const tx = {
+      query: jest.fn(async (sql: string) =>
+        withCasGate(async () => {
+          if (sql.includes("transaction_status = 'PAID'")) {
+            if (
+              transactionStatus === 'PENDING' ||
+              transactionStatus === 'FAILED'
+            ) {
+              transactionStatus = 'PAID';
+              return { rows: [{ payment_transaction_id: TX_ID }] };
+            }
+            return { rows: [] };
+          }
+          if (sql.includes("transaction_status = 'FAILED'")) {
+            if (transactionStatus === 'PENDING') {
+              transactionStatus = 'FAILED';
+              return { rows: [{ payment_transaction_id: TX_ID }] };
+            }
+            return { rows: [] };
+          }
+          return { rows: [] };
+        }),
+      ),
+    };
+    const callOrder: string[] = [];
+    const postgres = {
+      transaction: jest.fn(async (work: (client: typeof tx) => Promise<unknown>) => {
+        callOrder.push('transaction');
+        return work(tx);
+      }),
+    };
+    const payments = {
+      findTransaction: jest.fn(async () => ({
+        payment_transaction_id: TX_ID,
+        order_id: null,
+        rider_profile_id: opts.riderProfileId ?? RIDER_PROFILE_ID,
+        amount: '40.00',
+        transaction_status: transactionStatus,
+      })),
+      amountsEqual: jest.fn(async (left: string, right: string) => left === right),
+    };
+    const walletCod = {
+      syncOrderFinance: jest.fn(async () => undefined),
+      applyVerifiedWalletTopUp: jest.fn(async () => undefined),
+    };
+    const paymentNotifications = {
+      onTransactionRecorded: jest.fn(async () => undefined),
+    };
+    const settlement = {
+      creditOnlineClearance: jest.fn(async () => undefined),
+    };
+    const gateway = {
+      findByTransaction: jest.fn(async () => ({
+        payment_gateway_attempt_id: ATTEMPT_ID,
+        payment_transaction_id: TX_ID,
+        gateway_order_id: 'iu-wallet-1',
+        gateway_status: gatewayStatus,
+        transaction_status: transactionStatus,
+        transaction_amount: '40.00',
+        charge_purpose: opts.chargePurpose ?? 'WALLET_TOPUP',
+        rider_profile_id: opts.riderProfileId ?? RIDER_PROFILE_ID,
+        order_id: null,
+        payer_type: 'RIDER',
+      })),
+      updateGatewayStatus: jest.fn(async (_id: string, status: string) => {
+        gatewayStatus = status;
+      }),
+      updateAttempt: jest.fn(async (input: { gatewayStatus: string }) => {
+        gatewayStatus = input.gatewayStatus;
+      }),
+    };
+    const provider = {
+      beginOnlineCharge: jest.fn(),
+      retrieveOnlineOrder: jest.fn(async () => {
+        callOrder.push('retrieveOnlineOrder');
+        return {
+          orderStatus: opts.orderStatus,
+          orderAmount: opts.orderAmount ?? '40.00',
+          orderCurrency: 'INR',
+        };
+      }),
+    };
+    const service = new PaymentsService(
+      postgres as never,
+      {} as never,
+      {} as never,
+      payments as never,
+      { find: jest.fn(), insert: jest.fn() } as never,
+      walletCod as never,
+      paymentNotifications as never,
+      {} as never,
+      provider as never,
+      gateway as never,
+      settlement as never,
+    );
+    return {
+      service,
+      walletCod,
+      paymentNotifications,
+      callOrder,
+      getStatus: () => transactionStatus,
+    };
+  }
+
+  it('credits order-less WALLET_TOPUP without order notifications', async () => {
+    const { service, walletCod, paymentNotifications, getStatus } =
+      makeRiderTopUpVerify({ orderStatus: 'PAID' });
+
+    const result = await service.verifyRiderWalletTopUp(riderAuth, TX_ID);
+
+    expect(result).toMatchObject({
+      payment_transaction_id: TX_ID,
+      transaction_status: 'PAID',
+      authoritative: true,
+      amount_matches: true,
+    });
+    expect(getStatus()).toBe('PAID');
+    expect(walletCod.applyVerifiedWalletTopUp).toHaveBeenCalledTimes(1);
+    expect(paymentNotifications.onTransactionRecorded).not.toHaveBeenCalled();
+  });
+
+  it('does not credit twice on repeated rider verify', async () => {
+    const { service, walletCod } = makeRiderTopUpVerify({ orderStatus: 'PAID' });
+    await service.verifyRiderWalletTopUp(riderAuth, TX_ID);
+    await service.verifyRiderWalletTopUp(riderAuth, TX_ID);
+    expect(walletCod.applyVerifiedWalletTopUp).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects amount mismatches without crediting', async () => {
+    const { service, walletCod, getStatus } = makeRiderTopUpVerify({
+      orderStatus: 'PAID',
+      orderAmount: '99.00',
+    });
+    const result = await service.verifyRiderWalletTopUp(riderAuth, TX_ID);
+    expect(result).toMatchObject({
+      amount_matches: false,
+      authoritative: false,
+      transaction_status: 'PENDING',
+    });
+    expect(getStatus()).toBe('PENDING');
+    expect(walletCod.applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+  });
+
+  it('refuses non-rider callers', async () => {
+    const { service, walletCod } = makeRiderTopUpVerify({ orderStatus: 'PAID' });
+    await expect(
+      service.verifyRiderWalletTopUp(customerAuth, TX_ID),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(walletCod.applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+  });
+
+  it('hides non-wallet charges from rider verify', async () => {
+    const { service, walletCod } = makeRiderTopUpVerify({
+      orderStatus: 'PAID',
+      chargePurpose: 'BOOKING',
+    });
+    await expect(
+      service.verifyRiderWalletTopUp(riderAuth, TX_ID),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(walletCod.applyVerifiedWalletTopUp).not.toHaveBeenCalled();
+  });
+
+  it('retrieves Cashfree before opening the settle transaction', async () => {
+    const { service, callOrder } = makeRiderTopUpVerify({ orderStatus: 'PAID' });
+    await service.verifyRiderWalletTopUp(riderAuth, TX_ID);
+    expect(callOrder.indexOf('retrieveOnlineOrder')).toBeGreaterThanOrEqual(0);
+    expect(callOrder.indexOf('transaction')).toBeGreaterThan(
+      callOrder.indexOf('retrieveOnlineOrder'),
+    );
+  });
+});

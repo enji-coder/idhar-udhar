@@ -129,6 +129,23 @@ class WalletTopUpSession {
       environment.isNotEmpty;
 }
 
+class WalletTopUpPaymentStatus {
+  const WalletTopUpPaymentStatus({
+    required this.paymentTransactionId,
+    required this.transactionStatus,
+  });
+
+  final String paymentTransactionId;
+  final String transactionStatus;
+
+  factory WalletTopUpPaymentStatus.fromJson(Map<String, Object?> json) {
+    return WalletTopUpPaymentStatus(
+      paymentTransactionId: jsonString(json['payment_transaction_id']) ?? '',
+      transactionStatus: jsonString(json['transaction_status']) ?? '',
+    );
+  }
+}
+
 class WalletApi {
   WalletApi(this._client);
 
@@ -152,6 +169,16 @@ class WalletApi {
         '/v1/rider/wallet/recharge',
         data: <String, String>{'amount': amount.toStringAsFixed(2)},
         headers: <String, String>{'Idempotency-Key': _uuid.v4()},
+      ),
+    );
+  }
+
+  /// Server-side Cashfree retrieve + settle for a rider top-up. Does not trust SDK.
+  Future<WalletTopUpPaymentStatus> verifyTopUp(String paymentTransactionId) async {
+    return WalletTopUpPaymentStatus.fromJson(
+      await _client.post(
+        '/v1/rider/wallet/transactions/$paymentTransactionId/verify',
+        data: <String, Object?>{},
       ),
     );
   }

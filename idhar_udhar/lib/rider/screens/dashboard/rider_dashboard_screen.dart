@@ -518,10 +518,13 @@ class _HomeTab extends ConsumerWidget {
                   confirmLabel: 'Add',
                   onConfirm: (amount) async {
                     try {
-                      final session = await ref
-                          .read(walletApiProvider)
-                          .beginTopUp(amount);
+                      final walletApi = ref.read(walletApiProvider);
+                      final session = await walletApi.beginTopUp(amount);
                       await openRiderWalletTopUpCheckout(session);
+                      await verifyRiderWalletTopUpAfterCheckout(
+                        walletApi: walletApi,
+                        paymentTransactionId: session.paymentTransactionId,
+                      );
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(

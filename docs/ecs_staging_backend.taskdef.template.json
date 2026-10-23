@@ -1,0 +1,77 @@
+{
+  "_comment": "PLACEHOLDER ECS Fargate task definition shape for a staging API service. Replace every <PLACEHOLDER>. Do not copy production secret ARNs. Do not register this file as-is. Agent must not deploy.",
+  "family": "idhar-udhar-staging-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<STAGING_ECS_EXECUTION_ROLE>",
+  "taskRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<STAGING_ECS_TASK_ROLE>",
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "<AWS_ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/<STAGING_API_IMAGE>:<TAG>",
+      "essential": true,
+      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "IU_DEPLOYMENT_TIER", "value": "staging" },
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "3000" },
+        { "name": "PAYMENT_PROVIDER", "value": "cashfree" },
+        { "name": "CASHFREE_ENVIRONMENT", "value": "sandbox" },
+        { "name": "CASHFREE_API_VERSION", "value": "2025-01-01" },
+        { "name": "CASHFREE_TIMEOUT_MS", "value": "10000" },
+        { "name": "DATABASE_HOST", "value": "<STAGING_RDS_HOST>" },
+        { "name": "DATABASE_PORT", "value": "5432" },
+        { "name": "DATABASE_NAME", "value": "<STAGING_DB_NAME>" },
+        { "name": "DATABASE_USER", "value": "<STAGING_DB_USER>" },
+        { "name": "DATABASE_SSL", "value": "true" },
+        { "name": "DATABASE_SSL_ROOT_CERT", "value": "<STAGING_CA_PATH_IN_IMAGE>" },
+        { "name": "LOCATION_STORE", "value": "redis" },
+        { "name": "REDIS_ENABLED", "value": "true" },
+        { "name": "REDIS_TLS", "value": "true" },
+        { "name": "S3_DOCUMENTS_BUCKET", "value": "<STAGING_DOCUMENTS_BUCKET>" },
+        { "name": "AWS_REGION", "value": "ap-south-1" },
+        { "name": "CORS_ORIGIN", "value": "<STAGING_ADMIN_ORIGIN>" }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:DATABASE_PASSWORD::"
+        },
+        {
+          "name": "JWT_ACCESS_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:JWT_ACCESS_SECRET::"
+        },
+        {
+          "name": "REFRESH_TOKEN_PEPPER",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:REFRESH_TOKEN_PEPPER::"
+        },
+        {
+          "name": "OTP_HASH_PEPPER",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:OTP_HASH_PEPPER::"
+        },
+        {
+          "name": "CASHFREE_CLIENT_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:CASHFREE_CLIENT_ID::"
+        },
+        {
+          "name": "CASHFREE_CLIENT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:CASHFREE_CLIENT_SECRET::"
+        },
+        {
+          "name": "REDIS_HOST",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:REDIS_HOST::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/idhar-udhar-staging-api",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    }
+  ]
+}

@@ -9,6 +9,7 @@ describe('payment configuration', () => {
   const originalSecret = process.env.CASHFREE_CLIENT_SECRET;
   const originalPayoutClientId = process.env.CASHFREE_PAYOUT_CLIENT_ID;
   const originalPayoutSecret = process.env.CASHFREE_PAYOUT_CLIENT_SECRET;
+  const originalTier = process.env.IU_DEPLOYMENT_TIER;
 
   function restore(name: string, value: string | undefined): void {
     if (value === undefined) {
@@ -26,6 +27,7 @@ describe('payment configuration', () => {
     restore('CASHFREE_CLIENT_SECRET', originalSecret);
     restore('CASHFREE_PAYOUT_CLIENT_ID', originalPayoutClientId);
     restore('CASHFREE_PAYOUT_CLIENT_SECRET', originalPayoutSecret);
+    restore('IU_DEPLOYMENT_TIER', originalTier);
   });
 
   it('defaults to unconfigured and does not select a gateway', () => {
@@ -110,5 +112,27 @@ describe('payment configuration', () => {
   it('maps the production host without calling it', () => {
     expect(cashfreeApiBaseUrl('sandbox')).toBe('https://sandbox.cashfree.com/pg');
     expect(cashfreeApiBaseUrl('production')).toBe('https://api.cashfree.com/pg');
+  });
+
+  it('allows staging tier only with Cashfree sandbox hosts', () => {
+    process.env.IU_DEPLOYMENT_TIER = 'staging';
+    process.env.PAYMENT_PROVIDER = 'cashfree';
+    process.env.CASHFREE_ENVIRONMENT = 'sandbox';
+    process.env.CASHFREE_CLIENT_ID = 'staging_sandbox_client';
+    process.env.CASHFREE_CLIENT_SECRET = 'staging_sandbox_secret';
+    const payment = loadAppConfig().payment;
+    expect(payment.cashfree.environment).toBe('sandbox');
+    expect(payment.cashfree.apiBaseUrl).toBe('https://sandbox.cashfree.com/pg');
+  });
+
+  it('refuses staging tier when Cashfree environment is production', () => {
+    process.env.IU_DEPLOYMENT_TIER = 'staging';
+    process.env.PAYMENT_PROVIDER = 'cashfree';
+    process.env.CASHFREE_ENVIRONMENT = 'production';
+    process.env.CASHFREE_CLIENT_ID = 'live_client';
+    process.env.CASHFREE_CLIENT_SECRET = 'live_secret';
+    expect(() => loadAppConfig()).toThrow(
+      /IU_DEPLOYMENT_TIER=staging requires CASHFREE_ENVIRONMENT=sandbox/,
+    );
   });
 });

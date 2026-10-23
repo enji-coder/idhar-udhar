@@ -65,13 +65,21 @@ class _WaitingChargePromptState extends ConsumerState<WaitingChargePrompt> {
     }
     setState(() => _busy = true);
     try {
-      final ReceivableClearance session = await ref
-          .read(ordersApiProvider)
-          .startReceivableClearance(widget.orderId);
+      final OrdersApi ordersApi = ref.read(ordersApiProvider);
+      final ReceivableClearance session =
+          await ordersApi.startReceivableClearance(widget.orderId);
       await openReceivableCheckout(session);
+      // SDK return is not settlement. Ask the backend to retrieve Cashfree.
+      try {
+        await ordersApi.verifyOnlineTripTransaction(
+          orderId: widget.orderId,
+          paymentTransactionId: session.paymentTransactionId,
+        );
+      } on ApiException {
+        // Outstanding refresh below remains authoritative if verify is delayed.
+      }
       ref.invalidate(orderServerViewProvider(widget.orderId));
-      final ApiOrder latest =
-          await ref.read(ordersApiProvider).getById(widget.orderId);
+      final ApiOrder latest = await ordersApi.getById(widget.orderId);
       if (!mounted) {
         return;
       }

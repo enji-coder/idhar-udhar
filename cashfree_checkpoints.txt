@@ -7,6 +7,11 @@ First step
   
   Pass condition: existing production setup documented ho; koi production change nahi.
 
+  Status (code audit): COMPLETE with blockers for Checkpoint 2 — see
+  docs/cashfree_staging_preparation.md. Duplicate migration prefixes 0026/0027/0028
+  must be resolved only after manual production schema_migrations verification.
+  No production DB/AWS/Cashfree changes were made by the agent.
+
 
 
 
@@ -17,6 +22,13 @@ Checkpoint 2 — Staging database aur configuration
 - Production database aur credentials se strict separation.
   
   Pass condition: test transactions production records ko touch na kar saken.
+
+  Status (code prep): READY FOR OPERATOR — templates/docs in
+  docs/cashfree_staging_preparation.md, backend/.env.staging.example,
+  docs/ecs_staging_backend.taskdef.template.json, docs/cashfree_staging_app_commands.md.
+  IU_DEPLOYMENT_TIER=staging refuses production Cashfree hosts.
+  NOT deployed/isolated until human provisions AWS + staging DB.
+  Blocker: resolve 0026/0027/0028 only after production schema_migrations check.
 
 
 

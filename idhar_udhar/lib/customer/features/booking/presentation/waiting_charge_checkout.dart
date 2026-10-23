@@ -11,7 +11,7 @@ import 'package:idhar_udhar/shared/api/orders_api.dart';
 /// Opens the existing Cashfree checkout for a server-created receivable session.
 ///
 /// The SDK callback only means the customer left checkout. The receivable stays
-/// outstanding until the Cashfree webhook credits it.
+/// outstanding until server-side settlement (verify and/or Cashfree webhook).
 Future<void> openReceivableCheckout(ReceivableClearance session) {
   return openCashfreeWebCheckout(
     paymentSessionId: session.paymentSessionId,
@@ -25,8 +25,8 @@ Future<void> openReceivableCheckout(ReceivableClearance session) {
 
 /// Same Cashfree web checkout used for waiting charges.
 ///
-/// Returning from the SDK does not mean the trip fare is paid. The webhook
-/// remains the only writer of PAID.
+/// Returning from the SDK does not mean the trip fare is paid. PAID is written
+/// only after server-side settlement (verify and/or Cashfree webhook).
 Future<void> openTripFareCheckout({
   required String paymentSessionId,
   required String cashfreeOrderId,

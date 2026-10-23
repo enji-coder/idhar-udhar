@@ -170,7 +170,7 @@ export default function Payments() {
           </>
         }
       >
-        <p className="text-sm text-ink-muted">Refunds are not available on the server yet. {refund ? `${formatINR(refund.amount)} for ${refund.customer}` : ''} remains unchanged.</p>
+        <p className="text-sm text-ink-muted">Admin refund is not wired. Order ONLINE refunds exist on the API and are sandbox-gated; do not use this dialog for live refunds. {refund ? `${formatINR(refund.amount)} for ${refund.customer}` : ''} remains unchanged.</p>
       </Modal>
     </PageContainer>
   );

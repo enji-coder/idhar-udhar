@@ -100,9 +100,13 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
               confirmLabel: 'Add',
               onConfirm: (amount) async {
                 try {
-                  final session =
-                      await ref.read(walletApiProvider).beginTopUp(amount);
+                  final walletApi = ref.read(walletApiProvider);
+                  final session = await walletApi.beginTopUp(amount);
                   await openRiderWalletTopUpCheckout(session);
+                  await verifyRiderWalletTopUpAfterCheckout(
+                    walletApi: walletApi,
+                    paymentTransactionId: session.paymentTransactionId,
+                  );
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -112,7 +116,7 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
                       ),
                     );
                   }
-                  // Poll briefly; credit only arrives after webhook verification.
+                  // Poll briefly if webhook/verify settlement is still in flight.
                   for (var i = 0; i < 5; i++) {
                     await Future<void>.delayed(const Duration(seconds: 2));
                     await ref

@@ -3,7 +3,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { planMigrations, sha256Hex } from './migrate.mjs';
+import {
+  assertUniqueNumericPrefixes,
+  migrationNumericPrefix,
+  planMigrations,
+  sha256Hex,
+} from './migrate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const migrationFile = resolve(
@@ -55,5 +60,33 @@ test('0019 file checksum matches the confirmed production digest', () => {
   assert.equal(
     sha256Hex(bytes),
     'ebb61a59ee095441bca87d6ed77ca614b0d58416aad2b0e68a2fdbae8ab0363c',
+  );
+});
+
+test('migrationNumericPrefix uses the leading four digits', () => {
+  assert.equal(
+    migrationNumericPrefix('0026_rider_wallet_topup_withdrawal.sql'),
+    '0026',
+  );
+});
+
+test('assertUniqueNumericPrefixes accepts a unique sequence', () => {
+  assert.doesNotThrow(() =>
+    assertUniqueNumericPrefixes([
+      '0025_states_and_city_state.sql',
+      '0026_rider_wallet_topup_withdrawal.sql',
+      '0027_wallet_idempotency_scopes.sql',
+    ]),
+  );
+});
+
+test('assertUniqueNumericPrefixes refuses duplicate prefixes', () => {
+  assert.throws(
+    () =>
+      assertUniqueNumericPrefixes([
+        '0026_rider_wallet_topup_withdrawal.sql',
+        '0026_rider_wallet_topup_withdrawals.sql',
+      ]),
+    /Duplicate migration numeric prefixes/,
   );
 });

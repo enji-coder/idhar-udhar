@@ -5,11 +5,13 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
 } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthContext } from '../auth/types/auth-context';
+import { UuidParamPipe } from '../common/uuid-param.pipe';
 import { readIdempotencyKey } from '../orders/idempotency-key';
 import { PaymentsService } from '../payments/payments.service';
 import { AmountDto } from './dto/amount.dto';
@@ -48,6 +50,16 @@ export class RiderWalletController {
       body.amount,
       readIdempotencyKey(idempotencyKey),
     );
+  }
+
+  @Roles('RIDER')
+  @Post('wallet/transactions/:transactionId/verify')
+  @HttpCode(HttpStatus.OK)
+  verifyWalletTopUp(
+    @CurrentAuth() auth: AuthContext,
+    @Param('transactionId', UuidParamPipe) transactionId: string,
+  ) {
+    return this.payments.verifyRiderWalletTopUp(auth, transactionId);
   }
 
   @Roles('RIDER')

@@ -23,4 +23,13 @@ Does not change migration SQL files.
 
 Idempotent: already-applied versions in `schema_migrations` are skipped.
 
+The Node migrator (`backend/scripts/migrate.mjs`) refuses duplicate numeric
+prefixes (two `0026_*.sql` files, etc.) before connecting. Resolve duplicates
+only after verifying production `schema_migrations`. Do not rename applied
+files blindly.
+
+`MIGRATE_DRY_RUN=1` lists missing versions only and does not create
+`schema_migrations`. It still opens a DB connection — never point it at
+production.
+
 Do not run this against production RDS until that step is explicitly approved.
