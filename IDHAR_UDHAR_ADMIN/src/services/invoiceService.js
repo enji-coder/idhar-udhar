@@ -16,7 +16,20 @@ function packagingFor(order) {
   return 15;
 }
 
+export function orderIsCancelled(order) {
+  const status = order?.canonicalStatus || order?.status;
+  return status === 'Cancelled' || status === 'CANCELLED';
+}
+
 export function buildInvoice(order, extras = {}) {
+  if (orderIsCancelled(order) && !extras.retainExisting) {
+    return {
+      blocked: true,
+      message: 'Cancelled orders cannot generate an invoice.',
+      orderId: order?.id || '',
+      crn: order?.crn || '',
+    };
+  }
   const deliveryCharge = round2(order.amount || 0);
   const packaging = packagingFor(order);
   const taxRate = 0;
@@ -190,6 +203,7 @@ export function invoiceFromRecord(record, order) {
       status: record.status,
       dueDate: record.dueDate,
       discount: record.discount,
+      retainExisting: true,
     });
   }
   const amount = Number(record.amount || 0);

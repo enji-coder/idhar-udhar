@@ -3,6 +3,8 @@ import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UuidParamPipe } from '../common/uuid-param.pipe';
 import { AuthContext } from '../auth/types/auth-context';
+import { WalletCleanupDto, WalletCleanupPreviewDto } from './dto/wallet-cleanup.dto';
+import { WalletCleanupService } from './wallet-cleanup.service';
 import { WalletCodService } from './wallet-cod.service';
 
 @Controller('admin/riders')
@@ -66,7 +68,30 @@ export class AdminWalletController {
 
 @Controller('admin/wallet')
 export class AdminWalletWithdrawalsController {
-  constructor(private readonly walletCod: WalletCodService) {}
+  constructor(
+    private readonly walletCod: WalletCodService,
+    private readonly cleanup: WalletCleanupService,
+  ) {}
+
+  @Roles('ADMIN')
+  @Post('cleanup/preview')
+  @HttpCode(HttpStatus.OK)
+  previewCleanup(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: WalletCleanupPreviewDto,
+  ) {
+    return this.cleanup.preview(auth, body);
+  }
+
+  @Roles('ADMIN')
+  @Post('cleanup')
+  @HttpCode(HttpStatus.OK)
+  applyCleanup(
+    @CurrentAuth() auth: AuthContext,
+    @Body() body: WalletCleanupDto,
+  ) {
+    return this.cleanup.apply(auth, body);
+  }
 
   @Roles('ADMIN')
   @Get('withdrawals')

@@ -289,6 +289,9 @@ export class PaymentsRepository {
   ): Promise<
     (TransactionRow & {
       display_id: string;
+      crn: string | null;
+      invoice_number: string | null;
+      invoice_status: string | null;
       cashfree_order_id: string | null;
       cf_order_id: string | null;
       cf_payment_id: string | null;
@@ -301,6 +304,9 @@ export class PaymentsRepository {
     const result = await db.query<
       TransactionRow & {
         display_id: string;
+        crn: string | null;
+        invoice_number: string | null;
+        invoice_status: string | null;
         cashfree_order_id: string | null;
         cf_order_id: string | null;
         cf_payment_id: string | null;
@@ -327,6 +333,9 @@ export class PaymentsRepository {
         t.created_at,
         t.updated_at,
         o.display_id,
+        o.crn,
+        i.invoice_number,
+        i.status AS invoice_status,
         g.gateway_order_id AS cashfree_order_id,
         g.cf_order_id,
         g.gateway_payment_id AS cf_payment_id,
@@ -336,6 +345,7 @@ export class PaymentsRepository {
         ref.refund_status
       FROM payment_transactions t
       LEFT JOIN orders o ON o.order_id = t.order_id
+      LEFT JOIN invoices i ON i.order_id = t.order_id
       LEFT JOIN payment_gateway_attempts g
         ON g.payment_transaction_id = t.payment_transaction_id
       LEFT JOIN LATERAL (
@@ -345,7 +355,7 @@ export class PaymentsRepository {
         ORDER BY r.created_at DESC
         LIMIT 1
       ) ref ON TRUE
-      ORDER BY t.created_at DESC
+      ORDER BY t.created_at DESC, t.payment_transaction_id DESC
       LIMIT 200
       `,
     );

@@ -13,7 +13,6 @@ import EmptyState from '../components/common/EmptyState';
 import Field, { inputClass } from '../components/common/Field';
 import ActionButton, { ActionGroup } from '../components/common/ActionButton';
 import DetailSection, { DetailRow } from '../components/common/DetailSection';
-import ConfirmDialog from '../components/common/ConfirmDialog';
 import Toast from '../components/common/Toast';
 import PageHeader from '../components/common/PageHeader';
 import { TableSkeleton } from '../components/common/Skeleton';
@@ -25,7 +24,8 @@ import { riderStore } from '../services/stores';
 import { formatINR } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import Tabs from '../components/common/Tabs';
-import { fetchRiderCod, fetchRiderEarnings, fetchRiderWallet, fetchRiderWalletLedger } from '../api/adminApi';
+import { applyWalletCleanup, fetchRiderCod, fetchRiderEarnings, fetchRiderWallet, fetchRiderWalletLedger, previewWalletCleanup } from '../api/adminApi';
+import { ApiError } from '../api/errors';
 
 const emptyTxn = {
   id: '',
@@ -49,6 +49,11 @@ export default function WalletPage() {
   const [wallets, setWallets] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [cleanupPreview, setCleanupPreview] = useState(null);
+  const [cleanupReason, setCleanupReason] = useState('');
+  const [cleanupError, setCleanupError] = useState('');
+  const [cleanupBusy, setCleanupBusy] = useState(false);
   const panel = usePanelState(emptyTxn);
   useQueryAction('add', panel.openCreate);
 
@@ -95,6 +100,8 @@ export default function WalletPage() {
             date: entry.created_at,
             status: 'Success',
             description: entry.entry_type,
+            entryType: entry.entry_type,
+            ledgerKind: 'RIDER_WALLET',
           }));
         } catch {
           return [];
@@ -118,7 +125,7 @@ export default function WalletPage() {
     return () => {
       cancelled = true;
     };
-  }, [riders]);
+  }, [riders, reloadKey]);
 
   const data = useMemo(() => {
     const query = (searchQuery || '').toLowerCase();
@@ -134,6 +141,48 @@ export default function WalletPage() {
       count: rows.length,
     };
   }, [rows, wallets]);
+
+  async function openCleanup(row) {
+    panel.setConfirm(row);
+    setCleanupReason('');
+    setCleanupError('');
+    setCleanupPreview(null);
+    try {
+      setCleanupPreview(await previewWalletCleanup({
+        ledger_kind: 'RIDER_WALLET',
+        ledger_id: row.id,
+      }));
+    } catch (error) {
+      setCleanupError(error instanceof ApiError ? error.message : 'Could not preview this cleanup.');
+    }
+  }
+
+  async function confirmCleanup() {
+    if (!panel.confirm?.id) return;
+    if (cleanupReason.trim().length < 8) {
+      setCleanupError('Enter a reason of at least 8 characters.');
+      return;
+    }
+    setCleanupBusy(true);
+    setCleanupError('');
+    try {
+      const result = await applyWalletCleanup({
+        ledger_kind: 'RIDER_WALLET',
+        ledger_id: panel.confirm.id,
+        reason: cleanupReason.trim(),
+        confirm: true,
+      });
+      panel.setConfirm(null);
+      panel.setToast(result.result === 'already_reversed'
+        ? 'This entry was already reversed. The balance was not changed again.'
+        : 'Reversal recorded. The original row was kept and the balance was recalculated.');
+      setReloadKey((value) => value + 1);
+    } catch (error) {
+      setCleanupError(error instanceof ApiError ? error.message : 'Could not clean up this entry.');
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
 
   function save() {
     panel.setToast('Admin wallet credit/debit is not available on the server yet.');
@@ -169,7 +218,7 @@ export default function WalletPage() {
         <ActionGroup>
           <ActionButton icon={Eye} tone="view" onClick={() => panel.setView(row)}>View</ActionButton>
           <ActionButton icon={Pencil} tone="edit" onClick={() => panel.openEdit(row)}>Edit</ActionButton>
-          <ActionButton icon={Trash2} tone="danger" onClick={() => panel.setConfirm(row)}>Delete</ActionButton>
+          <ActionButton icon={Trash2} tone="danger" onClick={() => openCleanup(row)}>Clean up</ActionButton>
         </ActionGroup>
       ),
     },
@@ -229,7 +278,41 @@ export default function WalletPage() {
           </DetailSection>
         ) : null}
       </Drawer>
-      <ConfirmDialog open={Boolean(panel.confirm)} description={`${panel.confirm?.id} cannot be deleted from Admin. Wallet ledgers are server-owned.`} onClose={() => panel.setConfirm(null)} onConfirm={() => { panel.setConfirm(null); panel.setToast('Wallet ledgers cannot be deleted from Admin.'); }} />
+      <Modal
+        open={Boolean(panel.confirm)}
+        title="Clean up wallet entry"
+        onClose={() => { if (!cleanupBusy) panel.setConfirm(null); }}
+        footer={(
+          <>
+            <Button variant="ghost" onClick={() => panel.setConfirm(null)} disabled={cleanupBusy}>Cancel</Button>
+            <Button
+              variant="reject"
+              disabled={cleanupBusy || !cleanupPreview?.allowed}
+              onClick={confirmCleanup}
+            >
+              Record reversal
+            </Button>
+          </>
+        )}
+      >
+        <div className="space-y-3 text-sm">
+          <p>The original ledger row stays. A reversal is posted and the balance is recalculated from the ledger.</p>
+          <p><span className="font-semibold">Entry:</span> {panel.confirm?.id}</p>
+          <p><span className="font-semibold">Type:</span> {panel.confirm?.entryType || panel.confirm?.description}</p>
+          {cleanupPreview ? (
+            <div className="rounded-2xl bg-slate-50 p-3">
+              <p>Amount {formatINR(cleanupPreview.amount)} {cleanupPreview.direction}</p>
+              <p>Balance now {formatINR(cleanupPreview.balance_before)}</p>
+              <p>Balance after {formatINR(cleanupPreview.projected_balance)}</p>
+              {cleanupPreview.reasons?.length ? <p className="mt-2 text-danger">{cleanupPreview.reasons.join(' ')}</p> : null}
+            </div>
+          ) : <p>Checking this entry…</p>}
+          <Field label="Reason">
+            <textarea className={inputClass} rows={3} value={cleanupReason} onChange={(event) => setCleanupReason(event.target.value)} placeholder="Why this entry is a confirmed dummy or error" />
+          </Field>
+          {cleanupError ? <p className="text-danger">{cleanupError}</p> : null}
+        </div>
+      </Modal>
         </>
       ) : (
         <GlassCard className="overflow-hidden">

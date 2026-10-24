@@ -30,12 +30,10 @@ export class AuditService {
   }
 
   /**
-   * Writes one immutable audit_logs row.
-   *
-   * Audit is evidence, not control flow: a failure here must not fail the
-   * financial action or the report the admin asked for, so it is logged and
-   * swallowed. Callers that need audit to be transactional should pass the
-   * surrounding transaction as `db`.
+   * Best-effort audit for reports and non-financial admin actions.
+   * A failure is logged and does not abort the caller, even when `db` is a
+   * transaction. Order purge, order hide, and wallet reversal must use
+   * recordRequired so a failed insert rolls the operation back.
    */
   async record(input: AuditWriteInput, db?: Queryable): Promise<void> {
     try {
@@ -65,5 +63,31 @@ export class AuditService {
         error: err instanceof Error ? err.message : 'unknown',
       });
     }
+  }
+
+  /**
+   * Mandatory security or financial audit. Uses the caller's transaction
+   * connection. Throws on failure so PostgresService.transaction rolls back
+   * the purge, hide, or reversal that required this row.
+   */
+  async recordRequired(input: AuditWriteInput, db: Queryable): Promise<void> {
+    await this.repo.insert(
+      {
+        actorIdentityId: input.auth.identityId,
+        actorProfileId: input.auth.profileId,
+        actorRole: input.auth.role,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        oldValue: input.oldValue ?? null,
+        newValue: input.newValue ?? null,
+        reason: input.reason ?? null,
+        requestId: currentRequestId(),
+        ip: input.ip ?? null,
+        userAgent: input.userAgent ?? null,
+        category: input.category,
+      },
+      db,
+    );
   }
 }

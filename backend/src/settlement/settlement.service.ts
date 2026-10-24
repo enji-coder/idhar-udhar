@@ -71,6 +71,10 @@ export class SettlementService {
    * The customer wallet is not debited here.
    */
   async settleDelivered(order: OrderRow, db: Queryable): Promise<void> {
+    const status = await this.repo.lockOrderStatus(order.order_id, db);
+    if (status !== 'DELIVERED') {
+      return;
+    }
     let waiting = await this.repo.findWaiting(order.order_id, db);
     if (!waiting) {
       waiting = await this.repo.assessPickup(order.order_id, db);

@@ -11,8 +11,10 @@
  * (including schema_migrations).
  *
  * Duplicate numeric prefixes (e.g. two 0026_*.sql files) are refused before
- * any database connection. Do not rename production-applied files until the
- * live schema_migrations history is manually verified.
+ * any database connection. Production-applied 0026 and 0027 files must match
+ * their recorded checksums. 0028_payout_provider_references was applied in
+ * production, but its exact bytes are not in this repository: that version is
+ * not reapplied, and a different file under that name is refused.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -21,6 +23,23 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import pg from 'pg';
 
 const FILENAME_PATTERN = /^(\d{4}_.+)\.sql$/;
+
+/** Checksums of production-applied files restored from commit 5ce4d74. */
+export const PRODUCTION_FILE_CHECKSUMS = Object.freeze({
+  '0026_rider_wallet_topup_withdrawal':
+    '24e2ce4c19916df8049c578bebb95d5821cf2a5951b4c93147e433ac934756e8',
+  '0027_wallet_idempotency_scopes':
+    'b635b1f8d34217eb08e930acf88dbb97fc086f2b469b39ff046405ef9f09583e',
+});
+
+/**
+ * Applied in production. The exact file bytes are not in this repository.
+ * Leave the filename absent unless those bytes are restored.
+ */
+export const HISTORICAL_APPLIED_WITHOUT_BYTES = Object.freeze({
+  '0028_payout_provider_references':
+    '87731dfe7527925d9c98a92baef24abd9788a849e19d931e8515c896f3a082ba',
+});
 
 export function migrationVersion(filename) {
   const match = FILENAME_PATTERN.exec(filename);
@@ -91,6 +110,80 @@ export function planMigrations(filenames, appliedVersions) {
   return { skip, apply };
 }
 
+/**
+ * A recorded version whose file bytes changed must not be skipped.
+ * Call this before any migration SQL runs.
+ *
+ * @param {Array<{ version: string, checksum: string }>} recorded
+ * @param {Map<string, string>} localChecksumByVersion lowercase sha256 of the current file
+ */
+/**
+ * Refuses a drifted production file before any database connection.
+ * A historical version with no local file is allowed only when its bytes
+ * were never recovered. A different file under that version name is refused.
+ *
+ * @param {Map<string, string>} localChecksumByVersion
+ */
+export function assertProductionMigrationIdentity(localChecksumByVersion) {
+  for (const [version, expected] of Object.entries(PRODUCTION_FILE_CHECKSUMS)) {
+    const local = localChecksumByVersion.get(version);
+    if (!local) {
+      throw new Error(`Production-applied migration file is missing: ${version}`);
+    }
+    if (local !== expected) {
+      throw new Error(
+        `Production-applied migration checksum does not match the file: ${version}`,
+      );
+    }
+  }
+  for (const [version, expected] of Object.entries(HISTORICAL_APPLIED_WITHOUT_BYTES)) {
+    const local = localChecksumByVersion.get(version);
+    if (!local) {
+      continue;
+    }
+    if (local !== expected) {
+      throw new Error(
+        `Unrecovered production migration is present with a different checksum. Refusing to skip or apply: ${version}`,
+      );
+    }
+  }
+}
+
+export function assertRecordedChecksums(recorded, localChecksumByVersion) {
+  const mismatches = [];
+  const missing = [];
+  for (const row of recorded) {
+    const version = String(row.version);
+    const stored = String(row.checksum || '').trim().toLowerCase();
+    const local = localChecksumByVersion.get(version);
+    const pinned = HISTORICAL_APPLIED_WITHOUT_BYTES[version];
+    if (!local) {
+      if (pinned && stored === pinned) {
+        continue;
+      }
+      if (pinned) {
+        mismatches.push(version);
+      } else {
+        missing.push(version);
+      }
+      continue;
+    }
+    if (!stored || stored !== local) {
+      mismatches.push(version);
+    }
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Recorded migration checksum does not match the file. Refusing to skip or apply: ${mismatches.join(', ')}`,
+    );
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Recorded migration has no local file. Refusing to continue: ${missing.join(', ')}`,
+    );
+  }
+}
+
 export function sha256Hex(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -149,8 +242,13 @@ async function appliedVersions(client, { allowCreate }) {
     await ensureSchemaMigrationsTable(client);
   }
   try {
-    const result = await client.query('SELECT version FROM schema_migrations');
-    return result.rows.map((row) => String(row.version));
+    const result = await client.query(
+      'SELECT version, checksum FROM schema_migrations',
+    );
+    return result.rows.map((row) => ({
+      version: String(row.version),
+      checksum: row.checksum == null ? '' : String(row.checksum),
+    }));
   } catch (error) {
     const code = error && typeof error === 'object' ? error.code : null;
     // undefined_table — dry-run must not CREATE; treat as empty history.
@@ -197,6 +295,18 @@ export async function runMigrations({ dryRun }) {
     throw new Error('No SQL migrations were found');
   }
   assertUniqueNumericPrefixes(filenames);
+  const localChecksums = new Map();
+  for (const filename of filenames) {
+    const version = migrationVersion(filename);
+    if (!version) {
+      continue;
+    }
+    localChecksums.set(
+      version,
+      sha256Hex(readFileSync(join(directory, filename))),
+    );
+  }
+  assertProductionMigrationIdentity(localChecksums);
 
   const port = Number.parseInt(requireEnv('DATABASE_PORT'), 10);
   if (!Number.isInteger(port)) {
@@ -215,7 +325,17 @@ export async function runMigrations({ dryRun }) {
   await client.connect();
   try {
     const applied = await appliedVersions(client, { allowCreate: !dryRun });
-    const plan = planMigrations(filenames, applied);
+    assertRecordedChecksums(applied, localChecksums);
+    for (const row of applied) {
+      const version = String(row.version);
+      if (!localChecksums.has(version) && HISTORICAL_APPLIED_WITHOUT_BYTES[version]) {
+        process.stdout.write(`SKIP already applied without local file: ${version}.sql\n`);
+      }
+    }
+    const plan = planMigrations(
+      filenames,
+      applied.map((row) => row.version),
+    );
     for (const item of plan.skip) {
       process.stdout.write(`SKIP already applied: ${item.filename}\n`);
     }

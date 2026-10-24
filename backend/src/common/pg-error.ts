@@ -33,6 +33,10 @@ export function isForeignKeyViolation(err: unknown): boolean {
   return asPgError(err)?.code === '23503';
 }
 
+export function isDeadlock(err: unknown): boolean {
+  return asPgError(err)?.code === '40P01';
+}
+
 export function isRestrictViolation(err: unknown): boolean {
   return asPgError(err)?.code === '23001';
 }

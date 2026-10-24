@@ -26,6 +26,10 @@ export type WorkbookInput = {
   exportMaxRows: number;
 };
 
+function spreadsheetText(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 function money(value: string | null): number | null {
   if (value == null) return null;
   return Number(value);
@@ -79,7 +83,7 @@ function buildSummarySheet(workbook: Workbook, input: WorkbookInput): void {
     sheet.addRow(['(none)']);
   } else {
     filterEntries.forEach(([key, value]) => {
-      sheet.addRow([key, value]);
+      sheet.addRow([key, spreadsheetText(value)]);
     });
   }
   sheet.addRow([]);
@@ -140,7 +144,7 @@ function buildSummarySheet(workbook: Workbook, input: WorkbookInput): void {
   groupHeader.font = { bold: true };
   input.groups.forEach((group) => {
     const row = sheet.addRow([
-      group.period,
+      spreadsheetText(group.period),
       Number(group.order_count),
       money(group.trip_fare),
       money(group.rider_share),
@@ -177,7 +181,7 @@ function addLabelled(
   label: string,
   value: string,
 ): void {
-  const row = sheet.addRow([label, value]);
+  const row = sheet.addRow([label, spreadsheetText(value)]);
   row.getCell(1).font = { bold: true };
 }
 
@@ -190,6 +194,7 @@ const TRANSACTION_COLUMNS: {
   { header: 'Date', key: 'report_date' },
   { header: 'Order ID', key: 'order_id' },
   { header: 'Display ID', key: 'display_id' },
+  { header: 'CRN', key: 'crn' },
   { header: 'Customer', key: 'customer_name' },
   { header: 'Rider Phone', key: 'rider_phone' },
   { header: 'City', key: 'city_name' },
@@ -243,7 +248,7 @@ function buildTransactionsSheet(workbook: Workbook, input: WorkbookInput): void 
       if (typeof raw === 'boolean') {
         return raw ? 'YES' : 'NO';
       }
-      return String(raw);
+      return spreadsheetText(String(raw));
     });
     const row = sheet.addRow(values);
     TRANSACTION_COLUMNS.forEach((column, index) => {

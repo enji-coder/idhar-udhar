@@ -351,7 +351,8 @@ export class OrdersRepository {
       SELECT ${ORDER_SELECT}
       FROM orders o
       JOIN cities c ON c.city_id = o.city_id
-      ORDER BY o.created_at DESC
+      WHERE o.removed_from_operations_at IS NULL
+      ORDER BY o.created_at DESC, o.order_id DESC
       LIMIT 100
       `,
     );
@@ -1128,6 +1129,163 @@ export class OrdersRepository {
       params,
     );
     return result.rows;
+  }
+
+  async lockDeletionTarget(
+    orderId: string,
+    db: Queryable,
+  ): Promise<{
+    order_id: string;
+    display_id: string;
+    crn: string;
+    canonical_status: OrderStatus;
+    removed_from_operations_at: Date | null;
+  } | null> {
+    const result = await db.query<{
+      order_id: string;
+      display_id: string;
+      crn: string;
+      canonical_status: OrderStatus;
+      removed_from_operations_at: Date | null;
+    }>(
+      `
+      SELECT
+        order_id,
+        display_id,
+        crn,
+        canonical_status,
+        removed_from_operations_at
+      FROM orders
+      WHERE order_id = $1
+      FOR UPDATE
+      `,
+      [orderId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async dependencyCounts(
+    orderId: string,
+    db: Queryable,
+  ): Promise<{
+    payments: number;
+    wallet: number;
+    cod: number;
+    customer_wallet: number;
+    receivables: number;
+    invoices: number;
+    finance: number;
+    cancellations: number;
+    adjustments: number;
+    resends: number;
+    tax: number;
+    children: number;
+    waiting: number;
+  }> {
+    const result = await db.query<{
+      payments: string;
+      wallet: string;
+      cod: string;
+      customer_wallet: string;
+      receivables: string;
+      invoices: string;
+      finance: string;
+      cancellations: string;
+      adjustments: string;
+      resends: string;
+      tax: string;
+      children: string;
+      waiting: string;
+    }>(
+      `
+      SELECT
+        (SELECT count(*) FROM payment_transactions WHERE order_id = $1) AS payments,
+        (SELECT count(*) FROM wallet_ledger_entries WHERE related_order_id = $1) AS wallet,
+        (SELECT count(*) FROM cod_ledger_entries WHERE related_order_id = $1) AS cod,
+        (SELECT count(*) FROM customer_wallet_ledger_entries WHERE related_order_id = $1) AS customer_wallet,
+        (SELECT count(*) FROM customer_receivable_entries WHERE order_id = $1) AS receivables,
+        (SELECT count(*) FROM invoices WHERE order_id = $1) AS invoices,
+        (SELECT count(*) FROM order_finance_snapshots WHERE order_id = $1) AS finance,
+        (SELECT count(*) FROM order_cancellation_snapshots WHERE order_id = $1) AS cancellations,
+        (SELECT count(*) FROM order_adjustments WHERE order_id = $1) AS adjustments,
+        (SELECT count(*) FROM resend_snapshots WHERE original_order_id = $1 OR child_order_id = $1) AS resends,
+        (SELECT count(*) FROM order_tax_snapshots WHERE order_id = $1) AS tax,
+        (SELECT count(*) FROM orders WHERE parent_order_id = $1) AS children,
+        (SELECT count(*) FROM order_waiting_charges WHERE order_id = $1) AS waiting
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    return {
+      payments: Number(row.payments),
+      wallet: Number(row.wallet),
+      cod: Number(row.cod),
+      customer_wallet: Number(row.customer_wallet),
+      receivables: Number(row.receivables),
+      invoices: Number(row.invoices),
+      finance: Number(row.finance),
+      cancellations: Number(row.cancellations),
+      adjustments: Number(row.adjustments),
+      resends: Number(row.resends),
+      tax: Number(row.tax),
+      children: Number(row.children),
+      waiting: Number(row.waiting),
+    };
+  }
+
+  /**
+   * Deletes operational children and the order. Caller must already have
+   * decided the order has no protected financial rows, inside this transaction.
+   */
+  async purgeEligibleOrder(orderId: string, db: Queryable): Promise<void> {
+    await db.query(`SELECT set_config('app.order_purge', 'on', true)`);
+    await db.query(
+      `
+      DELETE FROM notification_deliveries
+      WHERE notification_id IN (
+        SELECT notification_id FROM notifications WHERE order_id = $1
+      )
+      `,
+      [orderId],
+    );
+    await db.query(`DELETE FROM notifications WHERE order_id = $1`, [orderId]);
+    await db.query(`DELETE FROM order_offers WHERE order_id = $1`, [orderId]);
+    await db.query(`DELETE FROM order_ratings WHERE order_id = $1`, [orderId]);
+    await db.query(
+      `UPDATE order_stops SET proof_file_id = NULL WHERE order_id = $1 AND proof_file_id IS NOT NULL`,
+      [orderId],
+    );
+    await db.query(`DELETE FROM order_stops WHERE order_id = $1`, [orderId]);
+    await db.query(`DELETE FROM order_payment_plans WHERE order_id = $1`, [orderId]);
+    await db.query(`DELETE FROM order_payment_responsibilities WHERE order_id = $1`, [orderId]);
+    await db.query(`DELETE FROM failed_deliveries WHERE order_id = $1`, [orderId]);
+    // order_waiting_charges_guard rejects every DELETE, and those rows reference
+    // fare snapshots and status events. dependencyCounts blocks purge when any exist.
+    await db.query(`DELETE FROM order_fare_snapshots WHERE order_id = $1`, [orderId]);
+    await db.query(`DELETE FROM order_status_events WHERE order_id = $1`, [orderId]);
+    const deleted = await db.query(`DELETE FROM orders WHERE order_id = $1`, [orderId]);
+    if ((deleted.rowCount ?? 0) !== 1) {
+      throw new Error('Order purge did not delete the order');
+    }
+  }
+
+  async hideFromOperations(
+    input: { orderId: string; identityId: string; reason: string },
+    db: Queryable,
+  ): Promise<boolean> {
+    const result = await db.query(
+      `
+      UPDATE orders
+      SET
+        removed_from_operations_at = now(),
+        removed_by_identity_id = $2,
+        removal_reason = $3
+      WHERE order_id = $1
+        AND removed_from_operations_at IS NULL
+      `,
+      [input.orderId, input.identityId, input.reason.trim()],
+    );
+    return (result.rowCount ?? 0) === 1;
   }
 }
 

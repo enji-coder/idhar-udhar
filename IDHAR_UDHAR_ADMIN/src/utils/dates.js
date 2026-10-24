@@ -4,7 +4,23 @@ const MONTHS = {
   oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
 };
 
-export const DATA_TODAY = new Date(2026, 7, 17);
+/** Calendar day in the admin report zone. India has no DST. */
+export function calendarToday(timeZone = 'Asia/Kolkata', now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const value = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return new Date(value('year'), value('month') - 1, value('day'));
+}
+
+export function dataToday() {
+  return calendarToday();
+}
+
+export const DATA_TODAY = dataToday();
 
 export function parseAppDate(value) {
   if (!value && value !== 0) return null;
@@ -47,7 +63,8 @@ export function sortByDateTime(rows, dateKey = 'date', timeKey = 'time', newestF
   return [...rows].sort((left, right) => {
     const leftStamp = parseAppDateTime(left[dateKey] || left.timestamp, left[timeKey] || left.timestamp)?.getTime() || 0;
     const rightStamp = parseAppDateTime(right[dateKey] || right.timestamp, right[timeKey] || right.timestamp)?.getTime() || 0;
-    return newestFirst ? rightStamp - leftStamp : leftStamp - rightStamp;
+    if (leftStamp !== rightStamp) return newestFirst ? rightStamp - leftStamp : leftStamp - rightStamp;
+    return String(left.id ?? left.orderId ?? '').localeCompare(String(right.id ?? right.orderId ?? ''));
   });
 }
 
@@ -97,9 +114,9 @@ export function formatTimestamp(dateValue, timeValue) {
   return time ? `${formatAppDate(date)}, ${time}` : formatAppDate(date);
 }
 
-export function daysBetween(from, to = DATA_TODAY) {
+export function daysBetween(from, to = dataToday()) {
   const start = parseAppDate(from);
-  const end = parseAppDate(to) || DATA_TODAY;
+  const end = parseAppDate(to) || dataToday();
   if (!start) return null;
   return Math.round((startOfDay(start) - startOfDay(end)) / 86400000);
 }
@@ -118,7 +135,7 @@ const MONTH_INDEX = {
 };
 
 export function rangeForPreset(preset, year, monthName, customFrom, customTo) {
-  const today = DATA_TODAY;
+  const today = dataToday();
   const yearNumber = Number(year) || today.getFullYear();
   if (preset === 'custom') {
     return { from: customFrom, to: customTo };

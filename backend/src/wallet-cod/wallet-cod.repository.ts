@@ -34,6 +34,8 @@ export type WalletLedgerRow = {
   related_cod_ledger_id: string | null;
   actor_type: string;
   actor_profile_id: string | null;
+  reverses_wallet_ledger_id?: string | null;
+  reversal_reason?: string | null;
   created_at: Date;
 };
 
@@ -46,6 +48,8 @@ export type CodLedgerRow = {
   related_order_id: string | null;
   related_wallet_ledger_id: string | null;
   source_txn_id: string | null;
+  reverses_cod_ledger_id?: string | null;
+  reversal_reason?: string | null;
   created_at: Date;
 };
 
@@ -73,16 +77,19 @@ export type WalletEntryType =
   | 'PAYOUT'
   | 'ADJUSTMENT'
   | 'CANCELLATION_SHARE'
-  | 'RESEND_EARNING';
+  | 'RESEND_EARNING'
+  | 'REVERSAL';
 
 export type CodSource =
   | 'CASH_COMPANY_SHARE'
   | 'RECHARGE_SETTLEMENT'
   | 'DIGITAL_EARNING_SETTLEMENT'
   | 'CANCELLATION_SHARE_SETTLEMENT'
-  | 'ADMIN_ADJUSTMENT';
+  | 'ADMIN_ADJUSTMENT'
+  | 'REVERSAL';
 
-const WALLET_LEDGER_COLUMNS = `
+/** Columns that exist before migration 0032. Existing wallet reads and writes use this list. */
+export const WALLET_LEDGER_COLUMNS = `
   wallet_ledger_id,
   wallet_account_id,
   direction,
@@ -96,7 +103,15 @@ const WALLET_LEDGER_COLUMNS = `
   created_at
 `;
 
-const COD_LEDGER_COLUMNS = `
+/** Reversal linkage from 0032. Cleanup queries only. */
+export const WALLET_LEDGER_REVERSAL_COLUMNS = `
+  ${WALLET_LEDGER_COLUMNS},
+  reverses_wallet_ledger_id,
+  reversal_reason
+`;
+
+/** Columns that exist before migration 0032. Existing COD reads and writes use this list. */
+export const COD_LEDGER_COLUMNS = `
   cod_ledger_id,
   cod_account_id,
   direction,
@@ -106,6 +121,13 @@ const COD_LEDGER_COLUMNS = `
   related_wallet_ledger_id,
   source_txn_id,
   created_at
+`;
+
+/** Reversal linkage from 0032. Cleanup queries only. */
+export const COD_LEDGER_REVERSAL_COLUMNS = `
+  ${COD_LEDGER_COLUMNS},
+  reverses_cod_ledger_id,
+  reversal_reason
 `;
 
 @Injectable()
@@ -1216,6 +1238,353 @@ export class WalletCodRepository {
       [riderProfileId],
     );
     return result.rows;
+  }
+
+  async lockWalletLedger(
+    ledgerId: string,
+    db: Queryable,
+  ): Promise<(WalletLedgerRow & { rider_profile_id: string; available_balance: string; ledger_balance: string }) | null> {
+    const result = await db.query<
+      WalletLedgerRow & { rider_profile_id: string; available_balance: string; ledger_balance: string }
+    >(
+      `
+      SELECT
+        e.wallet_ledger_id,
+        e.wallet_account_id,
+        e.direction,
+        e.amount::text AS amount,
+        e.entry_type,
+        e.related_order_id,
+        e.related_payment_transaction_id,
+        e.related_cod_ledger_id,
+        e.actor_type,
+        e.actor_profile_id,
+        e.reverses_wallet_ledger_id,
+        e.reversal_reason,
+        e.created_at,
+        a.rider_profile_id,
+        a.available_balance::text AS available_balance,
+        (
+          SELECT COALESCE(SUM(
+            CASE WHEN x.direction = 'CREDIT' THEN x.amount ELSE -x.amount END
+          ), 0)::text
+          FROM wallet_ledger_entries x
+          WHERE x.wallet_account_id = e.wallet_account_id
+        ) AS ledger_balance
+      FROM wallet_ledger_entries e
+      JOIN rider_wallet_accounts a ON a.wallet_account_id = e.wallet_account_id
+      WHERE e.wallet_ledger_id = $1
+      FOR UPDATE OF e, a
+      `,
+      [ledgerId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findWalletReversal(ledgerId: string, db: Queryable): Promise<WalletLedgerRow | null> {
+    const result = await db.query<WalletLedgerRow>(
+      `
+      SELECT ${WALLET_LEDGER_REVERSAL_COLUMNS}
+      FROM wallet_ledger_entries
+      WHERE reverses_wallet_ledger_id = $1
+      `,
+      [ledgerId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async lockCodLedger(
+    ledgerId: string,
+    db: Queryable,
+  ): Promise<(CodLedgerRow & { rider_profile_id: string; cod_due: string; ledger_due: string }) | null> {
+    const result = await db.query<CodLedgerRow & { rider_profile_id: string; cod_due: string; ledger_due: string }>(
+      `
+      SELECT
+        e.cod_ledger_id,
+        e.cod_account_id,
+        e.direction,
+        e.amount::text AS amount,
+        e.source,
+        e.related_order_id,
+        e.related_wallet_ledger_id,
+        e.source_txn_id,
+        e.reverses_cod_ledger_id,
+        e.reversal_reason,
+        e.created_at,
+        a.rider_profile_id,
+        a.cod_due::text AS cod_due,
+        (
+          SELECT COALESCE(SUM(
+            CASE WHEN x.direction = 'INCREASE' THEN x.amount ELSE -x.amount END
+          ), 0)::text
+          FROM cod_ledger_entries x
+          WHERE x.cod_account_id = e.cod_account_id
+        ) AS ledger_due
+      FROM cod_ledger_entries e
+      JOIN rider_cod_accounts a ON a.cod_account_id = e.cod_account_id
+      WHERE e.cod_ledger_id = $1
+      FOR UPDATE OF e, a
+      `,
+      [ledgerId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findCodReversal(ledgerId: string, db: Queryable): Promise<CodLedgerRow | null> {
+    const result = await db.query<CodLedgerRow>(
+      `
+      SELECT ${COD_LEDGER_REVERSAL_COLUMNS}
+      FROM cod_ledger_entries
+      WHERE reverses_cod_ledger_id = $1
+      `,
+      [ledgerId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async codSourceFor(ledgerId: string, db: Queryable): Promise<string | null> {
+    const result = await db.query<{ source: string }>(
+      `SELECT source FROM cod_ledger_entries WHERE cod_ledger_id = $1`,
+      [ledgerId],
+    );
+    return result.rows[0]?.source ?? null;
+  }
+
+  async walletEntryTypeFor(ledgerId: string, db: Queryable): Promise<string | null> {
+    const result = await db.query<{ entry_type: string }>(
+      `SELECT entry_type FROM wallet_ledger_entries WHERE wallet_ledger_id = $1`,
+      [ledgerId],
+    );
+    return result.rows[0]?.entry_type ?? null;
+  }
+
+  async insertWalletReversal(
+    input: {
+      walletAccountId: string;
+      direction: 'CREDIT' | 'DEBIT';
+      amount: string;
+      reversesWalletLedgerId: string;
+      reason: string;
+      actorProfileId: string;
+      relatedOrderId?: string | null;
+      relatedCodLedgerId?: string | null;
+    },
+    db: Queryable,
+  ): Promise<WalletLedgerRow> {
+    const result = await db.query<WalletLedgerRow>(
+      `
+      INSERT INTO wallet_ledger_entries (
+        wallet_account_id, direction, amount, entry_type,
+        related_order_id, related_cod_ledger_id,
+        actor_type, actor_profile_id,
+        reverses_wallet_ledger_id, reversal_reason
+      )
+      VALUES ($1, $2, $3::numeric(12,2), 'REVERSAL', $4, $5, 'ADMIN', $6, $7, $8)
+      RETURNING ${WALLET_LEDGER_REVERSAL_COLUMNS}
+      `,
+      [
+        input.walletAccountId,
+        input.direction,
+        input.amount,
+        input.relatedOrderId ?? null,
+        input.relatedCodLedgerId ?? null,
+        input.actorProfileId,
+        input.reversesWalletLedgerId,
+        input.reason.trim(),
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async insertCodReversal(
+    input: {
+      codAccountId: string;
+      direction: 'INCREASE' | 'DECREASE';
+      amount: string;
+      reversesCodLedgerId: string;
+      reason: string;
+      relatedOrderId?: string | null;
+      relatedWalletLedgerId?: string | null;
+    },
+    db: Queryable,
+  ): Promise<CodLedgerRow> {
+    const result = await db.query<CodLedgerRow>(
+      `
+      INSERT INTO cod_ledger_entries (
+        cod_account_id, direction, amount, source,
+        related_order_id, related_wallet_ledger_id, source_txn_id,
+        reverses_cod_ledger_id, reversal_reason
+      )
+      VALUES (
+        $1, $2, $3::numeric(12,2), 'REVERSAL', $4, $5, $6, $7, $8
+      )
+      RETURNING ${COD_LEDGER_REVERSAL_COLUMNS}
+      `,
+      [
+        input.codAccountId,
+        input.direction,
+        input.amount,
+        input.relatedOrderId ?? null,
+        input.relatedWalletLedgerId ?? null,
+        `reversal:${input.reversesCodLedgerId}`,
+        input.reversesCodLedgerId,
+        input.reason.trim(),
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async recomputeWalletBalance(walletAccountId: string, db: Queryable): Promise<string> {
+    const result = await db.query<{ available_balance: string }>(
+      `
+      UPDATE rider_wallet_accounts a
+      SET available_balance = COALESCE((
+        SELECT SUM(CASE WHEN e.direction = 'CREDIT' THEN e.amount ELSE -e.amount END)
+        FROM wallet_ledger_entries e
+        WHERE e.wallet_account_id = a.wallet_account_id
+      ), 0)
+      WHERE a.wallet_account_id = $1
+      RETURNING available_balance::text AS available_balance
+      `,
+      [walletAccountId],
+    );
+    return formatInr(result.rows[0].available_balance);
+  }
+
+  async recomputeCodDue(codAccountId: string, db: Queryable): Promise<string> {
+    const result = await db.query<{ cod_due: string }>(
+      `
+      UPDATE rider_cod_accounts a
+      SET cod_due = COALESCE((
+        SELECT SUM(CASE WHEN e.direction = 'INCREASE' THEN e.amount ELSE -e.amount END)
+        FROM cod_ledger_entries e
+        WHERE e.cod_account_id = a.cod_account_id
+      ), 0)
+      WHERE a.cod_account_id = $1
+      RETURNING cod_due::text AS cod_due
+      `,
+      [codAccountId],
+    );
+    return formatInr(result.rows[0].cod_due);
+  }
+
+  async lockCustomerWalletLedger(
+    ledgerId: string,
+    db: Queryable,
+  ): Promise<{
+    customer_wallet_ledger_id: string;
+    customer_wallet_id: string;
+    customer_profile_id: string;
+    direction: 'CREDIT' | 'DEBIT';
+    amount: string;
+    entry_type: string;
+    related_order_id: string | null;
+    available_balance: string;
+    ledger_balance: string;
+  } | null> {
+    const result = await db.query<{
+      customer_wallet_ledger_id: string;
+      customer_wallet_id: string;
+      customer_profile_id: string;
+      direction: 'CREDIT' | 'DEBIT';
+      amount: string;
+      entry_type: string;
+      related_order_id: string | null;
+      available_balance: string;
+      ledger_balance: string;
+    }>(
+      `
+      SELECT
+        e.customer_wallet_ledger_id,
+        e.customer_wallet_id,
+        a.customer_profile_id,
+        e.direction,
+        e.amount::text AS amount,
+        e.entry_type,
+        e.related_order_id,
+        a.available_balance::text AS available_balance,
+        (
+          SELECT COALESCE(SUM(
+            CASE WHEN x.direction = 'CREDIT' THEN x.amount ELSE -x.amount END
+          ), 0)::text
+          FROM customer_wallet_ledger_entries x
+          WHERE x.customer_wallet_id = e.customer_wallet_id
+        ) AS ledger_balance
+      FROM customer_wallet_ledger_entries e
+      JOIN customer_wallet_accounts a ON a.customer_wallet_id = e.customer_wallet_id
+      WHERE e.customer_wallet_ledger_id = $1
+      FOR UPDATE OF e, a
+      `,
+      [ledgerId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findCustomerWalletReversal(
+    ledgerId: string,
+    db: Queryable,
+  ): Promise<{ customer_wallet_ledger_id: string } | null> {
+    const result = await db.query<{ customer_wallet_ledger_id: string }>(
+      `
+      SELECT customer_wallet_ledger_id
+      FROM customer_wallet_ledger_entries
+      WHERE reverses_customer_wallet_ledger_id = $1
+      `,
+      [ledgerId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async insertCustomerWalletReversal(
+    input: {
+      customerWalletId: string;
+      direction: 'CREDIT' | 'DEBIT';
+      amount: string;
+      reversesLedgerId: string;
+      reason: string;
+      actorProfileId: string;
+      relatedOrderId?: string | null;
+    },
+    db: Queryable,
+  ): Promise<{ customer_wallet_ledger_id: string }> {
+    const result = await db.query<{ customer_wallet_ledger_id: string }>(
+      `
+      INSERT INTO customer_wallet_ledger_entries (
+        customer_wallet_id, direction, amount, entry_type,
+        related_order_id, actor_type, actor_profile_id,
+        reverses_customer_wallet_ledger_id, reversal_reason
+      )
+      VALUES ($1, $2, $3::numeric(12,2), 'REVERSAL', $4, 'ADMIN', $5, $6, $7)
+      RETURNING customer_wallet_ledger_id
+      `,
+      [
+        input.customerWalletId,
+        input.direction,
+        input.amount,
+        input.relatedOrderId ?? null,
+        input.actorProfileId,
+        input.reversesLedgerId,
+        input.reason.trim(),
+      ],
+    );
+    return result.rows[0];
+  }
+
+  async recomputeCustomerWalletBalance(customerWalletId: string, db: Queryable): Promise<string> {
+    const result = await db.query<{ available_balance: string }>(
+      `
+      UPDATE customer_wallet_accounts a
+      SET available_balance = COALESCE((
+        SELECT SUM(CASE WHEN e.direction = 'CREDIT' THEN e.amount ELSE -e.amount END)
+        FROM customer_wallet_ledger_entries e
+        WHERE e.customer_wallet_id = a.customer_wallet_id
+      ), 0)
+      WHERE a.customer_wallet_id = $1
+      RETURNING available_balance::text AS available_balance
+      `,
+      [customerWalletId],
+    );
+    return formatInr(result.rows[0].available_balance);
   }
 }
 

@@ -1,10 +1,11 @@
 export class ApiError extends Error {
-  constructor({ code, message, requestId, status }) {
+  constructor({ code, message, requestId, status, details }) {
     super(message || 'Something went wrong.');
     this.name = 'ApiError';
     this.code = code || 'INTERNAL_ERROR';
     this.requestId = requestId || null;
     this.status = status || 500;
+    this.details = details || null;
   }
 }
 
@@ -42,5 +43,6 @@ export function mapApiError(payload, status) {
     message,
     requestId: error.request_id,
     status,
+    details: error.details || null,
   });
 }

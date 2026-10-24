@@ -148,7 +148,8 @@ function exportableRows(rows, columns) {
     const next = {};
     columns.forEach((column) => {
       const raw = row[column.exportKey || column.key];
-      next[column.key] = raw == null ? '' : typeof raw === 'object' ? '' : raw;
+      const text = raw == null || typeof raw === 'object' ? '' : String(raw);
+      next[column.key] = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
     });
     return next;
   });

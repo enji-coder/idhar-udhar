@@ -31,7 +31,7 @@ const DEFAULT_LIMIT = 50;
  * response labels the scope so this is never mistaken for total company revenue.
  */
 const REPORT_SCOPE_NOTE =
-  'Trip commission GST. Based on the ORIGINAL order finance snapshot (85/15 freeze). Excludes resend company amounts, cancellation company shares and order adjustments, which do not follow the 85/15 split. GST on the customer trip fare is 0.';
+  'Trip commission GST. Based on the ORIGINAL order finance snapshot (85/15 freeze) for DELIVERED orders only. Cancelled and in-progress orders are not completed revenue. Excludes resend company amounts, cancellation company shares and order adjustments, which do not follow the 85/15 split. GST on the customer trip fare is 0.';
 
 @Injectable()
 export class GstReportService {
@@ -197,6 +197,7 @@ function toFilters(query: GstReportQueryDto): GstReportFilters {
   return {
     order_id: query.order_id,
     display_id: query.display_id,
+    crn: query.crn,
     customer_profile_id: query.customer_profile_id,
     rider_profile_id: query.rider_profile_id,
     city_id: query.city_id,
@@ -249,6 +250,7 @@ function serializeDetail(row: GstDetailRow) {
     frozen_at: row.frozen_at.toISOString(),
     order_id: row.order_id,
     display_id: row.display_id,
+    crn: row.crn,
     finance_snapshot_id: row.finance_snapshot_id,
     customer_profile_id: row.customer_profile_id,
     customer_name: row.customer_name,

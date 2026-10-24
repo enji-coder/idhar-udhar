@@ -20,7 +20,6 @@ import ReassignRiderDrawer from '../components/orders/ReassignRiderDrawer';
 import CancelOrderModal from '../components/orders/CancelOrderModal';
 import InvoicePreview from '../components/orders/InvoicePreview';
 import CreateOrderModal from '../components/orders/CreateOrderModal';
-import ConfirmDialog from '../components/common/ConfirmDialog';
 import PageHeader from '../components/common/PageHeader';
 import useStore from '../hooks/useStore';
 import useQueryAction from '../hooks/useQueryAction';
@@ -29,7 +28,7 @@ import { ORDER_STATUSES, normalizeOrder } from '../services/orderRules';
 import { useAuth } from '../context/AuthContext';
 import { formatINR } from '../utils/format';
 import { buildInvoice, downloadInvoicePdf, invoicePrintMarkup, invoiceShareText, printInvoiceHtml } from '../services/invoiceService';
-import { assignAdminOrder, cancelAdminOrder, transitionAdminOrder } from '../api/adminApi';
+import { assignAdminOrder, cancelAdminOrder, checkAdminInvoice, deleteAdminOrder, hideAdminOrder, transitionAdminOrder } from '../api/adminApi';
 import { hydrateAdminDirectory } from '../api/hydrate';
 import { UI_TO_CANONICAL } from '../api/mappers';
 import { ApiError } from '../api/errors';
@@ -59,6 +58,10 @@ export default function Orders() {
   useStore(vehicleCategoryStore);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteRow, setDeleteRow] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteBlockers, setDeleteBlockers] = useState([]);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [statusRow, setStatusRow] = useState(null);
   const [localSearch, setLocalSearch] = useState('');
   const [filters, setFilters] = useState({ ...emptyFilters, status: params.get('status') || 'All' });
@@ -145,6 +148,62 @@ export default function Orders() {
     }
   }
 
+  async function openInvoice(order) {
+    if (order.status === 'Cancelled' || order.canonicalStatus === 'CANCELLED') {
+      setToast('Cancelled orders cannot generate an invoice.');
+      return;
+    }
+    if (order.backendOrderId) {
+      try {
+        await checkAdminInvoice(order.backendOrderId);
+      } catch (error) {
+        setToast(error instanceof ApiError ? error.message : 'This order cannot generate an invoice.');
+        return;
+      }
+    }
+    openPanel('invoice', order);
+  }
+
+  async function confirmDelete(hideInstead) {
+    if (!deleteRow?.backendOrderId) {
+      setDeleteError('This order is not on the server.');
+      return;
+    }
+    if (deleteReason.trim().length < 8) {
+      setDeleteError('Enter a reason of at least 8 characters.');
+      return;
+    }
+    const body = {
+      reason: deleteReason.trim(),
+      confirm_display_id: deleteRow.id,
+      confirm_crn: deleteRow.crn,
+    };
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      if (hideInstead) {
+        await hideAdminOrder(deleteRow.backendOrderId, body);
+        setToast(`Order ${deleteRow.id} was removed from operations. Financial records were kept.`);
+      } else {
+        await deleteAdminOrder(deleteRow.backendOrderId, body);
+        setToast(`Order ${deleteRow.id} (${deleteRow.crn || 'no CRN'}) was deleted.`);
+      }
+      setDeleteRow(null);
+      await hydrateAdminDirectory({ silent: true });
+    } catch (error) {
+      const blockers = error instanceof ApiError ? error.details?.blockers : null;
+      if (error instanceof ApiError && error.code === 'ORDER_FINANCIAL_DEPENDENCY') {
+        setDeleteBlockers(Array.isArray(blockers) ? blockers : []);
+        setDeleteError(error.message);
+      } else {
+        setDeleteBlockers([]);
+        setDeleteError(error instanceof ApiError ? error.message : 'Could not delete the order.');
+      }
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   function handleAction(type, order) {
     if (type === 'proof') {
       openPanel('view', order);
@@ -155,7 +214,14 @@ export default function Orders() {
       return;
     }
     if (type === 'delete') {
+      setDeleteReason('');
+      setDeleteError('');
+      setDeleteBlockers([]);
       setDeleteRow(order);
+      return;
+    }
+    if (type === 'invoice') {
+      void openInvoice(order);
       return;
     }
     if (type === 'status') {
@@ -386,12 +452,39 @@ export default function Orders() {
           setCreateOpen(false);
         }}
       />
-      <ConfirmDialog
+      <Modal
         open={Boolean(deleteRow)}
-        description={`${deleteRow?.id} will be removed from the orders list.`}
-        onClose={() => setDeleteRow(null)}
-        onConfirm={() => { setDeleteRow(null); setToast('Deleting orders from Admin is not available on the server yet.'); }}
-      />
+        title="Delete order"
+        onClose={() => { if (!deleteBusy) setDeleteRow(null); }}
+        footer={(
+          <>
+            <Button variant="ghost" onClick={() => setDeleteRow(null)} disabled={deleteBusy}>Cancel</Button>
+            {deleteBlockers.length > 0 ? (
+              <Button variant="secondary" disabled={deleteBusy} onClick={() => confirmDelete(true)}>Remove from operations</Button>
+            ) : null}
+            <Button variant="reject" disabled={deleteBusy || deleteBlockers.length > 0} onClick={() => confirmDelete(false)}>Delete order</Button>
+          </>
+        )}
+      >
+        <div className="space-y-3 text-sm">
+          <p>This permanently deletes the order when it has no settled financial records.</p>
+          <p><span className="font-semibold">Order ID:</span> {deleteRow?.id || '—'}</p>
+          <p><span className="font-semibold">CRN:</span> {deleteRow?.crn || '—'}</p>
+          <Field label="Reason">
+            <textarea className={inputClass} rows={3} value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} placeholder="Why this historical order should be removed" />
+          </Field>
+          {deleteError ? <p className="text-danger">{deleteError}</p> : null}
+          {deleteBlockers.length > 0 ? (
+            <div>
+              <p className="font-semibold">Kept records</p>
+              <ul className="list-disc pl-5">
+                {deleteBlockers.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              <p className="mt-2 text-ink-muted">Remove it from the operations list instead. Payments, wallet entries, invoices, and settlements stay.</p>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
       <Modal
         open={Boolean(statusRow)}
         title={`Update status · ${statusRow?.id || ''}`}

@@ -44,6 +44,29 @@ export async function assignAdminOrder(orderId, riderProfileId) {
   });
 }
 
+export async function deleteAdminOrder(orderId, body) {
+  return apiRequest(`/v1/admin/orders/${orderId}`, { method: 'DELETE', body });
+}
+
+export async function hideAdminOrder(orderId, body) {
+  return apiRequest(`/v1/admin/orders/${orderId}/remove-from-operations`, {
+    method: 'POST',
+    body,
+  });
+}
+
+export async function checkAdminInvoice(orderId) {
+  return apiRequest(`/v1/admin/orders/${orderId}/invoice-check`, { method: 'POST' });
+}
+
+export async function previewWalletCleanup(body) {
+  return apiRequest('/v1/admin/wallet/cleanup/preview', { method: 'POST', body });
+}
+
+export async function applyWalletCleanup(body) {
+  return apiRequest('/v1/admin/wallet/cleanup', { method: 'POST', body });
+}
+
 export async function cancelAdminOrder(orderId) {
   return apiRequest(`/v1/admin/orders/${orderId}/cancel`, { method: 'POST' });
 }

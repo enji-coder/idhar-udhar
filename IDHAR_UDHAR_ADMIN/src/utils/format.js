@@ -26,12 +26,17 @@ export function initials(name = '') {
     .toUpperCase();
 }
 
+export function spreadsheetText(value) {
+  const text = String(value ?? '');
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+}
+
 export function downloadCsv(filename, rows, columns) {
-  const header = columns.map((column) => column.label).join(',');
+  const header = columns.map((column) => spreadsheetText(column.label)).join(',');
   const body = rows
     .map((row) =>
       columns
-        .map((column) => `"${String(row[column.key] ?? '').replaceAll('"', '""')}"`)
+        .map((column) => `"${spreadsheetText(row[column.key]).replaceAll('"', '""')}"`)
         .join(','),
     )
     .join('\n');
@@ -48,9 +53,9 @@ export function printReport(title, rows, columns) {
   const win = window.open('', '_blank');
   if (!win) return;
   const keys = columns?.length ? columns : Object.keys(rows[0] || {}).map((key) => ({ key, label: key }));
-  const head = keys.map((column) => `<th>${column.label}</th>`).join('');
+  const head = keys.map((column) => `<th>${spreadsheetText(column.label)}</th>`).join('');
   const htmlRows = rows
-    .map((row) => `<tr>${keys.map((column) => `<td>${row[column.key] ?? ''}</td>`).join('')}</tr>`)
+    .map((row) => `<tr>${keys.map((column) => `<td>${spreadsheetText(row[column.key] ?? '')}</td>`).join('')}</tr>`)
     .join('');
   win.document.write(`
     <html><head><title>${title}</title>

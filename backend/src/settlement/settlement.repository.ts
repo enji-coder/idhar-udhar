@@ -373,6 +373,19 @@ export class SettlementRepository {
     return formatInr(result.rows[0]?.paid ?? '0');
   }
 
+  async lockOrderStatus(orderId: string, db: Queryable): Promise<string | null> {
+    const result = await db.query<{ canonical_status: string }>(
+      `
+      SELECT canonical_status
+      FROM orders
+      WHERE order_id = $1
+      FOR UPDATE
+      `,
+      [orderId],
+    );
+    return result.rows[0]?.canonical_status ?? null;
+  }
+
   async insertInvoice(
     input: {
       invoiceNumber: string;
@@ -393,11 +406,13 @@ export class SettlementRepository {
         trip_fare, discount, additional_locked_charges, rounding, billed_total,
         customer_paid, receiver_paid, gst_on_fare, payment_status_snapshot
       )
-      VALUES (
-        $1, $2, 'ISSUED', now(),
+      SELECT
+        $1, o.order_id, 'ISSUED', now(),
         $3::numeric(12,2), 0, $4::numeric(12,2), 0, $5::numeric(12,2),
         $6::numeric(12,2), $7::numeric(12,2), 0, $8
-      )
+      FROM orders o
+      WHERE o.order_id = $2
+        AND o.canonical_status = 'DELIVERED'
       ON CONFLICT (order_id) DO NOTHING
       RETURNING invoice_id
       `,

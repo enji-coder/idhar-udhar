@@ -116,6 +116,8 @@ describe('admin mappers', () => {
     });
     assert.equal(payment.amount, 40);
     assert.equal(payment.status, 'Success');
+    assert.equal(payment.crn, '');
+    assert.equal(payment.invoiceNumber, '');
     const earning = mapEarning({
       display_id: '1001',
       order_id: 'o1',

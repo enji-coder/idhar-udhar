@@ -52,7 +52,7 @@ async function tryConnect(label, password) {
         (SELECT count(*)::int FROM schema_migrations
           WHERE version = '0025_states_and_city_state') AS has_0025,
         (SELECT count(*)::int FROM schema_migrations
-          WHERE version = '0026_rider_wallet_topup_withdrawals') AS has_0026,
+          WHERE version = '0026_rider_wallet_topup_withdrawal') AS has_0026,
         (SELECT count(*)::int FROM information_schema.tables
           WHERE table_schema='public' AND table_name='rider_wallet_withdrawals') AS has_withdrawals
     `);

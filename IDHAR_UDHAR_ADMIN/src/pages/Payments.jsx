@@ -19,7 +19,6 @@ import useStore from '../hooks/useStore';
 import { orderStore, paymentStore } from '../services/stores';
 import { fetchAdminPayments } from '../api/adminApi';
 import { downloadCsv, formatINR } from '../utils/format';
-import { formatNumericOrderId, invoiceNumberFor } from '../utils/orderId';
 import { useAuth } from '../context/AuthContext';
 
 const tabs = [
@@ -86,7 +85,7 @@ export default function Payments() {
     const query = (searchQuery || '').toLowerCase();
     return transactions.filter((row) => {
       const matchesTab = tab === 'All' || row.status === tab;
-      return matchesTab && (method === 'All' || row.method === method) && `${row.id} ${row.orderId} ${row.customer}`.toLowerCase().includes(query);
+      return matchesTab && (method === 'All' || row.method === method) && `${row.id} ${row.orderId} ${row.crn || ''} ${row.customer}`.toLowerCase().includes(query);
     });
   }, [tab, method, searchQuery, transactions]);
 
@@ -103,9 +102,10 @@ export default function Payments() {
   }
 
   const columns = [
-    { key: 'orderId', label: 'Order ID', render: (row) => formatNumericOrderId(row.orderId) },
+    { key: 'orderId', label: 'Order ID', render: (row) => row.orderId || 'N/A' },
+    { key: 'crn', label: 'CRN', render: (row) => row.crn || 'N/A' },
     { key: 'id', label: 'Transaction ID', sortable: true, render: (row) => <span className="font-semibold text-brand-600">{row.id}</span> },
-    { key: 'invoiceNumber', label: 'Invoice Number', render: (row) => invoiceNumberFor(row.orderId), hideBelow: 'lg' },
+    { key: 'invoiceNumber', label: 'Invoice Number', render: (row) => row.invoiceNumber || 'N/A', hideBelow: 'lg' },
     { key: 'customer', label: 'Customer', sortable: true },
     { key: 'amount', label: 'Payment Amount', sortable: true, render: (row) => formatINR(row.amount) },
     { key: 'method', label: 'Payment Mode' },
@@ -133,9 +133,9 @@ export default function Payments() {
   return (
     <PageContainer className="space-y-4">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <GlassCard><p className="text-sm text-ink-muted">Collected</p><p className="text-2xl font-bold">{formatINR(collected)}</p></GlassCard>
-        <GlassCard><p className="text-sm text-ink-muted">Refunds</p><p className="text-2xl font-bold">{formatINR(refunded)}</p></GlassCard>
-        <GlassCard><p className="text-sm text-ink-muted">Transactions</p><p className="text-2xl font-bold">{transactions.length}</p></GlassCard>
+        <GlassCard><p className="text-sm text-ink-muted">Collected in this list</p><p className="text-2xl font-bold">{formatINR(collected)}</p></GlassCard>
+        <GlassCard><p className="text-sm text-ink-muted">Refunds in this list</p><p className="text-2xl font-bold">{formatINR(refunded)}</p></GlassCard>
+        <GlassCard><p className="text-sm text-ink-muted">Rows loaded</p><p className="text-2xl font-bold">{transactions.length}</p><p className="text-xs text-ink-muted">Latest 200 payments. Not company revenue and not a complete ledger.</p></GlassCard>
       </div>
       <GlassCard className="flex min-w-0 flex-wrap items-center gap-3 overflow-hidden">
         <Tabs tabs={tabs} value={tab} onChange={setTab} />
@@ -148,8 +148,9 @@ export default function Payments() {
       <Drawer open={Boolean(selected)} size="lg" eyebrow="Transaction" title={selected?.id} onClose={() => setSelected(null)} footer={<Button onClick={() => setSelected(null)}>Close</Button>}>
         {selected ? (
           <DetailSection title="Payment">
-            <DetailRow label="Order" value={formatNumericOrderId(selected.orderId)} />
-            <DetailRow label="Invoice" value={invoiceNumberFor(selected.orderId)} />
+            <DetailRow label="Order" value={selected.orderId || 'N/A'} />
+            <DetailRow label="CRN" value={selected.crn || 'N/A'} />
+            <DetailRow label="Invoice" value={selected.invoiceNumber || 'N/A'} />
             <DetailRow label="Customer" value={selected.customer} />
             <DetailRow label="Amount" value={formatINR(selected.amount)} />
             <DetailRow label="Mode" value={selected.method} />

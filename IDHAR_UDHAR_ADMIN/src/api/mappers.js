@@ -188,7 +188,7 @@ export function mapOrder(row) {
     fareRiderPercentage: row.fare_rider_percentage == null ? null : money(row.fare_rider_percentage),
     fareCompanyPercentage: row.fare_company_commission_percentage == null ? null : money(row.fare_company_commission_percentage),
     payment: '',
-    paymentStatus: financeSnapshot ? 'Paid' : 'Pending',
+    paymentStatus: row.payment_status || 'Pending',
     customerRating: row.customer_rating
       ? {
           stars: row.customer_rating.stars,
@@ -216,6 +216,9 @@ export function mapPayment(row) {
     backendId: row.payment_transaction_id,
     orderId: row.display_id || row.order_id,
     backendOrderId: row.order_id,
+    crn: row.crn || '',
+    invoiceNumber: row.invoice_number || '',
+    invoiceStatus: row.invoice_status || '',
     customer: row.payer_type || '',
     user: row.payer_type,
     method: row.method,

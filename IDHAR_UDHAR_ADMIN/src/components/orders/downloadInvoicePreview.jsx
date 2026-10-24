@@ -183,7 +183,7 @@ async function captureSheet(sheet) {
 }
 
 export async function downloadInvoicePdf(invoice) {
-  if (!invoice) return;
+  if (!invoice || invoice.blocked) return;
   const mounted = await renderPreview(invoice);
   try {
     const canvas = await captureSheet(mounted.sheet);

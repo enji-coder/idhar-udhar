@@ -47,12 +47,18 @@ export default function DataTable({
     next.sort((a, b) => {
       const left = a[sortKey];
       const right = b[sortKey];
+      let cmp = 0;
       if (typeof left === 'number' && typeof right === 'number') {
-        return sortDir === 'asc' ? left - right : right - left;
+        cmp = left - right;
+      } else {
+        cmp = String(left ?? '').localeCompare(String(right ?? ''));
       }
-      return sortDir === 'asc'
-        ? String(left ?? '').localeCompare(String(right ?? ''))
-        : String(right ?? '').localeCompare(String(left ?? ''));
+      if (cmp === 0) {
+        cmp = String(a.id ?? a.orderId ?? a.order_id ?? '').localeCompare(
+          String(b.id ?? b.orderId ?? b.order_id ?? ''),
+        );
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
     });
     return next;
   }, [data, sortKey, sortDir]);

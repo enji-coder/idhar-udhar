@@ -188,6 +188,55 @@ if ($mode -eq "local") {
   }
 }
 
+$files = Get-ChildItem -Path $MigrationsDir -Filter "*.sql" |
+  Where-Object { $_.Name -match '^\d{4}_.+\.sql$' } |
+  Sort-Object Name
+if ($files.Count -eq 0) {
+  throw "No SQL files in $MigrationsDir"
+}
+
+$byPrefix = @{}
+foreach ($file in $files) {
+  $prefix = $file.Name.Substring(0, 4)
+  if (-not $byPrefix.ContainsKey($prefix)) {
+    $byPrefix[$prefix] = New-Object System.Collections.Generic.List[string]
+  }
+  $byPrefix[$prefix].Add($file.Name)
+}
+$duplicatePrefixes = @($byPrefix.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 })
+if ($duplicatePrefixes.Count -gt 0) {
+  $detail = ($duplicatePrefixes | ForEach-Object {
+    "$($_.Key): $(($_.Value | Sort-Object) -join ', ')"
+  }) -join "; "
+  throw "Duplicate migration numeric prefixes. Refusing before any database connection: $detail"
+}
+
+$productionFileChecksums = @{
+  "0026_rider_wallet_topup_withdrawal" = "24e2ce4c19916df8049c578bebb95d5821cf2a5951b4c93147e433ac934756e8"
+  "0027_wallet_idempotency_scopes" = "b635b1f8d34217eb08e930acf88dbb97fc086f2b469b39ff046405ef9f09583e"
+}
+$historicalWithoutBytes = @{
+  "0028_payout_provider_references" = "87731dfe7527925d9c98a92baef24abd9788a849e19d931e8515c896f3a082ba"
+}
+$checksumByVersion = @{}
+foreach ($file in $files) {
+  $version = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+  $checksumByVersion[$version] = (Get-FileHash -Algorithm SHA256 -Path $file.FullName).Hash.ToLowerInvariant()
+}
+foreach ($version in $productionFileChecksums.Keys) {
+  if (-not $checksumByVersion.ContainsKey($version)) {
+    throw "Production-applied migration file is missing: $version"
+  }
+  if ($checksumByVersion[$version] -ne $productionFileChecksums[$version]) {
+    throw "Production-applied migration checksum does not match the file: $version"
+  }
+}
+foreach ($version in $historicalWithoutBytes.Keys) {
+  if ($checksumByVersion.ContainsKey($version) -and $checksumByVersion[$version] -ne $historicalWithoutBytes[$version]) {
+    throw "Unrecovered production migration is present with a different checksum. Refusing to skip or apply: $version"
+  }
+}
+
 Write-Host "Preflight: checking PostgreSQL connectivity..."
 try {
   $preflight = Invoke-Psql -Sql "SELECT 1;" -Quiet -TuplesOnly
@@ -210,26 +259,47 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 "@ | Out-Null
 
-$files = Get-ChildItem -Path $MigrationsDir -Filter "*.sql" |
-  Where-Object { $_.Name -match '^\d{4}_.+\.sql$' } |
-  Sort-Object Name
-if ($files.Count -eq 0) {
-  throw "No SQL files in $MigrationsDir"
+$recordedText = Invoke-Psql -Sql "SELECT version || '|' || lower(checksum) FROM schema_migrations ORDER BY version;" -Quiet -TuplesOnly
+foreach ($line in ($recordedText -split "\r?\n")) {
+  $trimmed = $line.Trim()
+  if ($trimmed -eq "") { continue }
+  $parts = $trimmed.Split("|", 2)
+  if ($parts.Count -ne 2) {
+    throw "Unexpected schema_migrations row"
+  }
+  $recordedVersion = $parts[0].Trim()
+  $storedChecksum = $parts[1].Trim().ToLowerInvariant()
+  if ($checksumByVersion.ContainsKey($recordedVersion)) { continue }
+  $pinned = $null
+  if ($historicalWithoutBytes.ContainsKey($recordedVersion)) {
+    $pinned = $historicalWithoutBytes[$recordedVersion]
+  }
+  if ($pinned -and $storedChecksum -eq $pinned) {
+    Write-Host "SKIP already applied without local file: $recordedVersion.sql"
+    continue
+  }
+  if ($pinned) {
+    throw "Recorded migration checksum does not match the known production checksum. Refusing to skip or apply: $recordedVersion"
+  }
+  throw "Recorded migration has no local file. Refusing to continue: $recordedVersion"
 }
 
 foreach ($file in $files) {
   $version = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
   $checksum = (Get-FileHash -Algorithm SHA256 -Path $file.FullName).Hash.ToLowerInvariant()
-
-  $checkSql = "SELECT 1 FROM schema_migrations WHERE version = " + ("'{0}'" -f $version.Replace("'", "''")) + ";"
+  $safeVersion = $version.Replace("'", "''")
+  $checkSql = "SELECT checksum FROM schema_migrations WHERE version = '$safeVersion';"
   try {
-    $exists = Invoke-Psql -Sql $checkSql -Quiet -TuplesOnly
+    $recorded = (Invoke-Psql -Sql $checkSql -Quiet -TuplesOnly).Trim().ToLowerInvariant()
   }
   catch {
     throw "Failed checking schema_migrations for $version"
   }
 
-  if ($exists.Trim() -eq "1") {
+  if ($recorded -ne "") {
+    if ($recorded -ne $checksum) {
+      throw "Recorded migration checksum does not match the file. Refusing to skip or apply: $version"
+    }
     Write-Host "SKIP already applied: $($file.Name)"
     continue
   }

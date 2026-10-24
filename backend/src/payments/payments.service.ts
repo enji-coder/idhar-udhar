@@ -719,6 +719,9 @@ export class PaymentsService {
       transactions: rows.map((row) => ({
         ...serializeTransaction(row),
         display_id: row.display_id,
+        crn: row.crn,
+        invoice_number: row.invoice_number,
+        invoice_status: row.invoice_status,
         cashfree_order_id: row.cashfree_order_id,
         cf_order_id: row.cf_order_id,
         cf_payment_id: row.cf_payment_id,

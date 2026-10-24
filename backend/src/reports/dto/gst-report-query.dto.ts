@@ -44,6 +44,12 @@ export class GstReportQueryDto {
   display_id?: string;
 
   @IsOptional()
+  @Matches(/^IU-CRN-[A-Z]{2,5}-[0-9]{10}$/, {
+    message: 'crn must be an immutable IU-CRN reference',
+  })
+  crn?: string;
+
+  @IsOptional()
   @IsUUID()
   customer_profile_id?: string;
 

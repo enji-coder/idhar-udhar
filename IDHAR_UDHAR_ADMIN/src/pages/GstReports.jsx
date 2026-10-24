@@ -75,6 +75,7 @@ const emptyFilters = {
   to: '',
   group_by: 'day',
   display_id: '',
+  crn: '',
   city_id: '',
   vehicle_category_id: '',
   order_status: '',
@@ -93,7 +94,7 @@ function percent(value) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 }
 
 export default function GstReports() {
@@ -131,6 +132,7 @@ export default function GstReports() {
       preset: filters.preset,
       group_by: filters.group_by,
       display_id: filters.display_id.trim(),
+      crn: filters.crn.trim(),
       city_id: filters.city_id,
       vehicle_category_id: filters.vehicle_category_id,
       order_status: filters.order_status,
@@ -288,6 +290,7 @@ export default function GstReports() {
   const detailColumns = [
     { key: 'date', label: 'Date', sortable: true },
     { key: 'display_id', label: 'Order ID', sortable: true },
+    { key: 'crn', label: 'CRN', sortable: true },
     { key: 'customer_name', label: 'Customer', render: (row) => row.customer_name || '—' },
     { key: 'rider_phone', label: 'Rider', render: (row) => row.rider_phone || 'Unassigned' },
     { key: 'city_name', label: 'City', hideBelow: 'lg', render: (row) => row.city_name || '—' },
@@ -363,6 +366,12 @@ export default function GstReports() {
             placeholder="Order / Trip ID"
             value={filters.display_id}
             onChange={(event) => updateFilter('display_id', event.target.value)}
+          />
+          <input
+            className={`${inputClass} md:w-64`}
+            placeholder="CRN"
+            value={filters.crn}
+            onChange={(event) => updateFilter('crn', event.target.value)}
           />
           <Select
             aria-label="City"

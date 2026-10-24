@@ -74,6 +74,13 @@ export default function Invoices() {
     });
     panel.setErrors(issues);
     if (Object.keys(issues).length) return;
+    if (panel.mode !== 'edit') {
+      const linked = orders.find((item) => item.id === panel.form.orderId);
+      if (linked && (linked.status === 'Cancelled' || linked.canonicalStatus === 'CANCELLED')) {
+        panel.setToast('Cancelled orders cannot generate an invoice.');
+        return;
+      }
+    }
     const id = panel.form.id || nextId('INV-AMD', rows).replace('INV-AMD-', 'INV-AMD-');
     const invoiceNumber = panel.form.invoiceNumber || id;
     invoiceStore.upsert({

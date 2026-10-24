@@ -124,6 +124,21 @@ export function calculateDistribution(totalAmount, settings = getPaymentSettings
   };
 }
 
+export function isRecognizedDelivery(order) {
+  const status = order?.canonicalStatus || order?.orderStatus || order?.status;
+  return status === 'Delivered' || status === 'DELIVERED';
+}
+
+/** Completed-revenue trip fare. Cancelled and unfrozen API orders contribute 0. */
+export function recognizedTripFare(order) {
+  if (!isRecognizedDelivery(order)) return 0;
+  if (order?.financeSnapshot?.totalAmount != null && order.financeSnapshot.totalAmount !== '') {
+    return round2(order.financeSnapshot.totalAmount);
+  }
+  if (order?.source === 'api') return 0;
+  return tripFareOf(order);
+}
+
 export function tripFareOf(order) {
   return round2(order?.tripFare ?? order?.confirmedTripFare ?? order?.amount ?? 0);
 }
@@ -200,10 +215,10 @@ export function calculateOrderFinance(order, settings = getPaymentSettings()) {
     });
   }
 
-  if (order?.status === 'Cancelled') {
+  if (order?.status === 'Cancelled' || order?.canonicalStatus === 'CANCELLED' || order?.orderStatus === 'Cancelled') {
     return withLegacyAliases({
       ...calculateDistribution(0, settings),
-      totalAmount: payment,
+      totalAmount: 0,
     });
   }
 

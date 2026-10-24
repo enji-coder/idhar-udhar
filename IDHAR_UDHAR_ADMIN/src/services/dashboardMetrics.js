@@ -1,7 +1,7 @@
 import { BUSINESS_PERFORMANCE, resolveBarPerformance, resolveBusinessPerformance } from '../config/performance';
 import { DATA_TODAY, endOfDay, parseAppDate, parseAppDateTime, startOfDay } from '../utils/dates';
 import { formatINR } from '../utils/format';
-import { calculateOrderFinance, sumOrderFinance } from './commission';
+import { recognizedTripFare, sumOrderFinance } from './commission';
 
 export const REVENUE_PERIODS = [
   { value: 'today', label: 'Today' },
@@ -48,10 +48,6 @@ function inBounds(date, from, to) {
   return date >= from && date <= to;
 }
 
-function isRevenueOrder(order) {
-  return order?.status !== 'Cancelled' && order?.status !== 'Failed';
-}
-
 function isCancellation(order) {
   return order?.status === 'Cancelled' || order?.status === 'Failed';
 }
@@ -65,13 +61,12 @@ function parseEtaMinutes(order) {
   return match ? Number(match[1]) : null;
 }
 
-function revenueOf(order, settings) {
-  if (!isRevenueOrder(order)) return 0;
-  return calculateOrderFinance(order, settings).totalAmount;
+function revenueOf(order) {
+  return recognizedTripFare(order);
 }
 
-function sumRevenue(orders, settings) {
-  return orders.reduce((total, order) => total + revenueOf(order, settings), 0);
+function sumRevenue(orders) {
+  return orders.reduce((total, order) => total + revenueOf(order), 0);
 }
 
 function percentChange(current, previous) {
@@ -182,7 +177,7 @@ function buildChart(period, orders, settings, now) {
 
 function sparkFrom(values) {
   const series = values.map((value) => Number(value) || 0);
-  if (series.every((value) => value === 0)) return [8, 10, 9, 12, 11, 13, 12];
+  if (series.every((value) => value === 0)) return series.length ? series : [0];
   return series.slice(-7);
 }
 
@@ -208,7 +203,7 @@ export function buildDashboardMetrics(orders = [], riders = [], customers = [], 
   const cancelPercent = rows.length ? Number(((cancellations.length / rows.length) * 100).toFixed(1)) : 0;
   const todayRevenue = sumRevenue(todayOrders, settings);
   const yesterdayRevenue = sumRevenue(yesterdayOrders, settings);
-  const todayFinance = sumOrderFinance(todayOrders.filter(isRevenueOrder), settings);
+  const todayFinance = sumOrderFinance(todayOrders.filter(isCompleted), settings);
 
   const periods = {};
   REVENUE_PERIODS.forEach(({ value }) => {
@@ -235,7 +230,7 @@ export function buildDashboardMetrics(orders = [], riders = [], customers = [], 
       change,
       chart,
       performance,
-      finance: sumOrderFinance(currentRows.filter(isRevenueOrder), settings),
+      finance: sumOrderFinance(currentRows.filter(isCompleted), settings),
       trendLabel: change >= 0 ? `Positive trend vs previous period (+${Math.abs(change)}%)` : `Down vs previous period (${change}%)`,
     };
   });
@@ -282,7 +277,7 @@ export function buildDashboardMetrics(orders = [], riders = [], customers = [], 
         title: 'Revenue',
         value: formatINR(todayRevenue),
         trend: percentChange(todayRevenue, yesterdayRevenue),
-        note: 'Collected today',
+        note: 'Delivered trip fare',
         spark: sparkFrom(periods.weekly.chart.map((item) => item.value)),
       },
     ],

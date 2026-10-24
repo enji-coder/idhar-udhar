@@ -27,14 +27,14 @@ import {
 import { formatCompactINR, formatINR, formatINRExact, printReport } from '../utils/format';
 import { useAuth } from '../context/AuthContext';
 import { filterByDate, joinOrders, searchRows } from '../services/reportJoin';
-import { formatAppDate, formatAppTime, parseAppDate, rangeForPreset, sortByDateTime } from '../utils/dates';
+import { dataToday, formatAppDate, formatAppTime, parseAppDate, rangeForPreset, sortByDateTime, toISODate } from '../utils/dates';
 import usePaymentSettings from '../hooks/usePaymentSettings';
 import { exportCsv, exportXlsx } from '../services/exportEngine';
 import { classifyCustomer, categoryLabel, CUSTOMER_CATEGORIES } from '../services/customerClassification';
 import { buildDocumentAlerts } from '../services/documentExpiry';
 import { enrichRiderProfile, enrichVehicleRecord } from '../services/profileEnrichment';
 import { recordAudit } from '../services/auditService';
-import { calculateOrderFinance, sumOrderFinance } from '../services/commission';
+import { calculateOrderFinance, isRecognizedDelivery, recognizedTripFare, sumOrderFinance } from '../services/commission';
 import {
   DELIVERY_REPORT_STATUSES,
   PAYMENT_MODES,
@@ -43,9 +43,7 @@ import {
 
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-function orderTripFare(order) {
-  return Number(order?.financeSnapshot?.totalAmount ?? order?.tripFare ?? order?.amount ?? 0);
-}
+const crnColumn = { key: 'crn', label: 'CRN', sortable: true };
 
 function ordersInYear(orders, yearNum) {
   return orders.filter((order) => {
@@ -95,13 +93,16 @@ export default function Reports() {
   const invoices = useStore(invoiceStore);
   const payouts = useStore(payoutStore);
   const audits = useStore(auditStore);
+  const today = dataToday();
+  const todayIso = toISODate(today);
+  const yearOptions = [0, 1, 2].map((back) => String(today.getFullYear() - back));
   const [type, setType] = useState('revenue');
   const [preset, setPreset] = useState('year');
-  const [year, setYear] = useState('2026');
-  const [month, setMonth] = useState('August');
-  const [from, setFrom] = useState('2026-01-01');
-  const [to, setTo] = useState('2026-08-14');
-  const [applied, setApplied] = useState({ from: '2026-01-01', to: '2026-08-17' });
+  const [year, setYear] = useState(String(today.getFullYear()));
+  const [month, setMonth] = useState(months[today.getMonth()]);
+  const [from, setFrom] = useState(`${today.getFullYear()}-01-01`);
+  const [to, setTo] = useState(todayIso);
+  const [applied, setApplied] = useState({ from: `${today.getFullYear()}-01-01`, to: todayIso });
   const [view, setView] = useState(null);
   const [chartMode, setChartMode] = useState('monthly');
   const [search, setSearch] = useState('');
@@ -110,8 +111,8 @@ export default function Reports() {
   const [customerCategory, setCustomerCategory] = useState('All');
   const [deliveryStatus, setDeliveryStatus] = useState('All');
   const pay = usePaymentSettings();
-  const [dailyFrom, setDailyFrom] = useState('2026-08-01');
-  const [dailyTo, setDailyTo] = useState('2026-08-17');
+  const [dailyFrom, setDailyFrom] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`);
+  const [dailyTo, setDailyTo] = useState(todayIso);
   const [dailyApplied, setDailyApplied] = useState(null);
 
   const range = useMemo(() => {
@@ -121,7 +122,7 @@ export default function Reports() {
 
   const joined = useMemo(
     () => joinOrders({ orders, riders, customers, payments, vehicles, invoices, payouts }),
-    [orders, riders, customers, payments, vehicles, invoices, payouts, pay],
+    [orders, riders, customers, payments, vehicles, invoices, payouts],
   );
 
   const dated = useMemo(() => filterByDate(joined, range.from, range.to, 'orderDate'), [joined, range]);
@@ -133,7 +134,7 @@ export default function Reports() {
       const labels = years.length ? years.sort() : [yearNum];
       return labels.map((label) => ({
         label: String(label),
-        value: ordersInYear(orders, label).reduce((sum, order) => sum + orderTripFare(order), 0),
+        value: ordersInYear(orders, label).reduce((sum, order) => sum + recognizedTripFare(order), 0),
       }));
     }
     return months.map((label, index) => ({
@@ -141,7 +142,7 @@ export default function Reports() {
       value: orders.filter((order) => {
         const stamp = parseAppDate(order.date);
         return stamp && stamp.getFullYear() === yearNum && stamp.getMonth() === index;
-      }).reduce((sum, order) => sum + orderTripFare(order), 0),
+      }).reduce((sum, order) => sum + recognizedTripFare(order), 0),
     }));
   }, [year, chartMode, orders]);
 
@@ -151,7 +152,7 @@ export default function Reports() {
         const related = orders.filter((order) => order.riderId === row.id || order.rider === row.name);
         return {
           ...row,
-          earnings: related.reduce((sum, order) => sum + calculateOrderFinance(order).riderAmount, 0),
+          earnings: related.filter(isRecognizedDelivery).reduce((sum, order) => sum + calculateOrderFinance(order).riderAmount, 0),
         };
       });
       return {
@@ -161,11 +162,12 @@ export default function Reports() {
           { key: 'monthDeliveries', label: 'Deliveries', sortable: true },
           { key: 'onTime', label: 'On-time %', sortable: true },
           { key: 'rating', label: 'Rating', sortable: true },
-          { key: 'earnings', label: `Rider Payout — ${pay.riderSharePercent}%`, sortable: true, render: (row) => formatINRExact(row.earnings) },
+          { key: 'earnings', label: 'Rider payout (delivered)', sortable: true, render: (row) => formatINRExact(row.earnings) },
         ],
         rows,
         searchKeys: ['id', 'name'],
         dateField: null,
+        scopeNote: 'The period filter does not apply to rider performance. Payout is the delivered snapshot rider amount for riders currently loaded.',
       };
     }
     if (type === 'customers') {
@@ -215,13 +217,14 @@ export default function Reports() {
       return {
         columns: [
           { key: 'orderId', label: 'Order ID', sortable: true },
+          crnColumn,
           { key: 'transactionId', label: 'Transaction ID' },
           { key: 'invoiceNumber', label: 'Invoice Number' },
           { key: 'customerName', label: 'Customer', sortable: true },
           { key: 'paymentAmount', label: 'Payment Amount', sortable: true, render: (row) => money(row, 'paymentAmount') },
-          { key: 'riderCommission', label: `Rider Payout — ${pay.riderSharePercent}%`, render: (row) => money(row, 'riderCommission') },
-          { key: 'companyCommission', label: `Company Commission — ${pay.companyCommissionPercent}%`, hideBelow: 'lg', render: (row) => money(row, 'companyCommission') },
-          { key: 'operationalExpense', label: `Operational Cost — ${pay.operationalCostPercent}% of Commission`, hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
+          { key: 'riderCommission', label: 'Rider payout', render: (row) => money(row, 'riderCommission') },
+          { key: 'companyCommission', label: 'Company commission', hideBelow: 'lg', render: (row) => money(row, 'companyCommission') },
+          { key: 'operationalExpense', label: 'Operational cost', hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
           { key: 'netCompanyEarnings', label: 'Actual Profit', hideBelow: 'lg', render: (row) => money(row, 'netCompanyEarnings') },
           { key: 'paymentMode', label: 'Payment Mode' },
           { key: 'paymentStatus', label: 'Payment Status', render: (row) => <StatusBadge status={row.paymentStatus} /> },
@@ -230,18 +233,19 @@ export default function Reports() {
           { key: 'paymentDate', label: 'Payment Date' },
         ],
         rows: dated,
-        searchKeys: ['orderId', 'transactionId', 'invoiceNumber', 'customerName', 'paymentMode'],
+        searchKeys: ['orderId', 'crn', 'transactionId', 'invoiceNumber', 'customerName', 'paymentMode'],
         dateField: 'paymentDate',
         scroll: true,
       };
     }
     if (type === 'revenue') {
       if (revenueTab === 'mode') {
-        const rows = dated.filter((row) => paymentMode === 'All' || row.paymentMode === paymentMode);
+        const rows = dated.filter((row) => isRecognizedDelivery(row) && (paymentMode === 'All' || row.paymentMode === paymentMode));
         return {
           columns: [
             { key: 'customerName', label: 'Customer', sortable: true },
             { key: 'orderId', label: 'Order ID', sortable: true },
+            crnColumn,
             { key: 'invoiceNumber', label: 'Invoice Number' },
             { key: 'paymentMode', label: 'Payment Mode' },
             { key: 'paymentAmount', label: 'Amount', sortable: true, render: (row) => money(row, 'paymentAmount') },
@@ -249,7 +253,7 @@ export default function Reports() {
             { key: 'orderDate', label: 'Order Date' },
           ],
           rows,
-          searchKeys: ['customerName', 'orderId', 'invoiceNumber', 'paymentMode'],
+          searchKeys: ['customerName', 'orderId', 'crn', 'invoiceNumber', 'paymentMode'],
           dateField: 'orderDate',
           scroll: true,
         };
@@ -257,20 +261,21 @@ export default function Reports() {
       return {
         columns: [
           { key: 'orderId', label: 'Order ID', sortable: true },
+          crnColumn,
           { key: 'invoiceNumber', label: 'Invoice Number' },
           { key: 'customerName', label: 'Customer Name' },
           { key: 'riderName', label: 'Rider Name' },
           { key: 'customerPayment', label: 'Total Ride Amount', sortable: true, render: (row) => money(row, 'customerPayment') },
-          { key: 'riderCommission', label: `Rider Payout — ${pay.riderSharePercent}%`, render: (row) => money(row, 'riderCommission') },
-          { key: 'companyCommission', label: `Company Commission — ${pay.companyCommissionPercent}%`, render: (row) => money(row, 'companyCommission') },
-          { key: 'operationalExpense', label: `Operational Cost — ${pay.operationalCostPercent}% of Commission`, hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
+          { key: 'riderCommission', label: 'Rider payout', render: (row) => money(row, 'riderCommission') },
+          { key: 'companyCommission', label: 'Company commission', render: (row) => money(row, 'companyCommission') },
+          { key: 'operationalExpense', label: 'Operational cost', hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
           { key: 'netCompanyEarnings', label: 'Actual Profit', render: (row) => money(row, 'netCompanyEarnings') },
           { key: 'paymentMode', label: 'Payment Mode' },
           { key: 'paymentStatus', label: 'Payment Status', render: (row) => <StatusBadge status={row.paymentStatus} /> },
           { key: 'revenueDate', label: 'Order Date' },
         ],
-        rows: dated,
-        searchKeys: ['orderId', 'invoiceNumber', 'customerName', 'riderName', 'paymentMode'],
+        rows: dated.filter((row) => isRecognizedDelivery(row)),
+        searchKeys: ['orderId', 'crn', 'invoiceNumber', 'customerName', 'riderName', 'paymentMode'],
         dateField: 'revenueDate',
         scroll: true,
       };
@@ -279,6 +284,7 @@ export default function Reports() {
       return {
         columns: [
           { key: 'orderId', label: 'Order ID', sortable: true },
+          crnColumn,
           { key: 'customerName', label: 'Customer Name' },
           { key: 'riderName', label: 'Rider Name' },
           { key: 'invoiceNumber', label: 'Invoice Number' },
@@ -289,7 +295,7 @@ export default function Reports() {
           { key: 'cancelledBy', label: 'Cancelled By', render: (row) => <StatusBadge status={row.cancelledBy} /> },
         ],
         rows: dated.filter((row) => row.orderStatus === 'Cancelled'),
-        searchKeys: ['orderId', 'customerName', 'riderName', 'invoiceNumber', 'cancellationReason', 'cancelledBy'],
+        searchKeys: ['orderId', 'crn', 'customerName', 'riderName', 'invoiceNumber', 'cancellationReason', 'cancelledBy'],
         dateField: 'cancellationDate',
         scroll: true,
       };
@@ -299,6 +305,7 @@ export default function Reports() {
       return {
         columns: [
           { key: 'orderId', label: 'Order ID', sortable: true },
+          crnColumn,
           { key: 'customerName', label: 'Customer' },
           { key: 'riderName', label: 'Rider' },
           { key: 'pickupLocation', label: 'Pickup' },
@@ -308,7 +315,7 @@ export default function Reports() {
           { key: 'orderDate', label: 'Date' },
         ],
         rows,
-        searchKeys: ['orderId', 'customerName', 'riderName', 'deliveryStatus'],
+        searchKeys: ['orderId', 'crn', 'customerName', 'riderName', 'deliveryStatus'],
         dateField: 'orderDate',
         scroll: true,
       };
@@ -317,6 +324,7 @@ export default function Reports() {
       return {
         columns: [
           { key: 'orderId', label: 'Order ID', sortable: true },
+          crnColumn,
           { key: 'customerOnboardingDate', label: 'Customer Onboarding Date', hideBelow: 'lg' },
           { key: 'customerName', label: 'Customer Name' },
           { key: 'customerPhone', label: 'Mobile Number' },
@@ -349,9 +357,9 @@ export default function Reports() {
           { key: 'paymentMode', label: 'Payment Mode' },
           { key: 'paymentStatus', label: 'Payment Status', render: (row) => <StatusBadge status={row.paymentStatus} /> },
           { key: 'paymentDate', label: 'Payment Date', hideBelow: 'lg' },
-          { key: 'riderEarning', label: `Rider Payout — ${pay.riderSharePercent}%`, render: (row) => money(row, 'riderEarning') },
-          { key: 'companyCommission', label: `Company Commission — ${pay.companyCommissionPercent}%`, hideBelow: 'lg', render: (row) => money(row, 'companyCommission') },
-          { key: 'operationalExpense', label: `Operational Cost — ${pay.operationalCostPercent}% of Commission`, hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
+          { key: 'riderEarning', label: 'Rider payout', render: (row) => money(row, 'riderEarning') },
+          { key: 'companyCommission', label: 'Company commission', hideBelow: 'lg', render: (row) => money(row, 'companyCommission') },
+          { key: 'operationalExpense', label: 'Operational cost', hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
           { key: 'netCompanyEarnings', label: 'Actual Profit', hideBelow: 'lg', render: (row) => money(row, 'netCompanyEarnings') },
           { key: 'customerRatingByRider', label: 'Customer Rating by Rider', hideBelow: 'lg' },
           { key: 'riderRatingByCustomer', label: 'Rider Rating by Customer', hideBelow: 'lg' },
@@ -360,7 +368,7 @@ export default function Reports() {
           { key: 'cancelledBy', label: 'Order Cancelled By', hideBelow: 'lg' },
         ],
         rows: dated,
-        searchKeys: ['orderId', 'customerName', 'riderName', 'invoiceNumber', 'rcNumber'],
+        searchKeys: ['orderId', 'crn', 'customerName', 'riderName', 'invoiceNumber', 'rcNumber'],
         dateField: 'orderDate',
         scroll: true,
         exportMask: true,
@@ -407,6 +415,7 @@ export default function Reports() {
     return {
       columns: [
         { key: 'orderId', label: 'Order ID', sortable: true },
+        crnColumn,
         { key: 'orderDate', label: 'Order Date' },
         { key: 'invoiceNumber', label: 'Invoice Number' },
         { key: 'customerName', label: 'Customer Name' },
@@ -417,19 +426,19 @@ export default function Reports() {
         { key: 'dropLocation', label: 'Drop Location' },
         { key: 'orderStatus', label: 'Order Status', render: (row) => <StatusBadge status={row.orderStatus} /> },
         { key: 'paymentAmount', label: 'Total Ride Amount', render: (row) => money(row, 'paymentAmount') },
-        { key: 'riderCommission', label: `Rider Payout — ${pay.riderSharePercent}%`, hideBelow: 'lg', render: (row) => money(row, 'riderCommission') },
-        { key: 'companyCommission', label: `Company Commission — ${pay.companyCommissionPercent}%`, hideBelow: 'lg', render: (row) => money(row, 'companyCommission') },
-        { key: 'operationalExpense', label: `Operational Cost — ${pay.operationalCostPercent}% of Commission`, hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
+        { key: 'riderCommission', label: 'Rider payout', hideBelow: 'lg', render: (row) => money(row, 'riderCommission') },
+        { key: 'companyCommission', label: 'Company commission', hideBelow: 'lg', render: (row) => money(row, 'companyCommission') },
+        { key: 'operationalExpense', label: 'Operational cost', hideBelow: 'lg', render: (row) => money(row, 'operationalExpense') },
         { key: 'netCompanyEarnings', label: 'Actual Profit', hideBelow: 'lg', render: (row) => money(row, 'netCompanyEarnings') },
         { key: 'paymentMode', label: 'Payment Mode' },
         { key: 'paymentStatus', label: 'Payment Status', render: (row) => <StatusBadge status={row.paymentStatus} /> },
       ],
       rows: dated,
-      searchKeys: ['orderId', 'invoiceNumber', 'customerName', 'riderName', 'pickupLocation', 'dropLocation'],
+      searchKeys: ['orderId', 'crn', 'invoiceNumber', 'customerName', 'riderName', 'pickupLocation', 'dropLocation'],
       dateField: 'orderDate',
       scroll: true,
     };
-  }, [type, orders, riders, customers, vehicles, dated, revenueTab, paymentMode, customerCategory, deliveryStatus, audits, pay]);
+  }, [type, orders, riders, customers, vehicles, dated, revenueTab, paymentMode, customerCategory, deliveryStatus, audits]);
 
   const visibleRows = useMemo(
     () => searchRows(table.rows, search, table.searchKeys || ['id', 'name']),
@@ -450,7 +459,7 @@ export default function Reports() {
       const key = parsed ? formatAppDate(parsed) : (row.orderDate || 'N/A');
       if (!groups[key]) groups[key] = { date: key, sortDate: parsed?.getTime() || 0, totalOrders: 0, completed: 0, pending: 0, cancelled: 0, totalValue: 0 };
       groups[key].totalOrders += 1;
-      groups[key].totalValue += Number(row.paymentAmount || 0);
+      if (row.orderStatus === 'Delivered') groups[key].totalValue += Number(row.totalAmount || 0);
       if (row.orderStatus === 'Delivered') groups[key].completed += 1;
       else if (row.orderStatus === 'Cancelled') groups[key].cancelled += 1;
       else groups[key].pending += 1;
@@ -469,13 +478,13 @@ export default function Reports() {
   }, [view, type, orders]);
 
   const financeTotals = useMemo(
-    () => sumOrderFinance(visibleRows, pay),
+    () => sumOrderFinance(visibleRows.filter((row) => isRecognizedDelivery(row)), pay),
     [visibleRows, pay],
   );
 
   const title = reportTypes.find((item) => item.value === type)?.label;
-  const currentYearRevenue = ordersInYear(orders, Number(year)).reduce((sum, order) => sum + orderTripFare(order), 0);
-  const previousYearRevenue = ordersInYear(orders, Number(year) - 1).reduce((sum, order) => sum + orderTripFare(order), 0);
+  const currentYearRevenue = ordersInYear(orders, Number(year)).reduce((sum, order) => sum + recognizedTripFare(order), 0);
+  const previousYearRevenue = ordersInYear(orders, Number(year) - 1).reduce((sum, order) => sum + recognizedTripFare(order), 0);
   const currentYearOrders = ordersInYear(orders, Number(year)).length;
   const previousYearOrders = ordersInYear(orders, Number(year) - 1).length;
   const revenueGrowth = previousYearRevenue
@@ -499,7 +508,7 @@ export default function Reports() {
       <GlassCard className="flex flex-col gap-3 overflow-hidden lg:flex-row lg:flex-wrap lg:items-end">
         <label className="min-w-0 flex-1 text-sm lg:max-w-[220px]">Report<Select className="mt-1 block w-full" value={type} onChange={setType} options={reportTypes} /></label>
         <label className="min-w-0 flex-1 text-sm lg:max-w-[220px]">Period<Select className="mt-1 block w-full" value={preset} onChange={setPreset} options={presets} /></label>
-        <label className="min-w-0 flex-1 text-sm lg:max-w-[160px]">Year<Select className="mt-1 block w-full" value={year} onChange={setYear} options={['2024', '2025', '2026']} /></label>
+        <label className="min-w-0 flex-1 text-sm lg:max-w-[160px]">Year<Select className="mt-1 block w-full" value={year} onChange={setYear} options={yearOptions} /></label>
         <label className="min-w-0 flex-1 text-sm lg:max-w-[180px]">Month<Select className="mt-1 block w-full" value={month} onChange={setMonth} options={months} /></label>
         {preset === 'custom' ? (
           <>
@@ -516,6 +525,11 @@ export default function Reports() {
             <Button variant="secondary" onClick={() => printReport(`${title} ${year}`, visibleRows, exportCols)}>Print</Button>
           </div>
         ) : null}
+      </GlassCard>
+
+      <GlassCard className="text-sm text-ink-muted">
+        These tabs use the orders, riders, customers, and payments currently loaded in this admin session. The order list is capped at 100 rows, so these figures are not a database-wide financial statement. Delivered trip-fare revenue is the finance-snapshot trip fare for delivered orders only. GST Reports is the server-side delivered-revenue statement. Rider performance does not use the period filter. No separate server report exists here for refunds, reversals, settlements, waiting charges, ratings, or COD collection.
+        {table.scopeNote ? ` ${table.scopeNote}` : ''}
       </GlassCard>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -535,8 +549,8 @@ export default function Reports() {
 
       <div className="grid gap-3 md:grid-cols-4">
         {[
-          ['Customer growth', `0 → ${customers.length}`],
-          ['Rider growth', `0 → ${riders.length}`],
+          ['Customers loaded', String(customers.length)],
+          ['Riders loaded', String(riders.length)],
           ['On-time', 'N/A'],
           ['Selected month', `${month} ${year}`],
         ].map(([label, value]) => (
@@ -576,7 +590,14 @@ export default function Reports() {
             <label className="min-w-0 text-sm">From Date<input type="date" value={dailyFrom} onChange={(event) => setDailyFrom(event.target.value)} className="mt-1 block h-11 w-full rounded-2xl border border-line px-3" /></label>
             <label className="min-w-0 text-sm">To Date<input type="date" value={dailyTo} onChange={(event) => setDailyTo(event.target.value)} className="mt-1 block h-11 w-full rounded-2xl border border-line px-3" /></label>
             <Button variant="secondary" onClick={() => setDailyApplied({ from: dailyFrom, to: dailyTo })}>Apply Filter</Button>
-            <Button variant="ghost" onClick={() => { setDailyFrom('2026-08-01'); setDailyTo('2026-08-17'); setDailyApplied(null); }}>Reset</Button>
+            <Button variant="ghost" onClick={() => {
+              const today = dataToday();
+              const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+              const end = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+              setDailyFrom(start);
+              setDailyTo(end);
+              setDailyApplied(null);
+            }}>Reset</Button>
           </div>
           <BarChart data={dailyChart} />
           <div className="mt-4">

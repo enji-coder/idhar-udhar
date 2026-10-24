@@ -1,4 +1,12 @@
--- Payout provider references and single-refund audit for rider withdrawals.
+-- Idempotent payout columns and indexes for rider_wallet_withdrawals.
+-- Production already applied 0028_payout_provider_references
+-- (checksum 87731dfe7527925d9c98a92baef24abd9788a849e19d931e8515c896f3a082ba).
+-- Those exact bytes are not in this repository, so that version is not reapplied
+-- and this file must not be renamed to 0028.
+-- The unrecorded 0026_rider_wallet_topup_withdrawals.sql CREATE TABLE included
+-- provider_transfer_id. The applied 0026 file does not. Statements below use
+-- IF NOT EXISTS / DROP CONSTRAINT IF EXISTS so they are safe when production
+-- 0028 already created the same objects.
 
 ALTER TABLE rider_wallet_withdrawals
   ADD COLUMN IF NOT EXISTS merchant_transfer_id TEXT NULL,

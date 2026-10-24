@@ -21,12 +21,18 @@ Does not change migration SQL files.
 
     powershell -File records_database/migrate.ps1
 
-Idempotent: already-applied versions in `schema_migrations` are skipped.
+Idempotent: already-applied versions in `schema_migrations` are skipped only
+when the recorded checksum matches the file bytes. A mismatch stops the run
+before that file is skipped or applied.
 
-The Node migrator (`backend/scripts/migrate.mjs`) refuses duplicate numeric
-prefixes (two `0026_*.sql` files, etc.) before connecting. Resolve duplicates
-only after verifying production `schema_migrations`. Do not rename applied
-files blindly.
+Both `backend/scripts/migrate.mjs` and `records_database/migrate.ps1` refuse
+duplicate numeric prefixes before connecting. Applied `0026` and `0027` files
+must match the production checksums. `0028_payout_provider_references` was
+applied in production, but its exact bytes are not in this repository. Do not
+put a guessed file under that name. `0033_rider_withdrawal_payout_columns.sql`
+re-asserts the known payout columns idempotently and does not reuse version
+`0028`. A recorded version with no local file stops the run unless it is that
+unrecovered `0028` checksum.
 
 `MIGRATE_DRY_RUN=1` lists missing versions only and does not create
 `schema_migrations`. It still opens a DB connection — never point it at

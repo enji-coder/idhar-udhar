@@ -3,8 +3,10 @@ import { calculateOrderFinance } from './commission';
 import { classifyCustomer, categoryLabel } from './customerClassification';
 import { enrichCustomerProfile, enrichRiderProfile, enrichVehicleRecord } from './profileEnrichment';
 import { formatAppDate, formatAppTime, formatTimestamp, inDateRange, parseAppDate } from '../utils/dates';
-import { formatNumericOrderId, invoiceNumberFor, withStableOrderId } from '../utils/orderId';
+import { formatNumericOrderId, withStableOrderId } from '../utils/orderId';
 import { maskAadhaar } from '../utils/masking';
+
+import { reportCrn, reportInvoiceNumber, reportTransactionId } from './reportIdentifiers';
 
 function indexBy(rows, keys) {
   const map = {};
@@ -100,7 +102,8 @@ export function joinOrder(order, maps, allOrders = []) {
     ...base,
     orderId: formatNumericOrderId(base.orderId),
     orderCode: base.id,
-    invoiceNumber: invoice?.invoiceNumber || invoiceNumberFor(base),
+    crn: reportCrn(base),
+    invoiceNumber: reportInvoiceNumber(invoice),
     customerName: displayValue(customer.name || base.customer),
     customerPhone: displayValue(customer.phone || base.customerPhone),
     customerEmail: displayValue(customer.email || base.customerEmail),
@@ -142,19 +145,19 @@ export function joinOrder(order, maps, allOrders = []) {
     paymentStatus: paymentStatusOf(base, payment),
     paymentGatewayStatus: gatewayStatusOf(base, payment),
     cashCollection: normalizePaymentMode(payment?.method || base.payment) === 'Cash' ? finance.customerPayment : 0,
-    paymentDate: displayValue(payment?.date || base.date),
-    transactionId: displayValue(payment?.id, `TXN-${formatNumericOrderId(base.orderId)}`),
+    paymentDate: payment?.date ? displayValue(payment.date) : NA,
+    transactionId: reportTransactionId(payment),
     ...finance,
     revenueDate: displayValue(base.date),
     orderDate: displayValue(base.date),
     orderTime: displayValue(base.time),
-    cancellationDate: cancelled ? formatAppDate(parseAppDate(base.cancelledAt || base.date)) : NA,
-    cancellationTime: cancelled ? formatAppTime(base.cancelledAt || base.time) : NA,
-    cancellationTimestamp: cancelled ? formatTimestamp(base.cancelledAt || base.date, base.cancelledAt || base.time) : NA,
+    cancellationDate: cancelled && base.cancelledAt ? formatAppDate(parseAppDate(base.cancelledAt)) : NA,
+    cancellationTime: cancelled && base.cancelledAt ? formatAppTime(base.cancelledAt) : NA,
+    cancellationTimestamp: cancelled && base.cancelledAt ? formatTimestamp(base.cancelledAt, base.cancelledAt) : NA,
     cancellationReason: cancelled ? displayValue(base.cancelReason, NOT_AVAILABLE) : NA,
     cancelledBy: cancelled ? cancelledByOf(base) : NA,
-    customerRatingByRider: base.customerRating ?? (base.status === 'Delivered' ? 5 : NA),
-    riderRatingByCustomer: base.riderRating ?? (base.status === 'Delivered' ? rider?.rating || NA : NA),
+    customerRatingByRider: base.customerRating?.stars ?? base.customerRating ?? NA,
+    riderRatingByCustomer: base.riderRating ?? NA,
   };
 }
 

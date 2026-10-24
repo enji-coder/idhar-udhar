@@ -62,6 +62,7 @@ function harness(debit: string, row = waiting('5.00')) {
     }),
     bookingCustomerPaid: jest.fn(async () => '135.00'),
     bookingReceiverPaid: jest.fn(async () => '0.00'),
+    lockOrderStatus: jest.fn(async () => 'DELIVERED'),
     insertInvoice: jest.fn(async (input: Record<string, string>) => {
       invoices.push(input);
     }),
@@ -121,6 +122,15 @@ describe('SettlementService', () => {
     await service.settleDelivered(order(), db());
     expect(repo.debitWalletUpTo).not.toHaveBeenCalled();
     expect(repo.insertInvoice).not.toHaveBeenCalled();
+  });
+
+  it('does not create an invoice when the locked order is cancelled', async () => {
+    const { service, repo } = harness('5.00');
+    repo.lockOrderStatus.mockResolvedValue('CANCELLED');
+    await service.settleDelivered(order(), db());
+    expect(repo.insertInvoice).not.toHaveBeenCalled();
+    expect(repo.insertReceivable).not.toHaveBeenCalled();
+    expect(repo.markSettled).not.toHaveBeenCalled();
   });
 
   it('does not debit a voided assessment', async () => {

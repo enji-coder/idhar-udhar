@@ -9,6 +9,7 @@ import { ResolvedRange } from './date-range';
 export type GstReportFilters = {
   order_id?: string;
   display_id?: string;
+  crn?: string;
   customer_profile_id?: string;
   rider_profile_id?: string;
   city_id?: string;
@@ -47,6 +48,7 @@ export type GstDetailRow = {
   frozen_at: Date;
   order_id: string;
   display_id: string;
+  crn: string;
   finance_snapshot_id: string;
   customer_profile_id: string;
   customer_name: string | null;
@@ -122,6 +124,9 @@ export class GstReportRepository {
     if (filters.display_id) {
       add('o.display_id ILIKE $?', `%${filters.display_id}%`);
     }
+    if (filters.crn) {
+      add('o.crn = $?', filters.crn);
+    }
     if (filters.customer_profile_id) {
       add('o.customer_profile_id = $?', filters.customer_profile_id);
     }
@@ -163,6 +168,7 @@ export class GstReportRepository {
           s.company_commission_amount,
           s.operational_cost_amount,
           o.display_id,
+          o.crn,
           o.canonical_status,
           o.city_id,
           o.vehicle_category_id,
@@ -172,6 +178,7 @@ export class GstReportRepository {
         FROM order_finance_snapshots s
         JOIN orders o ON o.order_id = s.order_id
         WHERE s.snapshot_kind = 'ORIGINAL'
+          AND o.canonical_status = 'DELIVERED'
           AND s.frozen_at >= $1::timestamptz
           AND s.frozen_at < $2::timestamptz
           ${conditions.length ? `AND ${conditions.join('\n          AND ')}` : ''}
@@ -355,6 +362,7 @@ export class GstReportRepository {
         frozen_at,
         order_id,
         display_id,
+        crn,
         finance_snapshot_id,
         customer_profile_id,
         customer_name,

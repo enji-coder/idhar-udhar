@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { FareModule } from '../fare/fare.module';
 import { LocationModule } from '../location/location.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -11,12 +12,14 @@ import { CatalogRepository } from './catalog.repository';
 import { IdempotencyRepository } from './idempotency.repository';
 import { OrderStateMachine } from './order-state-machine';
 import { OrdersController, OrderStatusController } from './orders.controller';
+import { OrderAdminDeletionService } from './order-admin-deletion.service';
 import { OrdersRepository } from './orders.repository';
 import { OrdersService } from './orders.service';
 import { RiderOrdersController } from './rider-orders.controller';
 
 @Module({
   imports: [
+    AuditModule,
     FareModule,
     LocationModule,
     NotificationsModule,
@@ -34,6 +37,7 @@ import { RiderOrdersController } from './rider-orders.controller';
   ],
   providers: [
     OrdersService,
+    OrderAdminDeletionService,
     OrdersRepository,
     CatalogRepository,
     IdempotencyRepository,
