@@ -1,5 +1,5 @@
 {
-  "_comment": "PLACEHOLDER ECS Fargate task definition shape for a staging API service. Replace every <PLACEHOLDER>. Do not copy production secret ARNs. Do not register this file as-is. Agent must not deploy.",
+  "_comment": "PLACEHOLDER ECS Fargate task definition for a temporary single-task staging API smoke test. Replace every <PLACEHOLDER>. Do not copy production secret ARNs. Do not register this file as-is. GPS is process-local: run exactly one task. Do not use this configuration to validate multi-task rider dispatch or durable live tracking. Not deploy-ready until every referenced secret, image, role, database, S3 bucket, and the single CORS origin exist. To return to Redis-backed staging later, set LOCATION_STORE=redis, REDIS_ENABLED=true, and REDIS_TLS=true, then restore the REDIS_HOST secret arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:REDIS_HOST:: before raising the task count. SMS OTP (OTP_DELIVERY_PROVIDER=msg91 plus MSG91_AUTHKEY, MSG91_TEMPLATE_ID, MSG91_SENDER_ID), FCM push (PUSH_PROVIDER=fcm plus FIREBASE_SERVICE_ACCOUNT_JSON), and Cashfree Payouts (CASHFREE_PAYOUT_CLIENT_ID and CASHFREE_PAYOUT_CLIENT_SECRET) stay unset until real staging credentials are supplied. Do not add empty secret references for them. CASHFREE_ENVIRONMENT must stay sandbox. CORS_ORIGIN must be one exact https staging admin origin, never *.",
   "family": "idhar-udhar-staging-api",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
@@ -21,18 +21,19 @@
         { "name": "CASHFREE_ENVIRONMENT", "value": "sandbox" },
         { "name": "CASHFREE_API_VERSION", "value": "2025-01-01" },
         { "name": "CASHFREE_TIMEOUT_MS", "value": "10000" },
+        { "name": "JWT_ISSUER", "value": "idhar-udhar-api-staging" },
+        { "name": "ROUTING_PROVIDER", "value": "google" },
         { "name": "DATABASE_HOST", "value": "<STAGING_RDS_HOST>" },
         { "name": "DATABASE_PORT", "value": "5432" },
         { "name": "DATABASE_NAME", "value": "<STAGING_DB_NAME>" },
         { "name": "DATABASE_USER", "value": "<STAGING_DB_USER>" },
         { "name": "DATABASE_SSL", "value": "true" },
-        { "name": "DATABASE_SSL_ROOT_CERT", "value": "<STAGING_CA_PATH_IN_IMAGE>" },
-        { "name": "LOCATION_STORE", "value": "redis" },
-        { "name": "REDIS_ENABLED", "value": "true" },
-        { "name": "REDIS_TLS", "value": "true" },
+        { "name": "DATABASE_SSL_ROOT_CERT", "value": "/app/certs/rds-global-bundle.pem" },
+        { "name": "LOCATION_STORE", "value": "memory" },
+        { "name": "REDIS_ENABLED", "value": "false" },
         { "name": "S3_DOCUMENTS_BUCKET", "value": "<STAGING_DOCUMENTS_BUCKET>" },
         { "name": "AWS_REGION", "value": "ap-south-1" },
-        { "name": "CORS_ORIGIN", "value": "<STAGING_ADMIN_ORIGIN>" }
+        { "name": "CORS_ORIGIN", "value": "https://<STAGING_ADMIN_HOST>" }
       ],
       "secrets": [
         {
@@ -60,8 +61,12 @@
           "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:CASHFREE_CLIENT_SECRET::"
         },
         {
-          "name": "REDIS_HOST",
-          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:REDIS_HOST::"
+          "name": "PAYOUT_INSTRUMENT_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:PAYOUT_INSTRUMENT_KEY::"
+        },
+        {
+          "name": "GOOGLE_MAPS_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:<AWS_ACCOUNT_ID>:secret:<STAGING_SECRET_NAME>:GOOGLE_MAPS_API_KEY::"
         }
       ],
       "logConfiguration": {

@@ -1,4 +1,4 @@
-Checkpoint 1 — Existing system ka safety audit
+Checkpoint 1 â€” Existing system ka safety audit
 First step
 - Existing backend, Flutter apps aur Admin Panel inspect karna.
 - Database schema, wallet, transactions aur payment tables verify karna.
@@ -7,7 +7,7 @@ First step
   
   Pass condition: existing production setup documented ho; koi production change nahi.
 
-  Status (code audit): COMPLETE with blockers for Checkpoint 2 — see
+  Status (code audit): COMPLETE with blockers for Checkpoint 2 â€” see
   docs/cashfree_staging_preparation.md. Duplicate migration prefixes 0026/0027/0028
   must be resolved only after manual production schema_migrations verification.
   No production DB/AWS/Cashfree changes were made by the agent.
@@ -15,7 +15,7 @@ First step
 
 
 
-Checkpoint 2 — Staging database aur configuration
+Checkpoint 2 â€” Staging database aur configuration
 - Existing schema/migrations reuse karna.
 - Staging ke liye alag database ya isolated database instance taiyar karna.
 - Wallet, order aur transaction tables ko required test data ke saath setup karna.
@@ -23,7 +23,7 @@ Checkpoint 2 — Staging database aur configuration
   
   Pass condition: test transactions production records ko touch na kar saken.
 
-  Status (code prep): READY FOR OPERATOR — templates/docs in
+  Status (code prep): READY FOR OPERATOR â€” templates/docs in
   docs/cashfree_staging_preparation.md, backend/.env.staging.example,
   docs/ecs_staging_backend.taskdef.template.json, docs/cashfree_staging_app_commands.md.
   IU_DEPLOYMENT_TIER=staging refuses production Cashfree hosts.
@@ -33,7 +33,7 @@ Checkpoint 2 — Staging database aur configuration
 
 
 
-Checkpoint 3 — Separate staging backend
+Checkpoint 3 â€” Separate staging backend
 - Alag staging deployment aur API configuration.
 - Cashfree Sandbox credentials secure server-side storage mein.
 - Payment session, webhook, verification aur settlement flow test karna.
@@ -44,7 +44,7 @@ Checkpoint 3 — Separate staging backend
 
 
 
-Checkpoint 4 — Customer aur Rider apps
+Checkpoint 4 â€” Customer aur Rider apps
 - Staging API ke liye separate development builds/configuration.
 - Customer trip payment aur Rider wallet top-up Sandbox mein test karna.
 - Existing app IDs, flavors, signing aur production build settings ko bina zaroorat change nahi karna.
@@ -55,7 +55,7 @@ Checkpoint 4 — Customer aur Rider apps
 
 
 
-Checkpoint 5 — Admin Panel aur wallet verification
+Checkpoint 5 â€” Admin Panel aur wallet verification
 - Test payment records aur transaction statuses verify karna.
 - Rider wallet balance, duplicate webhook protection aur settlement verify karna.
 - Admin reports aur wallet transaction history check karna.
@@ -66,7 +66,7 @@ Checkpoint 5 — Admin Panel aur wallet verification
 
 
 
-Checkpoint 6 — Complete testing aur sign-off
+Checkpoint 6 â€” Complete testing aur sign-off
 - Successful payment.
 - Failed/cancelled payment.
 - Delayed ya duplicate webhook.
@@ -79,10 +79,41 @@ Checkpoint 6 — Complete testing aur sign-off
 
 
 
-Checkpoint 7 — Future Production activation
+Checkpoint 7 â€” Future Production activation
 - Approved production Cashfree credentials aur webhook configuration verify karna.
 - Production API aur database configuration ko separate, controlled deployment se maintain karna.
 - Customer aur Rider builds mein production API/environment select karna.
 - Real-payment smoke test, monitoring aur rollback plan.
   
   Pass condition: production payments verified hon aur rollback path ready ho.
+## Checkpoint 8 â€” AWS Staging Setup (26 Oct 2026)
+
+### Completed
+- Reviewed staging ECS cluster, task definition, ECR image, RDS configuration, Secrets Manager references, network access and CloudWatch logs.
+- Staging image: iu-staging-backend:staging-20261026-01.
+- Source commit used for image: 05bb129dae0c2bc0430751f7b0b12eb9abd9ca18.
+- Migration runner dry-run reported 33 missing migrations and 0 already applied.
+- Read-only database inspection succeeded: no application tables found; schema_migrations is absent.
+- Read-only inspection task exited 0: 47f1a5f129264fa7849ee2405de9421d.
+- Migration filename inventory task exited 0: d3023c643ade45f3a30387165cddf565. Its CloudWatch log still needs to be retrieved.
+- No staging migrations have been applied; API ECS service has not been started.
+- No production AWS, database or Cashfree configuration has been changed.
+
+### Blockers and cautions
+- 0028_payout_provider_references.sql is absent from the inspected image/source snapshot, while the runner has a historical checksum for version 0028. Resolve before applying migrations.
+- Review the complete migration inventory, ordering and checksums before applying any migration.
+- LOCATION_STORE=memory is for a single-task smoke test only, not multi-task rider dispatch or durable GPS tracking.
+- CORS_ORIGIN still has a staging-admin-host placeholder in the example configuration.
+- SMS OTP, FCM and Cashfree Payout sandbox credentials remain unconfigured until genuine staging credentials are available.
+- Never print secrets or switch to Cashfree production.
+
+### Next steps from home
+1. Commit and push the office changes to origin/main.
+2. Pull latest main on the home laptop with git pull --ff-only origin main.
+3. Retrieve CloudWatch logs for task d3023c643ade45f3a30387165cddf565 from /ecs/iu-staging-backend in ap-south-1.
+4. Resolve the 0028 migration discrepancy and review the full migration plan.
+5. Obtain explicit approval before applying staging migrations.
+6. Start the staging API service only after migration and configuration checks pass.
+7. Test staging health endpoints and Cashfree Sandbox payment/webhook flow.
+
+Resume point: retrieve the migration filename task logs. No migrations have been applied and the API service has not been started.
