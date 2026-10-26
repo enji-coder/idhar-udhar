@@ -117,6 +117,8 @@ export type AppConfig = {
       minAgeSeconds: number;
       batchSize: number;
     };
+    /** Base64-encoded 32-byte AES-256-GCM key. Null refuses new plaintext writes. */
+    payoutInstrumentKey: string | null;
   };
   location: {
     /**
@@ -416,6 +418,22 @@ export function loadAppConfig(): AppConfig {
       'PAYOUT_RECONCILE_MIN_AGE_SECONDS must be between 15 and 3600',
     );
   }
+  // enc1 ciphertext has no key id. Rotation needs a reader for the old and new
+  // keys, a rewrite of rider_upis.vpa_encrypted_or_token and
+  // rider_bank_accounts.account_encrypted_or_token, then removal of the old key.
+  const payoutInstrumentKeyRaw = (process.env.PAYOUT_INSTRUMENT_KEY ?? '').trim();
+  let payoutInstrumentKey: string | null = null;
+  if (payoutInstrumentKeyRaw) {
+    const decoded = Buffer.from(payoutInstrumentKeyRaw, 'base64');
+    if (decoded.length !== 32) {
+      throw new Error('PAYOUT_INSTRUMENT_KEY must be 32 bytes encoded as base64');
+    }
+    payoutInstrumentKey = payoutInstrumentKeyRaw;
+  } else if (paymentProvider === 'cashfree') {
+    throw new Error(
+      'PAYMENT_PROVIDER=cashfree requires PAYOUT_INSTRUMENT_KEY (base64 of 32 bytes)',
+    );
+  }
   const payoutReconcileBatchSize = integer('PAYOUT_RECONCILE_BATCH_SIZE', 20);
   if (payoutReconcileBatchSize < 1 || payoutReconcileBatchSize > 100) {
     throw new Error('PAYOUT_RECONCILE_BATCH_SIZE must be between 1 and 100');
@@ -552,6 +570,7 @@ export function loadAppConfig(): AppConfig {
         minAgeSeconds: payoutReconcileMinAgeSeconds,
         batchSize: payoutReconcileBatchSize,
       },
+      payoutInstrumentKey,
     },
     location: {
       store: locationStore,

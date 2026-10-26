@@ -1,4 +1,9 @@
+import { encryptPayoutInstrument, payoutBeneficiaryId } from './payout-instrument-crypto';
+import { TRANSFER_CLAIMED, TRANSFER_NOT_SENT } from './payout-transfer-state';
 import { WalletCodService } from './wallet-cod.service';
+
+const instrumentKey = Buffer.alloc(32, 7);
+const storedVpa = encryptPayoutInstrument('rider@upi', instrumentKey);
 
 describe('WalletCodService withdrawal lifecycle', () => {
   const riderId = '11111111-1111-1111-1111-111111111111';
@@ -48,8 +53,10 @@ describe('WalletCodService withdrawal lifecycle', () => {
       })),
       findUpiById: jest.fn(async () => ({
         rider_upi_id: 'upi-1',
-        vpa_encrypted_or_token: 'rider@upi',
+        vpa_encrypted_or_token: storedVpa,
         vpa_masked: 'r***@upi',
+        cashfree_beneficiary_id: payoutBeneficiaryId('UPI', 'upi-1'),
+        cashfree_beneficiary_status: 'REGISTERED',
       })),
       findBankById: jest.fn(async () => null),
       lockAccounts: jest.fn(async () => ({
@@ -77,6 +84,30 @@ describe('WalletCodService withdrawal lifecycle', () => {
         if (typeof input.providerTransferId === 'string') {
           withdrawal.provider_transfer_id = input.providerTransferId;
         }
+        if (typeof input.providerStatus === 'string') {
+          withdrawal.provider_status = input.providerStatus;
+        }
+      }),
+      claimPayoutTransferDispatch: jest.fn(async () => {
+        if (withdrawal.status !== 'PROCESSING' || withdrawal.provider_transfer_id) {
+          return false;
+        }
+        if (withdrawal.provider_status !== TRANSFER_NOT_SENT) {
+          return false;
+        }
+        withdrawal.provider_status = TRANSFER_CLAIMED;
+        return true;
+      }),
+      releasePayoutTransferDispatch: jest.fn(async () => {
+        if (
+          withdrawal.status !== 'PROCESSING' ||
+          withdrawal.provider_transfer_id ||
+          withdrawal.provider_status !== TRANSFER_CLAIMED
+        ) {
+          return false;
+        }
+        withdrawal.provider_status = TRANSFER_NOT_SENT;
+        return true;
       }),
       listWithdrawals: jest.fn(async () => []),
       listProcessingForReconcile: jest.fn(async () => []),
@@ -116,6 +147,7 @@ describe('WalletCodService withdrawal lifecycle', () => {
     const config = {
       getOrThrow: () => ({
         provider: 'cashfree',
+        payoutInstrumentKey: instrumentKey.toString('base64'),
         cashfree: { environment: 'sandbox' },
         payoutReconcile: {
           workerEnabled: false,

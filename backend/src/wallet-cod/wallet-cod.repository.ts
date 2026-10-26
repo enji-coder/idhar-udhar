@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { formatInr } from '../fare/money';
 import { Queryable } from '../database/queryable';
+import {
+  CLAIM_PAYOUT_TRANSFER_SQL,
+  RELEASE_PAYOUT_TRANSFER_SQL,
+} from './payout-transfer-state';
 import { PostgresService } from '../database/postgres.service';
 
 export const LOCKED_COD_SUSPEND_THRESHOLD = '100.00';
@@ -858,14 +862,23 @@ export class WalletCodRepository {
     rider_upi_id: string;
     vpa_encrypted_or_token: string;
     vpa_masked: string;
+    cashfree_beneficiary_id: string | null;
+    cashfree_beneficiary_status: string | null;
   } | null> {
     const result = await db.query<{
       rider_upi_id: string;
       vpa_encrypted_or_token: string;
       vpa_masked: string;
+      cashfree_beneficiary_id: string | null;
+      cashfree_beneficiary_status: string | null;
     }>(
       `
-      SELECT rider_upi_id, vpa_encrypted_or_token, vpa_masked
+      SELECT
+        rider_upi_id,
+        vpa_encrypted_or_token,
+        vpa_masked,
+        cashfree_beneficiary_id,
+        cashfree_beneficiary_status
       FROM rider_upis
       WHERE rider_profile_id = $1 AND is_current = TRUE
       `,
@@ -883,6 +896,8 @@ export class WalletCodRepository {
     account_masked: string;
     ifsc_or_bank: string | null;
     holder_name: string;
+    cashfree_beneficiary_id: string | null;
+    cashfree_beneficiary_status: string | null;
   } | null> {
     const result = await db.query<{
       bank_account_id: string;
@@ -890,6 +905,8 @@ export class WalletCodRepository {
       account_masked: string;
       ifsc_or_bank: string | null;
       holder_name: string;
+      cashfree_beneficiary_id: string | null;
+      cashfree_beneficiary_status: string | null;
     }>(
       `
       SELECT
@@ -897,13 +914,191 @@ export class WalletCodRepository {
         account_encrypted_or_token,
         account_masked,
         ifsc_or_bank,
-        holder_name
+        holder_name,
+        cashfree_beneficiary_id,
+        cashfree_beneficiary_status
       FROM rider_bank_accounts
       WHERE rider_profile_id = $1 AND is_current = TRUE
       `,
       [riderProfileId],
     );
     return result.rows[0] ?? null;
+  }
+
+  /**
+   * Replaces the authenticated rider's current UPI. The rider id is the only
+   * owner key. Old current rows are cleared before the new insert so the
+   * partial unique index stays satisfied.
+   */
+  async replaceCurrentUpi(
+    riderProfileId: string,
+    vpaMasked: string,
+    vpa: string,
+    db: Queryable,
+  ): Promise<{ rider_upi_id: string; vpa_masked: string } | null> {
+    const locked = await db.query(
+      `
+      SELECT rider_profile_id
+      FROM rider_profiles
+      WHERE rider_profile_id = $1
+      FOR UPDATE
+      `,
+      [riderProfileId],
+    );
+    if (!locked.rows[0]) {
+      return null;
+    }
+    await db.query(
+      `
+      UPDATE rider_upis
+      SET is_current = FALSE
+      WHERE rider_profile_id = $1
+        AND is_current = TRUE
+      `,
+      [riderProfileId],
+    );
+    const inserted = await db.query<{
+      rider_upi_id: string;
+      vpa_masked: string;
+    }>(
+      `
+      INSERT INTO rider_upis (
+        rider_profile_id,
+        vpa_masked,
+        vpa_encrypted_or_token,
+        is_current
+      )
+      VALUES ($1, $2, $3, TRUE)
+      RETURNING rider_upi_id, vpa_masked
+      `,
+      [riderProfileId, vpaMasked, vpa],
+    );
+    return inserted.rows[0] ?? null;
+  }
+
+  /**
+   * Marks the authenticated rider's current UPI as not current.
+   * Historical rows stay. Bank rows are not updated.
+   */
+  async clearCurrentUpi(riderProfileId: string, db: Queryable): Promise<boolean> {
+    const locked = await db.query(
+      `
+      SELECT rider_profile_id
+      FROM rider_profiles
+      WHERE rider_profile_id = $1
+      FOR UPDATE
+      `,
+      [riderProfileId],
+    );
+    if (!locked.rows[0]) {
+      return false;
+    }
+    await db.query(
+      `
+      UPDATE rider_upis
+      SET is_current = FALSE
+      WHERE rider_profile_id = $1
+        AND is_current = TRUE
+      `,
+      [riderProfileId],
+    );
+    return true;
+  }
+
+  async saveUpiBeneficiary(
+    riderUpiId: string,
+    beneficiaryId: string,
+    status: 'REGISTERED' | 'UNKNOWN',
+    db: Queryable,
+  ): Promise<void> {
+    await db.query(
+      `
+      UPDATE rider_upis
+      SET cashfree_beneficiary_id = $2,
+          cashfree_beneficiary_status = $3
+      WHERE rider_upi_id = $1
+      `,
+      [riderUpiId, beneficiaryId, status],
+    );
+  }
+
+  async saveBankBeneficiary(
+    bankAccountId: string,
+    beneficiaryId: string,
+    status: 'REGISTERED' | 'UNKNOWN',
+    db: Queryable,
+  ): Promise<void> {
+    await db.query(
+      `
+      UPDATE rider_bank_accounts
+      SET cashfree_beneficiary_id = $2,
+          cashfree_beneficiary_status = $3
+      WHERE bank_account_id = $1
+      `,
+      [bankAccountId, beneficiaryId, status],
+    );
+  }
+
+  /**
+   * Replaces the authenticated rider's current bank account. Clears the
+   * previous current row in the same transaction before inserting.
+   */
+  async replaceCurrentBank(
+    riderProfileId: string,
+    input: {
+      holderName: string;
+      accountMasked: string;
+      accountNumber: string;
+      ifsc: string;
+    },
+    db: Queryable,
+  ): Promise<{ bank_account_id: string; account_masked: string } | null> {
+    const locked = await db.query(
+      `
+      SELECT rider_profile_id
+      FROM rider_profiles
+      WHERE rider_profile_id = $1
+      FOR UPDATE
+      `,
+      [riderProfileId],
+    );
+    if (!locked.rows[0]) {
+      return null;
+    }
+    await db.query(
+      `
+      UPDATE rider_bank_accounts
+      SET is_current = FALSE
+      WHERE rider_profile_id = $1
+        AND is_current = TRUE
+      `,
+      [riderProfileId],
+    );
+    const inserted = await db.query<{
+      bank_account_id: string;
+      account_masked: string;
+    }>(
+      `
+      INSERT INTO rider_bank_accounts (
+        rider_profile_id,
+        holder_name,
+        account_masked,
+        account_encrypted_or_token,
+        ifsc_or_bank,
+        is_current
+      )
+      VALUES ($1, $2, $3, $4, $5, TRUE)
+      RETURNING bank_account_id, account_masked
+      `,
+      [
+        riderProfileId,
+        input.holderName,
+        input.accountMasked,
+        input.accountNumber,
+        input.ifsc,
+      ],
+    );
+    return inserted.rows[0] ?? null;
   }
 
   async findUpiById(
@@ -913,14 +1108,23 @@ export class WalletCodRepository {
     rider_upi_id: string;
     vpa_encrypted_or_token: string;
     vpa_masked: string;
+    cashfree_beneficiary_id: string | null;
+    cashfree_beneficiary_status: string | null;
   } | null> {
     const result = await db.query<{
       rider_upi_id: string;
       vpa_encrypted_or_token: string;
       vpa_masked: string;
+      cashfree_beneficiary_id: string | null;
+      cashfree_beneficiary_status: string | null;
     }>(
       `
-      SELECT rider_upi_id, vpa_encrypted_or_token, vpa_masked
+      SELECT
+        rider_upi_id,
+        vpa_encrypted_or_token,
+        vpa_masked,
+        cashfree_beneficiary_id,
+        cashfree_beneficiary_status
       FROM rider_upis
       WHERE rider_upi_id = $1
       `,
@@ -938,6 +1142,8 @@ export class WalletCodRepository {
     account_masked: string;
     ifsc_or_bank: string | null;
     holder_name: string;
+    cashfree_beneficiary_id: string | null;
+    cashfree_beneficiary_status: string | null;
   } | null> {
     const result = await db.query<{
       bank_account_id: string;
@@ -945,6 +1151,8 @@ export class WalletCodRepository {
       account_masked: string;
       ifsc_or_bank: string | null;
       holder_name: string;
+      cashfree_beneficiary_id: string | null;
+      cashfree_beneficiary_status: string | null;
     }>(
       `
       SELECT
@@ -952,7 +1160,9 @@ export class WalletCodRepository {
         account_encrypted_or_token,
         account_masked,
         ifsc_or_bank,
-        holder_name
+        holder_name,
+        cashfree_beneficiary_id,
+        cashfree_beneficiary_status
       FROM rider_bank_accounts
       WHERE bank_account_id = $1
       `,
@@ -1113,6 +1323,35 @@ export class WalletCodRepository {
       [withdrawalId],
     );
     return result.rows[0] ?? null;
+  }
+
+  /**
+   * One worker wins the right to call Cashfree. A lost race or an existing
+   * claim returns false and must not POST.
+   */
+  async claimPayoutTransferDispatch(
+    withdrawalId: string,
+    db: Queryable,
+  ): Promise<boolean> {
+    const result = await db.query<{ withdrawal_id: string }>(
+      CLAIM_PAYOUT_TRANSFER_SQL,
+      [withdrawalId],
+    );
+    return (result.rowCount ?? result.rows.length) > 0;
+  }
+
+  /**
+   * Returns the claim only when this process knows the HTTP call never started.
+   */
+  async releasePayoutTransferDispatch(
+    withdrawalId: string,
+    db: Queryable,
+  ): Promise<boolean> {
+    const result = await db.query<{ withdrawal_id: string }>(
+      RELEASE_PAYOUT_TRANSFER_SQL,
+      [withdrawalId],
+    );
+    return (result.rowCount ?? result.rows.length) > 0;
   }
 
   async findWithdrawalByMerchantTransferId(

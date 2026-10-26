@@ -13,6 +13,9 @@ describe('backend/.env.staging.example', () => {
     expect(text).toMatch(/^\s*PAYMENT_PROVIDER=cashfree\s*$/m);
     expect(text).toContain('<CASHFREE_SANDBOX_CLIENT_ID>');
     expect(text).toContain('<STAGING_RDS_HOST>');
+    expect(text).toMatch(
+      /^\s*PAYOUT_INSTRUMENT_KEY=<BASE64_32_BYTE_PAYOUT_INSTRUMENT_KEY>\s*$/m,
+    );
   });
 
   it('does not embed production API host or live Cashfree host as defaults', () => {

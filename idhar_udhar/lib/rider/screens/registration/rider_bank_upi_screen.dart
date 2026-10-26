@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/api/api_exception.dart';
+import '../../../shared/api/api_providers.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../state/rider_payout_destination.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -29,12 +32,10 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
   late final TextEditingController _holder;
   late final TextEditingController _account;
   late final TextEditingController _ifsc;
-  late final TextEditingController _upi;
   String? _bankError;
   String? _holderError;
   String? _accountError;
   String? _ifscError;
-  String? _upiError;
 
   @override
   void initState() {
@@ -44,7 +45,6 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
     _holder = TextEditingController(text: b.accountHolder);
     _account = TextEditingController(text: b.accountNumber);
     _ifsc = TextEditingController(text: b.ifsc);
-    _upi = TextEditingController(text: b.upiId);
   }
 
   @override
@@ -53,61 +53,50 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
     _holder.dispose();
     _account.dispose();
     _ifsc.dispose();
-    _upi.dispose();
     super.dispose();
   }
 
   bool _validate() {
-    String? bankError;
-    String? holderError;
-    String? accountError;
-    String? ifscError;
-    String? upiError;
-    if (_bankName.text.trim().length < 3) {
-      bankError = 'Enter bank name';
-    }
-    if (_holder.text.trim().length < 3) {
-      holderError = 'Enter account holder name';
-    }
-    final acc = _account.text.replaceAll(RegExp(r'\s'), '');
-    if (acc.length < 8) {
-      accountError = 'Enter a valid account number';
-    }
-    if (_ifsc.text.trim().length < 8) {
-      ifscError = 'Enter a valid IFSC';
-    }
-    if (!_upi.text.contains('@')) {
-      upiError = 'Enter a valid UPI ID';
-    }
+    final BankFieldErrors errors = validateBankFields(
+      bankName: _bankName.text,
+      holderName: _holder.text,
+      accountNumber: _account.text,
+      ifsc: _ifsc.text,
+    );
     setState(() {
-      _bankError = bankError;
-      _holderError = holderError;
-      _accountError = accountError;
-      _ifscError = ifscError;
-      _upiError = upiError;
+      _bankError = errors.bankName;
+      _holderError = errors.holder;
+      _accountError = errors.account;
+      _ifscError = errors.ifsc;
     });
-    return bankError == null &&
-        holderError == null &&
-        accountError == null &&
-        ifscError == null &&
-        upiError == null;
+    return errors.isValid;
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (!_validate()) return;
     final current = ref.read(riderBankProvider);
-    ref.read(riderBankProvider.notifier).state = current.copyWith(
-      bankName: _bankName.text.trim(),
-      accountHolder: _holder.text.trim(),
-      accountNumber: _account.text.replaceAll(RegExp(r'\s'), ''),
-      ifsc: _ifsc.text.trim().toUpperCase(),
-      upiId: _upi.text.trim(),
-    );
-    if (widget.editMode) {
-      context.pop();
-      return;
+    try {
+      final saved = await persistBankDestination(
+        saveBank: ref.read(walletApiProvider).saveBank,
+        current: current,
+        bankName: _bankName.text,
+        holderName: _holder.text,
+        accountNumber: _account.text,
+        ifsc: _ifsc.text,
+      );
+      if (!mounted) return;
+      ref.read(riderBankProvider.notifier).state = saved;
+      if (widget.editMode) {
+        context.pop();
+        return;
+      }
+      context.push(RiderRoutes.verificationStatus);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
     }
-    context.push(RiderRoutes.verificationStatus);
   }
 
   @override
@@ -134,7 +123,7 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
             ),
             const SizedBox(height: RiderSpacing.sm),
             Text(
-              'Add the account or UPI ID for your earnings.',
+              'Add the bank account for your earnings. Save a UPI ID separately.',
               style: RiderTextStyles.caption,
             ),
             const SizedBox(height: RiderSpacing.xl),
@@ -178,15 +167,7 @@ class _RiderBankUpiScreenState extends ConsumerState<RiderBankUpiScreen> {
                     hint: 'IFSC code',
                     prefixIcon: Icons.qr_code_rounded,
                     errorText: _ifscError,
-                    textInputAction: TextInputAction.next,
-                  ),
-                  const SizedBox(height: RiderSpacing.lg),
-                  RiderTextField(
-                    controller: _upi,
-                    label: 'UPI ID',
-                    hint: 'name@upi',
-                    prefixIcon: Icons.currency_rupee_rounded,
-                    errorText: _upiError,
+                    textInputAction: TextInputAction.done,
                   ),
                 ],
               ),

@@ -12,6 +12,7 @@ import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/dummy/rider_finance.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
 import '../../routing/rider_routes.dart';
+import '../../state/rider_payout_destination.dart';
 import '../../state/rider_session.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
@@ -141,20 +142,21 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
           const SizedBox(height: RiderSpacing.md),
           RiderSecondaryButton(
             label: 'Withdraw Money',
-            onPressed: () => _amountSheet(
+            onPressed: () {
+              final bank = ref.read(riderBankProvider);
+              unawaited(_amountSheet(
               context: context,
               ref: ref,
               title: 'Withdraw Money',
               confirmLabel: 'Withdraw',
               maxAmount: balance,
-              onConfirm: (amount) async {
+              upiSaved: bank.upiOnServer,
+              bankSaved: bank.bankOnServer,
+              onWithdraw: (amount, payoutMethod) async {
                 try {
-                  final bank = ref.read(riderBankProvider);
-                  final String method =
-                      bank.upiId.trim().isNotEmpty ? 'UPI' : 'BANK';
                   await ref.read(walletApiProvider).withdraw(
                         amount: amount,
-                        payoutMethod: method,
+                        payoutMethod: payoutMethod,
                       );
                   await ref.read(riderSessionProvider.notifier).refreshWallet();
                   if (context.mounted) {
@@ -174,7 +176,9 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
                   }
                 }
               },
-            ),
+              ),
+            );
+            },
           ),
         ],
       ),
@@ -187,7 +191,10 @@ Future<void> showRiderWalletAmountSheet({
   required WidgetRef ref,
   required String title,
   required String confirmLabel,
-  required FutureOr<void> Function(double amount) onConfirm,
+  FutureOr<void> Function(double amount)? onConfirm,
+  FutureOr<void> Function(double amount, String payoutMethod)? onWithdraw,
+  bool upiSaved = false,
+  bool bankSaved = false,
   double? maxAmount,
 }) {
   return _amountSheet(
@@ -196,6 +203,9 @@ Future<void> showRiderWalletAmountSheet({
     title: title,
     confirmLabel: confirmLabel,
     onConfirm: onConfirm,
+    onWithdraw: onWithdraw,
+    upiSaved: upiSaved,
+    bankSaved: bankSaved,
     maxAmount: maxAmount,
   );
 }
@@ -205,7 +215,10 @@ Future<void> _amountSheet({
   required WidgetRef ref,
   required String title,
   required String confirmLabel,
-  required FutureOr<void> Function(double amount) onConfirm,
+  FutureOr<void> Function(double amount)? onConfirm,
+  FutureOr<void> Function(double amount, String payoutMethod)? onWithdraw,
+  bool upiSaved = false,
+  bool bankSaved = false,
   double? maxAmount,
 }) {
   return showModalBottomSheet<void>(
@@ -220,6 +233,9 @@ Future<void> _amountSheet({
         title: title,
         confirmLabel: confirmLabel,
         onConfirm: onConfirm,
+        onWithdraw: onWithdraw,
+        upiSaved: upiSaved,
+        bankSaved: bankSaved,
         maxAmount: maxAmount,
       );
     },
@@ -230,13 +246,19 @@ class _WalletAmountSheet extends StatefulWidget {
   const _WalletAmountSheet({
     required this.title,
     required this.confirmLabel,
-    required this.onConfirm,
+    this.onConfirm,
+    this.onWithdraw,
+    this.upiSaved = false,
+    this.bankSaved = false,
     this.maxAmount,
   });
 
   final String title;
   final String confirmLabel;
-  final FutureOr<void> Function(double amount) onConfirm;
+  final FutureOr<void> Function(double amount)? onConfirm;
+  final FutureOr<void> Function(double amount, String payoutMethod)? onWithdraw;
+  final bool upiSaved;
+  final bool bankSaved;
   final double? maxAmount;
 
   @override
@@ -247,6 +269,7 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _amountFocus = FocusNode();
   String? _error;
+  String? _payoutMethod;
   bool _submitting = false;
 
   @override
@@ -267,10 +290,32 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
       setState(() => _error = 'Amount exceeds available balance');
       return;
     }
+    final WithdrawalSubmission? submission = widget.onWithdraw == null
+        ? null
+        : withdrawalSubmission(
+            amount: amount,
+            payoutMethod: _payoutMethod,
+            upiSaved: widget.upiSaved,
+            bankSaved: widget.bankSaved,
+          );
+    if (widget.onWithdraw != null && submission == null) {
+      setState(() {
+        _error = withdrawalDestinationError(
+          payoutMethod: _payoutMethod,
+          upiSaved: widget.upiSaved,
+          bankSaved: widget.bankSaved,
+        );
+      });
+      return;
+    }
     setState(() => _submitting = true);
     var closeSheet = false;
     try {
-      await widget.onConfirm(amount);
+      if (submission != null) {
+        await widget.onWithdraw!(submission.amount, submission.payoutMethod);
+      } else {
+        await widget.onConfirm!(amount);
+      }
       closeSheet = true;
     } finally {
       if (!closeSheet && mounted) {
@@ -316,6 +361,30 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
               FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
             ],
           ),
+          if (widget.onWithdraw != null) ...[
+            const SizedBox(height: RiderSpacing.lg),
+            Text('Payout method', style: RiderTextStyles.caption),
+            const SizedBox(height: RiderSpacing.sm),
+            Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('UPI'),
+                  selected: _payoutMethod == 'UPI',
+                  onSelected: _submitting
+                      ? null
+                      : (_) => setState(() => _payoutMethod = 'UPI'),
+                ),
+                const SizedBox(width: RiderSpacing.sm),
+                ChoiceChip(
+                  label: const Text('Bank'),
+                  selected: _payoutMethod == 'BANK',
+                  onSelected: _submitting
+                      ? null
+                      : (_) => setState(() => _payoutMethod = 'BANK'),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: RiderSpacing.lg),
           RiderPrimaryButton(
             label: _submitting ? 'Please wait…' : widget.confirmLabel,

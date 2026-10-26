@@ -31,8 +31,10 @@ must match the production checksums. `0028_payout_provider_references` was
 applied in production, but its exact bytes are not in this repository. Do not
 put a guessed file under that name. `0033_rider_withdrawal_payout_columns.sql`
 re-asserts the known payout columns idempotently and does not reuse version
-`0028`. A recorded version with no local file stops the run unless it is that
-unrecovered `0028` checksum.
+`0028`. `0034_payout_beneficiary_and_instrument.sql` adds the Cashfree
+beneficiary id and status on `rider_upis` and `rider_bank_accounts`. It does
+not drop withdrawal, wallet, COD, or ledger data. A recorded version with no
+local file stops the run unless it is that unrecovered `0028` checksum.
 
 `MIGRATE_DRY_RUN=1` lists missing versions only and does not create
 `schema_migrations`. It still opens a DB connection — never point it at

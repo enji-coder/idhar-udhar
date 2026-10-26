@@ -22,6 +22,7 @@ import '../data/models/rider_bank_details.dart';
 import '../data/models/rider_earnings.dart';
 import '../data/models/rider_profile.dart';
 import '../data/models/vehicle_info.dart';
+import 'rider_payout_destination.dart';
 
 String riderPhoneDigits(String raw) {
   String digits = raw.replaceAll(RegExp(r'\D'), '');
@@ -311,6 +312,20 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       _ref.read(riderCodDueProvider.notifier).state = cod.codDue;
     } catch (_) {
       // Keep last displayed values if the request fails.
+    }
+    await refreshDestinations();
+  }
+
+  Future<void> refreshDestinations() async {
+    try {
+      final Map<String, Object?> body = await _wallet.destinations();
+      final RiderBankDetails current = _ref.read(riderBankProvider);
+      _ref.read(riderBankProvider.notifier).state = destinationsFromServer(
+        current: current,
+        body: body,
+      );
+    } on ApiException {
+      // Keep the last known destination state.
     }
   }
 

@@ -135,6 +135,7 @@ test('migration prefixes are unique and production 0026 and 0027 checksums match
   );
   assert.ok(names.includes('0032_admin_order_purge_wallet_reversal.sql'));
   assert.ok(names.includes('0033_rider_withdrawal_payout_columns.sql'));
+  assert.ok(names.includes('0034_payout_beneficiary_and_instrument.sql'));
   const checksums = new Map(
     names.map((name) => [
       name.replace(/\.sql$/, ''),
@@ -159,6 +160,19 @@ test('migration prefixes are unique and production 0026 and 0027 checksums match
     readFileSync(resolve(directory, '0026_rider_wallet_topup_withdrawal.sql'), 'utf8'),
     /provider_transfer_id/,
   );
+  const beneficiary = readFileSync(
+    resolve(directory, '0034_payout_beneficiary_and_instrument.sql'),
+    'utf8',
+  );
+  assert.match(beneficiary, /cashfree_beneficiary_id/);
+  assert.match(beneficiary, /cashfree_beneficiary_status/);
+  assert.match(beneficiary, /rider_upis_cf_beneficiary_status_chk/);
+  assert.match(beneficiary, /rider_bank_cf_beneficiary_status_chk/);
+  assert.match(beneficiary, /rider_upis_cf_beneficiary_unique/);
+  assert.match(beneficiary, /rider_bank_cf_beneficiary_unique/);
+  assert.doesNotMatch(beneficiary, /DROP TABLE/i);
+  assert.doesNotMatch(beneficiary, /TRUNCATE/i);
+  assert.doesNotMatch(beneficiary, /CASCADE/i);
 });
 
 test('a recorded version with no local file is refused unless it is the unrecovered 0028 pin', () => {

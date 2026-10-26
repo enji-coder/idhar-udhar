@@ -1,6 +1,8 @@
 import { loadAppConfig } from './configuration';
 import { cashfreeApiBaseUrl } from '../payments/cashfree-environment';
 
+const TEST_PAYOUT_KEY = Buffer.alloc(32, 4).toString('base64');
+
 describe('payment configuration', () => {
   const originalEnv = process.env.NODE_ENV;
   const originalProvider = process.env.PAYMENT_PROVIDER;
@@ -10,6 +12,7 @@ describe('payment configuration', () => {
   const originalPayoutClientId = process.env.CASHFREE_PAYOUT_CLIENT_ID;
   const originalPayoutSecret = process.env.CASHFREE_PAYOUT_CLIENT_SECRET;
   const originalTier = process.env.IU_DEPLOYMENT_TIER;
+  const originalPayoutKey = process.env.PAYOUT_INSTRUMENT_KEY;
 
   function restore(name: string, value: string | undefined): void {
     if (value === undefined) {
@@ -17,6 +20,14 @@ describe('payment configuration', () => {
     } else {
       process.env[name] = value;
     }
+  }
+
+  function useCashfree(environment: 'sandbox' | 'production'): void {
+    process.env.PAYMENT_PROVIDER = 'cashfree';
+    process.env.CASHFREE_ENVIRONMENT = environment;
+    process.env.CASHFREE_CLIENT_ID = 'test_client_id';
+    process.env.CASHFREE_CLIENT_SECRET = 'test_client_secret';
+    process.env.PAYOUT_INSTRUMENT_KEY = TEST_PAYOUT_KEY;
   }
 
   afterEach(() => {
@@ -28,6 +39,7 @@ describe('payment configuration', () => {
     restore('CASHFREE_PAYOUT_CLIENT_ID', originalPayoutClientId);
     restore('CASHFREE_PAYOUT_CLIENT_SECRET', originalPayoutSecret);
     restore('IU_DEPLOYMENT_TIER', originalTier);
+    restore('PAYOUT_INSTRUMENT_KEY', originalPayoutKey);
   });
 
   it('defaults to unconfigured and does not select a gateway', () => {
@@ -52,10 +64,7 @@ describe('payment configuration', () => {
   });
 
   it('selects the Cashfree sandbox host when credentials are present', () => {
-    process.env.PAYMENT_PROVIDER = 'cashfree';
-    process.env.CASHFREE_ENVIRONMENT = 'sandbox';
-    process.env.CASHFREE_CLIENT_ID = 'test_client_id';
-    process.env.CASHFREE_CLIENT_SECRET = 'test_client_secret';
+    useCashfree('sandbox');
     const payment = loadAppConfig().payment;
     expect(payment.provider).toBe('cashfree');
     expect(payment.cashfree.environment).toBe('sandbox');
@@ -64,10 +73,7 @@ describe('payment configuration', () => {
   });
 
   it('selects the Cashfree production host when credentials are present', () => {
-    process.env.PAYMENT_PROVIDER = 'cashfree';
-    process.env.CASHFREE_ENVIRONMENT = 'production';
-    process.env.CASHFREE_CLIENT_ID = 'test_client_id';
-    process.env.CASHFREE_CLIENT_SECRET = 'test_client_secret';
+    useCashfree('production');
     const payment = loadAppConfig().payment;
     expect(payment.provider).toBe('cashfree');
     expect(payment.cashfree.environment).toBe('production');
@@ -78,8 +84,7 @@ describe('payment configuration', () => {
   });
 
   it('keeps payout credentials separate from the payment gateway client', () => {
-    process.env.PAYMENT_PROVIDER = 'cashfree';
-    process.env.CASHFREE_ENVIRONMENT = 'sandbox';
+    useCashfree('sandbox');
     process.env.CASHFREE_CLIENT_ID = 'pg_client_id';
     process.env.CASHFREE_CLIENT_SECRET = 'pg_client_secret';
     delete process.env.CASHFREE_PAYOUT_CLIENT_ID;
@@ -116,8 +121,7 @@ describe('payment configuration', () => {
 
   it('allows staging tier only with Cashfree sandbox hosts', () => {
     process.env.IU_DEPLOYMENT_TIER = 'staging';
-    process.env.PAYMENT_PROVIDER = 'cashfree';
-    process.env.CASHFREE_ENVIRONMENT = 'sandbox';
+    useCashfree('sandbox');
     process.env.CASHFREE_CLIENT_ID = 'staging_sandbox_client';
     process.env.CASHFREE_CLIENT_SECRET = 'staging_sandbox_secret';
     const payment = loadAppConfig().payment;
@@ -134,5 +138,17 @@ describe('payment configuration', () => {
     expect(() => loadAppConfig()).toThrow(
       /IU_DEPLOYMENT_TIER=staging requires CASHFREE_ENVIRONMENT=sandbox/,
     );
+  });
+
+  it('requires a 32-byte payout instrument key when Cashfree is selected', () => {
+    useCashfree('sandbox');
+    delete process.env.PAYOUT_INSTRUMENT_KEY;
+    expect(() => loadAppConfig()).toThrow(/PAYOUT_INSTRUMENT_KEY/);
+  });
+
+  it('rejects a malformed payout instrument key', () => {
+    useCashfree('sandbox');
+    process.env.PAYOUT_INSTRUMENT_KEY = Buffer.from('short').toString('base64');
+    expect(() => loadAppConfig()).toThrow(/32 bytes/);
   });
 });

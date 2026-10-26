@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../shared/api/api_exception.dart';
+import '../../../shared/api/api_providers.dart';
 import '../../data/dummy/dummy_rider_repository.dart';
+import '../../state/rider_payout_destination.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -12,7 +15,7 @@ import '../../widgets/rider_scaffold.dart';
 import '../../widgets/rider_secondary_button.dart';
 import '../../widgets/rider_text_field.dart';
 
-/// Dedicated Rider UPI details — local/session save only (no backend).
+/// Dedicated Rider UPI details. Save persists the current UPI on the server.
 class RiderUpiDetailsScreen extends ConsumerStatefulWidget {
   const RiderUpiDetailsScreen({super.key});
 
@@ -53,30 +56,40 @@ class _RiderUpiDetailsScreenState extends ConsumerState<RiderUpiDetailsScreen> {
     return null;
   }
 
-  void _save() {
+  Future<void> _save() async {
     final error = _validate(_upi.text);
     setState(() => _upiError = error);
     if (error != null) return;
 
     final current = ref.read(riderBankProvider);
     final hasExisting = current.upiId.trim().isNotEmpty;
-    ref.read(riderBankProvider.notifier).state = current.copyWith(
-      upiId: _upi.text.trim(),
-      upiVerified: false,
-    );
-    setState(() => _editing = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: RiderColors.secondary,
-        content: Text(
-          hasExisting ? 'UPI ID updated' : 'UPI ID added',
-          style: RiderTextStyles.bodyMedium.copyWith(
-            color: RiderColors.textOnPrimary,
+    try {
+      final saved = await persistUpiDestination(
+        saveUpi: ref.read(walletApiProvider).saveUpi,
+        current: current,
+        vpa: _upi.text,
+      );
+      if (!mounted) return;
+      ref.read(riderBankProvider.notifier).state = saved;
+      setState(() => _editing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: RiderColors.secondary,
+          content: Text(
+            hasExisting ? 'UPI ID updated' : 'UPI ID added',
+            style: RiderTextStyles.bodyMedium.copyWith(
+              color: RiderColors.textOnPrimary,
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
   }
 
   Future<void> _confirmDelete() async {
@@ -116,20 +129,29 @@ class _RiderUpiDetailsScreenState extends ConsumerState<RiderUpiDetailsScreen> {
       },
     );
     if (confirmed != true || !mounted) return;
-    _delete();
+    await _delete();
   }
 
-  void _delete() {
+  Future<void> _delete() async {
     final current = ref.read(riderBankProvider);
-    ref.read(riderBankProvider.notifier).state = current.copyWith(
-      upiId: '',
-      upiVerified: false,
-    );
-    _upi.clear();
-    setState(() {
-      _editing = true;
-      _upiError = null;
-    });
+    try {
+      final saved = await clearUpiDestination(
+        clearUpi: ref.read(walletApiProvider).clearUpi,
+        current: current,
+      );
+      if (!mounted) return;
+      ref.read(riderBankProvider.notifier).state = saved;
+      _upi.clear();
+      setState(() {
+        _editing = true;
+        _upiError = null;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
   }
 
   @override

@@ -19,6 +19,21 @@ import {
 
 type CashfreeSettings = AppConfig['payment']['cashfree'];
 
+/**
+ * Thrown only when initiatePayoutTransfer has not started an HTTP request.
+ * Callers may release a local transfer claim. A transport error is not this type.
+ */
+export class PayoutTransferNotDispatchedError extends ApiError {
+  constructor() {
+    super(
+      ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+      'Cashfree transfer was not sent',
+      503,
+    );
+    this.name = 'PayoutTransferNotDispatchedError';
+  }
+}
+
 export type CashfreeHttp = (
   url: string,
   init: {
@@ -483,8 +498,110 @@ export class CashfreePaymentService implements PaymentProvider {
   }
 
   /**
+   * Creates a Cashfree Payouts v2 beneficiary (API 2024-01-01).
+   * POST /beneficiary. The caller supplies the merchant beneficiary_id.
+   * A timeout is `unknown`, not a rejection, and must not be followed by a transfer.
+   */
+  async registerPayoutBeneficiary(input: {
+    beneficiaryId: string;
+    beneficiaryName: string;
+    payoutMethod: 'UPI' | 'BANK';
+    vpa?: string | null;
+    bankAccountNumber?: string | null;
+    bankIfsc?: string | null;
+  }): Promise<{
+    outcome: 'registered' | 'duplicate' | 'rejected' | 'unknown';
+    beneficiaryId: string | null;
+  }> {
+    const settings = this.settings();
+    this.assertPayoutConfigured(settings);
+    const instrument =
+      input.payoutMethod === 'UPI'
+        ? { vpa: input.vpa }
+        : {
+            bank_account_number: input.bankAccountNumber,
+            bank_ifsc: input.bankIfsc,
+          };
+    try {
+      const response = await this.http(`${settings.payoutApiBaseUrl}/beneficiary`, {
+        method: 'POST',
+        headers: this.payoutHeaders(settings, input.beneficiaryId),
+        body: JSON.stringify({
+          beneficiary_id: input.beneficiaryId,
+          beneficiary_name: input.beneficiaryName,
+          beneficiary_instrument_details: instrument,
+        }),
+        timeoutMs: settings.timeoutMs,
+      });
+      if (response.status === 200 || response.status === 201) {
+        const body = asRecord(response.json);
+        const returned =
+          typeof body?.beneficiary_id === 'string' ? body.beneficiary_id : input.beneficiaryId;
+        this.logger.info('cashfree_beneficiary_registered', {
+          http_status: response.status,
+        });
+        return { outcome: 'registered', beneficiaryId: returned };
+      }
+      if (response.status === 409) {
+        this.logger.info('cashfree_beneficiary_duplicate', { http_status: 409 });
+        return { outcome: 'duplicate', beneficiaryId: input.beneficiaryId };
+      }
+      this.logger.warn('cashfree_beneficiary_rejected', { http_status: response.status });
+      return { outcome: 'rejected', beneficiaryId: null };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 503) {
+        this.logger.warn('cashfree_beneficiary_unknown', { http_status: 503 });
+        return { outcome: 'unknown', beneficiaryId: null };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * GET /beneficiary?beneficiary_id=
+   * Confirms a previous create before any transfer. A timeout stays unknown.
+   */
+  async getPayoutBeneficiary(beneficiaryId: string): Promise<{
+    outcome: 'registered' | 'missing' | 'unknown';
+    beneficiaryId: string | null;
+  }> {
+    const settings = this.settings();
+    this.assertPayoutConfigured(settings);
+    try {
+      const response = await this.http(
+        `${settings.payoutApiBaseUrl}/beneficiary?beneficiary_id=${encodeURIComponent(beneficiaryId)}`,
+        {
+          method: 'GET',
+          headers: this.payoutHeaders(settings),
+          timeoutMs: settings.timeoutMs,
+        },
+      );
+      if (response.status === 200) {
+        const body = asRecord(response.json);
+        const returned =
+          typeof body?.beneficiary_id === 'string' ? body.beneficiary_id : beneficiaryId;
+        return { outcome: 'registered', beneficiaryId: returned };
+      }
+      if (response.status === 404) {
+        return { outcome: 'missing', beneficiaryId: null };
+      }
+      return { outcome: 'unknown', beneficiaryId: null };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 503) {
+        return { outcome: 'unknown', beneficiaryId: null };
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Initiates a Cashfree Payouts v2 transfer.
-   * Caller must persist merchantTransferId before invoking so timeouts can reconcile.
+   * beneficiaryId must already be confirmed by registerPayoutBeneficiary or getPayoutBeneficiary.
+   * PayoutTransferNotDispatchedError means no HTTP request was started.
+   * Any later error, including timeout, means the request may have reached Cashfree.
+   * HTTP 409 is recorded as the response for this transfer_id. It is not permission
+   * to POST again, and this client does not treat transfer_id reuse as proof that
+   * Cashfree will deduplicate a second request.
    */
   async initiatePayoutTransfer(input: {
     merchantTransferId: string;
@@ -501,7 +618,14 @@ export class CashfreePaymentService implements PaymentProvider {
     failureReason: string | null;
   }> {
     const settings = this.settings();
-    this.assertPayoutConfigured(settings);
+    try {
+      this.assertPayoutConfigured(settings);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        throw new PayoutTransferNotDispatchedError();
+      }
+      throw err;
+    }
     const transferMode = input.payoutMethod === 'UPI' ? 'upi' : 'banktransfer';
     const instrument =
       input.payoutMethod === 'UPI'
@@ -533,6 +657,11 @@ export class CashfreePaymentService implements PaymentProvider {
     providerTransferId: string | null;
     providerStatus: string | null;
     failureReason: string | null;
+  } | {
+    outcome: 'not_found';
+    providerTransferId: null;
+    providerStatus: null;
+    failureReason: string | null;
   }> {
     const settings = this.settings();
     this.assertPayoutConfigured(settings);
@@ -545,8 +674,10 @@ export class CashfreePaymentService implements PaymentProvider {
       },
     );
     if (response.status === 404) {
+      // A 404 does not prove the transfer was never accepted. Callers may
+      // create one only when their own state confirms no request was sent.
       return {
-        outcome: 'unknown',
+        outcome: 'not_found',
         providerTransferId: null,
         providerStatus: null,
         failureReason: 'Transfer was not found at Cashfree',

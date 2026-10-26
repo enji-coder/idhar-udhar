@@ -549,20 +549,21 @@ class _HomeTab extends ConsumerWidget {
                     }
                   },
                 ),
-                onWithdraw: () => showRiderWalletAmountSheet(
+                onWithdraw: () {
+                  final bank = ref.read(riderBankProvider);
+                  unawaited(showRiderWalletAmountSheet(
                   context: context,
                   ref: ref,
                   title: 'Withdraw Money',
                   confirmLabel: 'Withdraw',
                   maxAmount: wallet,
-                  onConfirm: (amount) async {
+                  upiSaved: bank.upiOnServer,
+                  bankSaved: bank.bankOnServer,
+                  onWithdraw: (amount, payoutMethod) async {
                     try {
-                      final bank = ref.read(riderBankProvider);
-                      final String method =
-                          bank.upiId.trim().isNotEmpty ? 'UPI' : 'BANK';
                       await ref.read(walletApiProvider).withdraw(
                             amount: amount,
-                            payoutMethod: method,
+                            payoutMethod: payoutMethod,
                           );
                       await ref
                           .read(riderSessionProvider.notifier)
@@ -584,7 +585,9 @@ class _HomeTab extends ConsumerWidget {
                       }
                     }
                   },
-                ),
+                  ),
+                );
+                },
               ),
               const SizedBox(height: RiderSpacing.md),
               Row(

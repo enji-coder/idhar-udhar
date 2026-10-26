@@ -183,6 +183,36 @@ class WalletApi {
     );
   }
 
+  Future<Map<String, Object?>> destinations() async {
+    return _client.get('/v1/rider/payout-destinations');
+  }
+
+  Future<void> clearUpi() async {
+    await _client.post('/v1/rider/payout-destinations/upi/clear');
+  }
+
+  Future<void> saveUpi(String vpa) async {
+    await _client.post(
+      '/v1/rider/payout-destinations/upi',
+      data: <String, String>{'vpa': vpa},
+    );
+  }
+
+  Future<void> saveBank({
+    required String holderName,
+    required String accountNumber,
+    required String ifsc,
+  }) async {
+    await _client.post(
+      '/v1/rider/payout-destinations/bank',
+      data: <String, String>{
+        'holder_name': holderName,
+        'account_number': accountNumber,
+        'ifsc': ifsc,
+      },
+    );
+  }
+
   Future<Map<String, Object?>> withdraw({
     required double amount,
     required String payoutMethod,

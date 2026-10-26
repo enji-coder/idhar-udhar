@@ -16,7 +16,10 @@ import {
   IdempotencyScope,
 } from '../orders/idempotency.repository';
 import { OrderRow, OrdersRepository } from '../orders/orders.repository';
-import { CashfreePaymentService } from '../payments/cashfree-payment.service';
+import {
+  CashfreePaymentService,
+  PayoutTransferNotDispatchedError,
+} from '../payments/cashfree-payment.service';
 import { WalletNotificationDispatcher } from '../notifications/wallet-notification.dispatcher';
 import {
   LockedRiderFinance,
@@ -26,9 +29,32 @@ import {
   WalletActorType,
   WalletCodRepository,
 } from './wallet-cod.repository';
+import {
+  cashfreeBeneficiaryName,
+  decryptPayoutInstrument,
+  encryptPayoutInstrument,
+  payoutBeneficiaryId,
+} from './payout-instrument-crypto';
+import {
+  TRANSFER_NOT_SENT,
+  transferConfirmedUnsent,
+} from './payout-transfer-state';
 
 function merchantTransferIdFor(withdrawalId: string): string {
   return `w${withdrawalId.replace(/-/g, '')}`;
+}
+
+function maskVpa(vpa: string): string {
+  const at = vpa.indexOf('@');
+  const local = at > 0 ? vpa.slice(0, at) : vpa;
+  const domain = at > 0 ? vpa.slice(at) : '';
+  const visible = local.slice(0, 1);
+  return `${visible}***${domain}`;
+}
+
+function maskAccountNumber(accountNumber: string): string {
+  const tail = accountNumber.slice(-4);
+  return `XXXXXX${tail}`;
 }
 
 @Injectable()
@@ -203,6 +229,89 @@ export class WalletCodService {
     return { ...result, idempotent_replay: false };
   }
 
+  async saveOwnUpi(auth: AuthContext, vpaRaw: string) {
+    this.assertRider(auth);
+    const vpa = vpaRaw.trim();
+    const masked = maskVpa(vpa);
+    const stored = this.sealInstrument(vpa);
+    const saved = await this.postgres.transaction((tx) =>
+      this.repo.replaceCurrentUpi(auth.profileId, masked, stored, tx),
+    );
+    if (!saved) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    return {
+      rider_upi_id: saved.rider_upi_id,
+      vpa_masked: saved.vpa_masked,
+      is_current: true,
+    };
+  }
+
+  async clearOwnUpi(auth: AuthContext) {
+    this.assertRider(auth);
+    const cleared = await this.postgres.transaction((tx) =>
+      this.repo.clearCurrentUpi(auth.profileId, tx),
+    );
+    if (!cleared) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    return { cleared: true };
+  }
+
+  async getOwnDestinations(auth: AuthContext) {
+    this.assertRider(auth);
+    const upi = await this.repo.findCurrentUpi(auth.profileId, this.postgres);
+    const bank = await this.repo.findCurrentBankAccount(auth.profileId, this.postgres);
+    return {
+      upi: upi
+        ? {
+            available: true,
+            vpa_masked: upi.vpa_masked,
+            status: upi.cashfree_beneficiary_status ?? null,
+          }
+        : { available: false },
+      bank: bank
+        ? {
+            available: true,
+            account_masked: bank.account_masked,
+            ifsc: bank.ifsc_or_bank,
+            holder_name: bank.holder_name,
+            status: bank.cashfree_beneficiary_status ?? null,
+          }
+        : { available: false },
+    };
+  }
+
+  async saveOwnBank(
+    auth: AuthContext,
+    input: { holderName: string; accountNumber: string; ifsc: string },
+  ) {
+    this.assertRider(auth);
+    const accountNumber = input.accountNumber.replace(/\s+/g, '');
+    const ifsc = input.ifsc.trim().toUpperCase();
+    const storedAccount = this.sealInstrument(accountNumber);
+    const saved = await this.postgres.transaction((tx) =>
+      this.repo.replaceCurrentBank(
+        auth.profileId,
+        {
+          holderName: input.holderName.trim(),
+          accountMasked: maskAccountNumber(accountNumber),
+          accountNumber: storedAccount,
+          ifsc,
+        },
+        tx,
+      ),
+    );
+    if (!saved) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
+    }
+    return {
+      bank_account_id: saved.bank_account_id,
+      account_masked: saved.account_masked,
+      is_current: true,
+    };
+  }
+
   async requestWithdraw(
     auth: AuthContext,
     amountRaw: string,
@@ -237,6 +346,15 @@ export class WalletCodService {
             );
           }
           riderUpiId = upi.rider_upi_id;
+          this.assertEncryptedInstrument(upi.vpa_encrypted_or_token);
+          const driver = await this.identities.findRiderDriver(auth.profileId, tx);
+          if (!cashfreeBeneficiaryName(driver?.name)) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'A rider name with at least two letters is required before a UPI withdrawal',
+              409,
+            );
+          }
         } else {
           const bank = await this.repo.findCurrentBankAccount(auth.profileId, tx);
           if (!bank) {
@@ -247,6 +365,14 @@ export class WalletCodService {
             );
           }
           bankAccountId = bank.bank_account_id;
+          this.assertEncryptedInstrument(bank.account_encrypted_or_token);
+          if (!cashfreeBeneficiaryName(bank.holder_name)) {
+            throw new ApiError(
+              ErrorCodes.VALIDATION_ERROR,
+              'The bank account holder name must contain at least two letters before a bank withdrawal',
+              409,
+            );
+          }
         }
         const decreased = await this.repo.debitWallet(
           finance.wallet.wallet_account_id,
@@ -365,10 +491,20 @@ export class WalletCodService {
       if (!row) {
         throw new ApiError(ErrorCodes.NOT_FOUND, 'Withdrawal was not found', 404);
       }
-      if (row.status !== 'REQUESTED' && row.status !== 'PENDING') {
+      const unsentProcessing = transferConfirmedUnsent(
+        row.provider_status,
+        row.provider_transfer_id,
+      );
+      if (
+        row.status !== 'REQUESTED' &&
+        row.status !== 'PENDING' &&
+        !(row.status === 'PROCESSING' && unsentProcessing)
+      ) {
         throw new ApiError(
           ErrorCodes.VALIDATION_ERROR,
-          'Only requested withdrawals can be rejected',
+          row.status === 'PROCESSING'
+            ? 'Only an unsent withdrawal can be rejected. The Cashfree transfer outcome is still unknown'
+            : 'Only requested withdrawals can be rejected',
           409,
         );
       }
@@ -450,6 +586,7 @@ export class WalletCodService {
           status: 'PROCESSING',
           decidedByAdminProfileId: auth.profileId,
           merchantTransferId,
+          providerStatus: TRANSFER_NOT_SENT,
         },
         tx,
       );
@@ -479,57 +616,71 @@ export class WalletCodService {
       return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
     }
 
-    let vpa: string | null = null;
-    let bankAccountNumber: string | null = null;
-    let bankIfsc: string | null = null;
-    await this.postgres.transaction(async (tx) => {
-      if (prepared.payoutMethod === 'UPI') {
-        if (!prepared.riderUpiId) {
-          throw new ApiError(
-            ErrorCodes.VALIDATION_ERROR,
-            'Withdrawal is missing a UPI destination',
-            409,
-          );
-        }
-        const upi = await this.repo.findUpiById(prepared.riderUpiId, tx);
-        if (!upi?.vpa_encrypted_or_token) {
-          throw new ApiError(
-            ErrorCodes.VALIDATION_ERROR,
-            'UPI destination is incomplete',
-            409,
-          );
-        }
-        vpa = upi.vpa_encrypted_or_token;
-      } else {
-        if (!prepared.bankAccountId) {
-          throw new ApiError(
-            ErrorCodes.VALIDATION_ERROR,
-            'Withdrawal is missing a bank destination',
-            409,
-          );
-        }
-        const bank = await this.repo.findBankById(prepared.bankAccountId, tx);
-        if (!bank?.account_encrypted_or_token || !bank.ifsc_or_bank) {
-          throw new ApiError(
-            ErrorCodes.VALIDATION_ERROR,
-            'Bank destination is incomplete',
-            409,
-          );
-        }
-        bankAccountNumber = bank.account_encrypted_or_token;
-        bankIfsc = bank.ifsc_or_bank;
-      }
-    });
+    return this.continuePayout(prepared);
+  }
 
+  /**
+   * Registers the destination's beneficiary when needed, then sends one transfer.
+   * Unknown registration or transfer results stay PROCESSING and are not refunded.
+   */
+  private async continuePayout(prepared: {
+    withdrawalId: string;
+    merchantTransferId: string;
+    amount: string;
+    payoutMethod: 'UPI' | 'BANK';
+    riderProfileId: string;
+    riderUpiId: string | null;
+    bankAccountId: string | null;
+  }): Promise<{ withdrawal_id: string; status: string }> {
+    const withdrawalId = prepared.withdrawalId;
+    const gate = await this.ensurePayoutBeneficiary(prepared);
+    if (gate.state === 'wait') {
+      return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+    }
+    if (gate.state === 'unavailable') {
+      if (gate.reason === 'instrument_unreadable') {
+        await this.reportUnsentBlocker(
+          withdrawalId,
+          'Payout destination cannot be read with the configured key',
+        );
+        return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+      }
+      const failed = await this.failConfirmedUnsentWithdrawal(
+        withdrawalId,
+        gate.reason === 'beneficiary_name_missing'
+          ? 'Beneficiary name is missing'
+          : 'Payout destination is missing',
+      );
+      return {
+        withdrawal_id: withdrawalId,
+        status: failed ? 'FAILED' : 'PROCESSING',
+      };
+    }
+    if (gate.state === 'rejected') {
+      const failed = await this.failConfirmedUnsentWithdrawal(
+        withdrawalId,
+        'Cashfree rejected the beneficiary',
+      );
+      return {
+        withdrawal_id: withdrawalId,
+        status: failed ? 'FAILED' : 'PROCESSING',
+      };
+    }
+    const claimed = await this.postgres.transaction((tx) =>
+      this.repo.claimPayoutTransferDispatch(withdrawalId, tx),
+    );
+    if (!claimed) {
+      return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+    }
     try {
       const transfer = await this.cashfree.initiatePayoutTransfer({
         merchantTransferId: prepared.merchantTransferId,
         amount: prepared.amount,
         payoutMethod: prepared.payoutMethod,
-        beneficiaryId: prepared.riderProfileId.replace(/-/g, '').slice(0, 50),
-        vpa,
-        bankAccountNumber,
-        bankIfsc,
+        beneficiaryId: gate.beneficiaryId,
+        vpa: gate.vpa,
+        bankAccountNumber: gate.bankAccountNumber,
+        bankIfsc: gate.bankIfsc,
       });
       if (transfer.outcome === 'rejected') {
         await this.applyAuthoritativePayoutOutcome({
@@ -584,7 +735,13 @@ export class WalletCodService {
       }
       return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
     } catch (err) {
-      // Network/timeout after merchant_transfer_id is persisted: do NOT refund.
+      if (err instanceof PayoutTransferNotDispatchedError) {
+        await this.postgres.transaction((tx) =>
+          this.repo.releasePayoutTransferDispatch(withdrawalId, tx),
+        );
+        return { withdrawal_id: withdrawalId, status: 'PROCESSING' };
+      }
+      // The request may have reached Cashfree. Keep the claim and the debit.
       this.logger.warn('cashfree_payout_initiate_uncertain', {
         withdrawal_id: withdrawalId,
         merchant_transfer_id: prepared.merchantTransferId,
@@ -764,6 +921,29 @@ export class WalletCodService {
       const snapshot = await this.cashfree.retrievePayoutTransfer(
         locked.merchant_transfer_id,
       );
+      if (snapshot.outcome === 'not_found') {
+        if (
+          !transferConfirmedUnsent(
+            locked.provider_status,
+            locked.provider_transfer_id,
+          )
+        ) {
+          return { status: 'PROCESSING', result: 'requires_review' };
+        }
+        const continued = await this.continuePayout({
+          withdrawalId,
+          merchantTransferId: locked.merchant_transfer_id,
+          amount: locked.amount,
+          payoutMethod: locked.payout_method as 'UPI' | 'BANK',
+          riderProfileId: locked.rider_profile_id,
+          riderUpiId: locked.rider_upi_id,
+          bankAccountId: locked.bank_account_id,
+        });
+        return {
+          status: continued.status,
+          result: continued.status === 'FAILED' ? 'applied' : 'requires_review',
+        };
+      }
       return this.applyAuthoritativePayoutOutcome({
         withdrawalId,
         outcome: snapshot.outcome,
@@ -1488,6 +1668,296 @@ export class WalletCodService {
         403,
       );
     }
+  }
+
+  private sealInstrument(plaintext: string): string {
+    const key = this.payoutKey();
+    if (!key) {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Payout instrument encryption is not configured',
+        503,
+      );
+    }
+    return encryptPayoutInstrument(plaintext, key);
+  }
+
+  private assertEncryptedInstrument(stored: string): void {
+    const key = this.payoutKey();
+    if (!key) {
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Payout instrument encryption is not configured',
+        503,
+      );
+    }
+    if (!stored.startsWith('enc1:')) {
+      throw new ApiError(
+        ErrorCodes.VALIDATION_ERROR,
+        'Save the payout destination again before requesting a withdrawal',
+        409,
+      );
+    }
+    try {
+      decryptPayoutInstrument(stored, key);
+    } catch {
+      throw new ApiError(
+        ErrorCodes.VALIDATION_ERROR,
+        'Save the payout destination again before requesting a withdrawal',
+        409,
+      );
+    }
+  }
+
+  /**
+   * Refunds once only while this process has recorded that no transfer request
+   * was sent. A claimed or legacy row is left PROCESSING.
+   */
+  private async failConfirmedUnsentWithdrawal(
+    withdrawalId: string,
+    failureReason: string,
+  ): Promise<boolean> {
+    return this.postgres.transaction(async (tx) => {
+      const row = await this.repo.lockWithdrawal(withdrawalId, tx);
+      if (!row || row.status !== 'PROCESSING') {
+        return false;
+      }
+      if (!transferConfirmedUnsent(row.provider_status, row.provider_transfer_id)) {
+        return false;
+      }
+      const restored = await this.refundWithdrawalOnce(
+        {
+          withdrawalId,
+          riderProfileId: row.rider_profile_id,
+          amount: row.amount,
+          actorType: 'SYSTEM',
+          actorProfileId: null,
+          notifyType: 'WITHDRAWAL_FAILED',
+        },
+        tx,
+      );
+      await this.repo.updateWithdrawalStatus(
+        {
+          withdrawalId,
+          status: 'FAILED',
+          providerStatus: 'FAILED',
+          failureReason,
+          processed: true,
+          refundWalletLedgerId: restored.wallet_ledger_id,
+          touchReconciled: true,
+        },
+        tx,
+      );
+      return true;
+    });
+  }
+
+  private async reportUnsentBlocker(
+    withdrawalId: string,
+    failureReason: string,
+  ): Promise<void> {
+    await this.postgres.transaction(async (tx) => {
+      const row = await this.repo.lockWithdrawal(withdrawalId, tx);
+      if (
+        !row ||
+        row.status !== 'PROCESSING' ||
+        !transferConfirmedUnsent(row.provider_status, row.provider_transfer_id)
+      ) {
+        return;
+      }
+      await this.repo.updateWithdrawalStatus(
+        {
+          withdrawalId,
+          status: 'PROCESSING',
+          failureReason,
+          touchReconciled: true,
+        },
+        tx,
+      );
+    });
+  }
+
+  private openInstrument(stored: string): string | null {
+    try {
+      return decryptPayoutInstrument(stored, this.payoutKey());
+    } catch {
+      this.logger.warn('payout_instrument_unreadable', {});
+      return null;
+    }
+  }
+
+  private payoutKey(): Buffer | null {
+    const raw = this.config.getOrThrow<AppConfig['payment']>('payment').payoutInstrumentKey;
+    if (!raw) {
+      return null;
+    }
+    const key = Buffer.from(raw, 'base64');
+    return key.length === 32 ? key : null;
+  }
+
+  private async ensurePayoutBeneficiary(prepared: {
+    payoutMethod: 'UPI' | 'BANK';
+    riderProfileId: string;
+    riderUpiId: string | null;
+    bankAccountId: string | null;
+  }): Promise<
+    | {
+        state: 'ready';
+        beneficiaryId: string;
+        vpa: string | null;
+        bankAccountNumber: string | null;
+        bankIfsc: string | null;
+      }
+    | { state: 'wait' }
+    | { state: 'rejected' }
+    | {
+        state: 'unavailable';
+        reason:
+          | 'destination_missing'
+          | 'instrument_unreadable'
+          | 'beneficiary_name_missing';
+      }
+  > {
+    const loaded = await this.postgres.transaction(async (tx) => {
+      if (prepared.payoutMethod === 'UPI') {
+        if (!prepared.riderUpiId) {
+          return null;
+        }
+        const upi = await this.repo.findUpiById(prepared.riderUpiId, tx);
+        if (!upi?.vpa_encrypted_or_token) {
+          return null;
+        }
+        const expectedId = payoutBeneficiaryId('UPI', upi.rider_upi_id);
+        const registered =
+          upi.cashfree_beneficiary_status === 'REGISTERED' &&
+          upi.cashfree_beneficiary_id === expectedId;
+        const driver = registered
+          ? null
+          : await this.identities.findRiderDriver(prepared.riderProfileId, tx);
+        return {
+          kind: 'UPI' as const,
+          destinationId: upi.rider_upi_id,
+          storedInstrument: upi.vpa_encrypted_or_token,
+          ifsc: null as string | null,
+          name: cashfreeBeneficiaryName(driver?.name),
+          registered,
+          beneficiaryId: upi.cashfree_beneficiary_id,
+          status: upi.cashfree_beneficiary_status,
+        };
+      }
+      if (!prepared.bankAccountId) {
+        return null;
+      }
+      const bank = await this.repo.findBankById(prepared.bankAccountId, tx);
+      if (!bank?.account_encrypted_or_token || !bank.ifsc_or_bank) {
+        return null;
+      }
+      const expectedId = payoutBeneficiaryId('BANK', bank.bank_account_id);
+      const registered =
+        bank.cashfree_beneficiary_status === 'REGISTERED' &&
+        bank.cashfree_beneficiary_id === expectedId;
+      return {
+        kind: 'BANK' as const,
+        destinationId: bank.bank_account_id,
+        storedInstrument: bank.account_encrypted_or_token,
+        ifsc: bank.ifsc_or_bank,
+        name: cashfreeBeneficiaryName(bank.holder_name),
+        registered,
+        beneficiaryId: bank.cashfree_beneficiary_id,
+        status: bank.cashfree_beneficiary_status,
+      };
+    });
+    if (!loaded) {
+      return { state: 'unavailable', reason: 'destination_missing' };
+    }
+    const instrument = this.openInstrument(loaded.storedInstrument);
+    if (!instrument) {
+      return { state: 'unavailable', reason: 'instrument_unreadable' };
+    }
+    const vpa = loaded.kind === 'UPI' ? instrument : null;
+    const bankAccountNumber = loaded.kind === 'BANK' ? instrument : null;
+    if (
+      loaded.registered &&
+      loaded.beneficiaryId &&
+      loaded.beneficiaryId === payoutBeneficiaryId(loaded.kind, loaded.destinationId)
+    ) {
+      return {
+        state: 'ready',
+        beneficiaryId: loaded.beneficiaryId,
+        vpa,
+        bankAccountNumber,
+        bankIfsc: loaded.ifsc,
+      };
+    }
+    if (!loaded.name) {
+      return { state: 'unavailable', reason: 'beneficiary_name_missing' };
+    }
+    const beneficiaryName = loaded.name;
+    const beneficiaryId = payoutBeneficiaryId(loaded.kind, loaded.destinationId);
+    await this.postgres.transaction(async (tx) => {
+      if (loaded.kind === 'UPI') {
+        await this.repo.saveUpiBeneficiary(loaded.destinationId, beneficiaryId, 'UNKNOWN', tx);
+      } else {
+        await this.repo.saveBankBeneficiary(loaded.destinationId, beneficiaryId, 'UNKNOWN', tx);
+      }
+    });
+    const existing = await this.cashfree.getPayoutBeneficiary(beneficiaryId);
+    if (existing.outcome === 'unknown') {
+      return { state: 'wait' };
+    }
+    if (existing.outcome === 'registered' && existing.beneficiaryId === beneficiaryId) {
+      await this.markBeneficiaryRegistered(loaded.kind, loaded.destinationId, beneficiaryId);
+      return {
+        state: 'ready',
+        beneficiaryId,
+        vpa,
+        bankAccountNumber,
+        bankIfsc: loaded.ifsc,
+      };
+    }
+    if (existing.outcome !== 'missing') {
+      return { state: 'wait' };
+    }
+    const created = await this.cashfree.registerPayoutBeneficiary({
+      beneficiaryId,
+      beneficiaryName,
+      payoutMethod: loaded.kind,
+      vpa,
+      bankAccountNumber,
+      bankIfsc: loaded.ifsc,
+    });
+    if (created.outcome === 'unknown') {
+      return { state: 'wait' };
+    }
+    if (created.outcome === 'rejected') {
+      return { state: 'rejected' };
+    }
+    const confirmed = await this.cashfree.getPayoutBeneficiary(beneficiaryId);
+    if (confirmed.outcome === 'registered' && confirmed.beneficiaryId === beneficiaryId) {
+      await this.markBeneficiaryRegistered(loaded.kind, loaded.destinationId, beneficiaryId);
+      return {
+        state: 'ready',
+        beneficiaryId,
+        vpa,
+        bankAccountNumber,
+        bankIfsc: loaded.ifsc,
+      };
+    }
+    return { state: 'wait' };
+  }
+
+  private async markBeneficiaryRegistered(
+    kind: 'UPI' | 'BANK',
+    destinationId: string,
+    beneficiaryId: string,
+  ): Promise<void> {
+    await this.postgres.transaction(async (tx) => {
+      if (kind === 'UPI') {
+        await this.repo.saveUpiBeneficiary(destinationId, beneficiaryId, 'REGISTERED', tx);
+      } else {
+        await this.repo.saveBankBeneficiary(destinationId, beneficiaryId, 'REGISTERED', tx);
+      }
+    });
   }
 
   private assertRider(auth: AuthContext): void {

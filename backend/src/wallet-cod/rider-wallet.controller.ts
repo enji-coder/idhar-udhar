@@ -15,6 +15,8 @@ import { UuidParamPipe } from '../common/uuid-param.pipe';
 import { readIdempotencyKey } from '../orders/idempotency-key';
 import { PaymentsService } from '../payments/payments.service';
 import { AmountDto } from './dto/amount.dto';
+import { SaveBankDto } from './dto/save-bank.dto';
+import { SaveUpiDto } from './dto/save-upi.dto';
 import { WithdrawDto } from './dto/withdraw.dto';
 import { WalletCodService } from './wallet-cod.service';
 
@@ -60,6 +62,37 @@ export class RiderWalletController {
     @Param('transactionId', UuidParamPipe) transactionId: string,
   ) {
     return this.payments.verifyRiderWalletTopUp(auth, transactionId);
+  }
+
+  @Roles('RIDER')
+  @Get('payout-destinations')
+  destinations(@CurrentAuth() auth: AuthContext) {
+    return this.walletCod.getOwnDestinations(auth);
+  }
+
+  @Roles('RIDER')
+  @Post('payout-destinations/upi')
+  @HttpCode(HttpStatus.CREATED)
+  saveUpi(@CurrentAuth() auth: AuthContext, @Body() body: SaveUpiDto) {
+    return this.walletCod.saveOwnUpi(auth, body.vpa);
+  }
+
+  @Roles('RIDER')
+  @Post('payout-destinations/upi/clear')
+  @HttpCode(HttpStatus.OK)
+  clearUpi(@CurrentAuth() auth: AuthContext) {
+    return this.walletCod.clearOwnUpi(auth);
+  }
+
+  @Roles('RIDER')
+  @Post('payout-destinations/bank')
+  @HttpCode(HttpStatus.CREATED)
+  saveBank(@CurrentAuth() auth: AuthContext, @Body() body: SaveBankDto) {
+    return this.walletCod.saveOwnBank(auth, {
+      holderName: body.holder_name,
+      accountNumber: body.account_number,
+      ifsc: body.ifsc,
+    });
   }
 
   @Roles('RIDER')

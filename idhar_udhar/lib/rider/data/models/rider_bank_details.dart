@@ -7,6 +7,8 @@ class RiderBankDetails {
     required this.upiId,
     this.upiVerified = false,
     this.proofUploaded = false,
+    this.upiOnServer = false,
+    this.bankOnServer = false,
   });
 
   final String bankName;
@@ -16,6 +18,8 @@ class RiderBankDetails {
   final String upiId;
   final bool upiVerified;
   final bool proofUploaded;
+  final bool upiOnServer;
+  final bool bankOnServer;
 
   static const RiderBankDetails empty = RiderBankDetails(
     bankName: '',
@@ -43,6 +47,8 @@ class RiderBankDetails {
     String? upiId,
     bool? upiVerified,
     bool? proofUploaded,
+    bool? upiOnServer,
+    bool? bankOnServer,
   }) {
     return RiderBankDetails(
       bankName: bankName ?? this.bankName,
@@ -52,6 +58,8 @@ class RiderBankDetails {
       upiId: upiId ?? this.upiId,
       upiVerified: upiVerified ?? this.upiVerified,
       proofUploaded: proofUploaded ?? this.proofUploaded,
+      upiOnServer: upiOnServer ?? this.upiOnServer,
+      bankOnServer: bankOnServer ?? this.bankOnServer,
     );
   }
 }

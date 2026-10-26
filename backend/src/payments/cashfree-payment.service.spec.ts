@@ -151,7 +151,7 @@ describe('defaultCashfreeHttp', () => {
 
 describe('CashfreePaymentService', () => {
   function serviceWith(environment: 'sandbox' | 'production') {
-    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const calls: { url: string; headers: Record<string, string>; body?: string }[] = [];
     const config = {
       getOrThrow: () => ({
         provider: 'cashfree',
@@ -192,7 +192,7 @@ describe('CashfreePaymentService', () => {
       logger as never,
     );
     service.useHttp(async (url, init) => {
-      calls.push({ url, headers: init.headers });
+      calls.push({ url, headers: init.headers, body: init.body });
       const body = JSON.parse(init.body ?? '{}') as {
         order_id?: string;
         order_amount?: number;
@@ -308,5 +308,118 @@ describe('CashfreePaymentService', () => {
       status: 503,
     });
     expect(http).not.toHaveBeenCalled();
+  });
+
+  it('registers a UPI beneficiary with the 2024-01-01 body and confirmed id', async () => {
+    const { service, calls } = serviceWith('sandbox');
+    service.useHttp(async (url, init) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      return {
+        status: 201,
+        json: { beneficiary_id: 'uupi1', beneficiary_status: 'VERIFIED' },
+      };
+    });
+    const result = await service.registerPayoutBeneficiary({
+      beneficiaryId: 'uupi1',
+      beneficiaryName: 'Ravi Kumar',
+      payoutMethod: 'UPI',
+      vpa: 'rider@upi',
+    });
+    expect(result).toEqual({ outcome: 'registered', beneficiaryId: 'uupi1' });
+    const body = JSON.parse(calls[0].body ?? '{}') as {
+      beneficiary_id: string;
+      beneficiary_name: string;
+      beneficiary_instrument_details: { vpa?: string; bank_account_number?: string };
+    };
+    expect(calls[0].url).toBe('https://sandbox.cashfree.com/payout/beneficiary');
+    expect(calls[0].headers['x-api-version']).toBe('2024-01-01');
+    expect(body).toEqual({
+      beneficiary_id: 'uupi1',
+      beneficiary_name: 'Ravi Kumar',
+      beneficiary_instrument_details: { vpa: 'rider@upi' },
+    });
+    expect(body.beneficiary_instrument_details.bank_account_number).toBeUndefined();
+  });
+
+  it('treats a duplicate beneficiary create as duplicate and a timeout as unknown', async () => {
+    const { service } = serviceWith('sandbox');
+    service.useHttp(async () => ({ status: 409, json: { message: 'exists' } }));
+    await expect(
+      service.registerPayoutBeneficiary({
+        beneficiaryId: 'uupi1',
+        beneficiaryName: 'Ravi Kumar',
+        payoutMethod: 'UPI',
+        vpa: 'rider@upi',
+      }),
+    ).resolves.toEqual({ outcome: 'duplicate', beneficiaryId: 'uupi1' });
+
+    const { ApiError } = await import('../common/errors/api-error');
+    const { ErrorCodes } = await import('../common/errors/error-codes');
+    service.useHttp(async () => {
+      throw new ApiError(ErrorCodes.PAYMENT_GATEWAY_REJECTED, 'Cashfree did not respond', 503);
+    });
+    await expect(
+      service.registerPayoutBeneficiary({
+        beneficiaryId: 'uupi1',
+        beneficiaryName: 'Ravi Kumar',
+        payoutMethod: 'UPI',
+        vpa: 'rider@upi',
+      }),
+    ).resolves.toEqual({ outcome: 'unknown', beneficiaryId: null });
+  });
+
+  it('sends a transfer only with the supplied registered beneficiary and UPI instrument', async () => {
+    const { service, calls } = serviceWith('sandbox');
+    service.useHttp(async (url, init) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      return { status: 200, json: { status: 'PENDING', cf_transfer_id: 'cf-1' } };
+    });
+    await service.initiatePayoutTransfer({
+      merchantTransferId: 'wabc',
+      amount: '25.00',
+      payoutMethod: 'UPI',
+      beneficiaryId: 'uupi1',
+      vpa: 'rider@upi',
+    });
+    const body = JSON.parse(calls[0].body ?? '{}') as {
+      beneficiary_details: {
+        beneficiary_id: string;
+        beneficiary_instrument_details: { vpa: string };
+      };
+    };
+    expect(body.beneficiary_details.beneficiary_id).toBe('uupi1');
+    expect(body.beneficiary_details.beneficiary_instrument_details).toEqual({
+      vpa: 'rider@upi',
+    });
+  });
+
+  it('treats a transport failure as ambiguous after HTTP has started', async () => {
+    const { service } = serviceWith('sandbox');
+    const { ApiError } = await import('../common/errors/api-error');
+    const { ErrorCodes } = await import('../common/errors/error-codes');
+    const { PayoutTransferNotDispatchedError } = await import('./cashfree-payment.service');
+    const http = jest.fn(async () => {
+      throw new ApiError(ErrorCodes.PAYMENT_GATEWAY_REJECTED, 'Cashfree did not respond', 503);
+    });
+    service.useHttp(http);
+    await expect(
+      service.initiatePayoutTransfer({
+        merchantTransferId: 'wabc',
+        amount: '25.00',
+        payoutMethod: 'UPI',
+        beneficiaryId: 'uupi1',
+        vpa: 'rider@upi',
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+    await expect(
+      service.initiatePayoutTransfer({
+        merchantTransferId: 'wabc',
+        amount: '25.00',
+        payoutMethod: 'UPI',
+        beneficiaryId: 'uupi1',
+        vpa: 'rider@upi',
+      }),
+    ).rejects.not.toBeInstanceOf(PayoutTransferNotDispatchedError);
+    expect(http).toHaveBeenCalled();
   });
 });
