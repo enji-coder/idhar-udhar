@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "migrate",
-      "image": "635738235470.dkr.ecr.ap-south-1.amazonaws.com/iu-staging-backend:staging-20261026-01",
+      "image": "635738235470.dkr.ecr.ap-south-1.amazonaws.com/iu-staging-backend:staging-20261027-01",
       "essential": true,
       "command": ["node", "scripts/migrate.mjs"],
       "environment": [

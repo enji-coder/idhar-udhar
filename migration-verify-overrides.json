@@ -1,0 +1,12 @@
+{
+  "containerOverrides": [
+    {
+      "name": "migrate",
+      "command": [
+        "node",
+        "-e",
+        "const {Client}=require('pg'); const fs=require('fs'); (async()=>{const c=new Client({host:process.env.DATABASE_HOST,port:Number(process.env.DATABASE_PORT),database:process.env.DATABASE_NAME,user:process.env.DATABASE_USER,password:process.env.DATABASE_PASSWORD,ssl:{rejectUnauthorized:true,ca:fs.readFileSync(process.env.DATABASE_SSL_ROOT_CERT,'utf8')}}); await c.connect(); try { const r=await c.query('SELECT version, filename FROM schema_migrations ORDER BY version'); const t=await c.query(\"SELECT count(*)::int AS table_count FROM information_schema.tables WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')\"); console.log(JSON.stringify({database:(await c.query('SELECT current_database() AS database')).rows[0].database,migrationCount:r.rows.length,first:r.rows[0],last:r.rows[r.rows.length-1],tableCount:t.rows[0].table_count},null,2)); } finally {await c.end();}})().catch(e=>{console.error(e);process.exitCode=1})"
+      ]
+    }
+  ]
+}
