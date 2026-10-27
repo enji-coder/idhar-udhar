@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import {
+  assertMigrationTarget,
   assertProductionMigrationIdentity,
   assertRecordedChecksums,
   assertUniqueNumericPrefixes,
@@ -230,6 +231,99 @@ test('a guessed 0028 file is refused before it can be applied', () => {
         ]),
       ),
     /Unrecovered production migration/,
+  );
+});
+
+test('migration target refuses production and pins staging', () => {
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST:
+          'idhar-udhar-prod-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+        DATABASE_NAME: 'idhar_udhar_staging',
+      }),
+    /Refusing production database host/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST: '127.0.0.1',
+        DATABASE_NAME: 'local',
+        IU_DEPLOYMENT_TIER: 'production',
+      }),
+    /IU_DEPLOYMENT_TIER=production/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST:
+          'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+        DATABASE_NAME: 'idhar_udhar_staging',
+        CASHFREE_ENVIRONMENT: 'production',
+      }),
+    /CASHFREE_ENVIRONMENT=production/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST: '127.0.0.1',
+        DATABASE_NAME: 'idhar_udhar',
+        IU_DEPLOYMENT_TIER: 'staging',
+        CASHFREE_ENVIRONMENT: 'sandbox',
+      }),
+    /staging database host/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST:
+          'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+        DATABASE_NAME: 'idhar_udhar',
+        IU_DEPLOYMENT_TIER: 'staging',
+        CASHFREE_ENVIRONMENT: 'sandbox',
+      }),
+    /DATABASE_NAME=idhar_udhar_staging/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST:
+          'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+        DATABASE_NAME: 'idhar_udhar_staging',
+        IU_DEPLOYMENT_TIER: 'staging',
+      }),
+    /CASHFREE_ENVIRONMENT=sandbox/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST:
+          'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+        DATABASE_NAME: 'idhar_udhar_staging',
+        IU_DEPLOYMENT_TIER: 'staging',
+        CASHFREE_ENVIRONMENT: '',
+      }),
+    /CASHFREE_ENVIRONMENT=sandbox/,
+  );
+  assert.throws(
+    () =>
+      assertMigrationTarget({
+        DATABASE_HOST:
+          'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+        DATABASE_NAME: 'idhar_udhar_staging',
+        IU_DEPLOYMENT_TIER: 'staging',
+        CASHFREE_ENVIRONMENT: 'test',
+      }),
+    /CASHFREE_ENVIRONMENT=sandbox/,
+  );
+  assert.doesNotThrow(() =>
+    assertMigrationTarget({
+      DATABASE_HOST:
+        'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com',
+      DATABASE_NAME: 'idhar_udhar_staging',
+      IU_DEPLOYMENT_TIER: 'staging',
+      CASHFREE_ENVIRONMENT: 'sandbox',
+    }),
   );
 });
 

@@ -1,0 +1,30 @@
+{
+  "review": {
+    "status": "not-reviewed",
+    "notes": [
+      "Do not register the task definition or run this task until a human reviews both files.",
+      "Do not add an apply-confirmation variable.",
+      "Do not use ecs-migration-task-definition.json or migration-taskdef-*.json.",
+      "Cluster iu-staging-cluster is in VPC vpc-08331f9b7a8b89c22.",
+      "The task attaches only backend security group sg-003b05a0b649edf79.",
+      "Database security group sg-0638370629287c29c stays on iu-staging-db and is not attached to the task."
+    ]
+  },
+  "awsCli": "aws ecs run-task --region ap-south-1 --cluster iu-staging-cluster --launch-type FARGATE --task-definition idhar-udhar-staging-migrate --count 1 --network-configuration awsvpcConfiguration={subnets=[subnet-09ab7e7236a075ef6,subnet-07eac5da4b69b70d5],securityGroups=[sg-003b05a0b649edf79],assignPublicIp=DISABLED}",
+  "runTask": {
+    "cluster": "iu-staging-cluster",
+    "launchType": "FARGATE",
+    "taskDefinition": "idhar-udhar-staging-migrate",
+    "count": 1,
+    "networkConfiguration": {
+      "awsvpcConfiguration": {
+        "subnets": [
+          "subnet-09ab7e7236a075ef6",
+          "subnet-07eac5da4b69b70d5"
+        ],
+        "securityGroups": ["sg-003b05a0b649edf79"],
+        "assignPublicIp": "DISABLED"
+      }
+    }
+  }
+}

@@ -184,6 +184,50 @@ export function assertRecordedChecksums(recorded, localChecksumByVersion) {
   }
 }
 
+export const PRODUCTION_DATABASE_HOST =
+  'idhar-udhar-prod-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com';
+export const STAGING_DATABASE_HOST =
+  'iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com';
+export const STAGING_DATABASE_NAME = 'idhar_udhar_staging';
+
+/**
+ * Refuses the production RDS endpoint before any connection.
+ * Staging tier must use the staging host, staging database name, and
+ * Cashfree sandbox. Local runs that leave IU_DEPLOYMENT_TIER unset are unchanged.
+ */
+export function assertMigrationTarget(env = process.env) {
+  const host = (env.DATABASE_HOST || '').trim().toLowerCase();
+  const name = (env.DATABASE_NAME || '').trim();
+  const tier = (env.IU_DEPLOYMENT_TIER || '').trim().toLowerCase();
+  const cashfree = (env.CASHFREE_ENVIRONMENT || '').trim().toLowerCase();
+  if (host === PRODUCTION_DATABASE_HOST) {
+    throw new Error('Refusing production database host');
+  }
+  if (tier === 'production') {
+    throw new Error('Refusing IU_DEPLOYMENT_TIER=production');
+  }
+  if (cashfree === 'production') {
+    throw new Error('Refusing CASHFREE_ENVIRONMENT=production');
+  }
+  if (tier === 'staging') {
+    if (host !== STAGING_DATABASE_HOST) {
+      throw new Error(
+        'IU_DEPLOYMENT_TIER=staging requires the staging database host',
+      );
+    }
+    if (name !== STAGING_DATABASE_NAME) {
+      throw new Error(
+        'IU_DEPLOYMENT_TIER=staging requires DATABASE_NAME=idhar_udhar_staging',
+      );
+    }
+    if (cashfree !== 'sandbox') {
+      throw new Error(
+        'IU_DEPLOYMENT_TIER=staging requires CASHFREE_ENVIRONMENT=sandbox',
+      );
+    }
+  }
+}
+
 export function sha256Hex(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -312,6 +356,7 @@ export async function runMigrations({ dryRun }) {
   if (!Number.isInteger(port)) {
     throw new Error('DATABASE_PORT must be a number');
   }
+  assertMigrationTarget();
 
   const client = new pg.Client({
     host: requireEnv('DATABASE_HOST'),

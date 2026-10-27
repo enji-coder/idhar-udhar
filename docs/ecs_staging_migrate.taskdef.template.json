@@ -1,0 +1,42 @@
+{
+  "family": "idhar-udhar-staging-migrate",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::635738235470:role/iu-staging-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::635738235470:role/iu-staging-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "migrate",
+      "image": "635738235470.dkr.ecr.ap-south-1.amazonaws.com/iu-staging-backend:staging-20261026-01",
+      "essential": true,
+      "command": ["node", "scripts/migrate.mjs"],
+      "environment": [
+        { "name": "MIGRATE_DRY_RUN", "value": "1" },
+        { "name": "IU_DEPLOYMENT_TIER", "value": "staging" },
+        { "name": "CASHFREE_ENVIRONMENT", "value": "sandbox" },
+        { "name": "DATABASE_HOST", "value": "iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com" },
+        { "name": "DATABASE_PORT", "value": "5432" },
+        { "name": "DATABASE_NAME", "value": "idhar_udhar_staging" },
+        { "name": "DATABASE_USER", "value": "iu_staging_admin" },
+        { "name": "DATABASE_SSL", "value": "true" },
+        { "name": "DATABASE_SSL_ROOT_CERT", "value": "/app/certs/rds-global-bundle.pem" }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:DATABASE_PASSWORD::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/iu-staging-backend",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "migrate-dry-run"
+        }
+      }
+    }
+  ]
+}
