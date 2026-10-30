@@ -23,8 +23,22 @@ class RiderVehicleOptionCard extends StatelessWidget {
   final VoidCallback onTap;
 
   IconData get _icon {
+    switch (label.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim()) {
+      case 'bike':
+      case 'scooty':
+      case 'scooter':
+        return Icons.two_wheeler_rounded;
+      case '3w tempo':
+      case '3w auto':
+        return Icons.airport_shuttle_rounded;
+      case 'chhota hathi / tata ace':
+      case 'pickup':
+      case 'tempo 407':
+      case 'truck / eicher':
+        return Icons.local_shipping_rounded;
+    }
     final value = label.toLowerCase();
-    if (value.contains('bike') || value.contains('scooter')) {
+    if (value == 'bike' || value.contains('scooter')) {
       return Icons.two_wheeler_rounded;
     }
     if (value.contains('auto')) {

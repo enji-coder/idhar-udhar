@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/maps/geo_point.dart';
+import 'package:idhar_udhar/shared/parcel/dimension_cm.dart';
 
 import '../data/mock/mock_data.dart';
 import '../data/mock/mock_models.dart';
@@ -194,35 +195,18 @@ class BookingDraft {
     return value;
   }
 
-  /// Max parcel size in cm from vehicle description (admin category size).
-  double? get vehicleMaxSizeCm {
-    final String? raw = vehicle?.description;
-    if (raw == null || raw.trim().isEmpty) {
-      return null;
-    }
-    final Match? match = RegExp(
-      r'(\d+(?:\.\d+)?)\s*(cm)?',
-      caseSensitive: false,
-    ).firstMatch(raw.trim());
-    if (match == null) {
-      return null;
-    }
-    final double? value = double.tryParse(match.group(1)!);
-    if (value == null || value <= 0) {
-      return null;
-    }
-    return value;
-  }
+  /// Max parcel size in cm when the vehicle size is one explicit length.
+  double? get vehicleMaxSizeCm => parseSingleSizeLimitCm(vehicle?.description);
 
   bool parcelSizeAllowed(MockParcelSize size) {
-    final double? maxCm = vehicleMaxSizeCm;
-    if (maxCm == null) {
+    final int? maxThousandths = parseSingleSizeThousandths(vehicle?.description);
+    if (maxThousandths == null) {
       return true;
     }
     if (size.maxCm == null) {
       return false;
     }
-    return size.maxCm! <= maxCm + 0.0001;
+    return (size.maxCm! * 1000).round() <= maxThousandths;
   }
 
   bool weightAllowed(double kg) {

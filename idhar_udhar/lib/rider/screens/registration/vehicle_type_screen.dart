@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
+import '../../data/models/vehicle_info.dart';
 import '../../routing/rider_routes.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -41,8 +42,10 @@ class _VehicleTypeScreenState extends ConsumerState<VehicleTypeScreen> {
       data: (rows) => rows.where((row) => row.isActive).toList(),
       orElse: () => const <VehicleCategory>[],
     );
+    final bool loading = catalog.isLoading;
+    final bool failed = catalog.hasError;
     final String? selected = _selected ??
-        (options.isNotEmpty ? options.first.name : null);
+        (options.isNotEmpty ? options.first.id : null);
 
     return RiderScaffold(
       appBar: AppBar(
@@ -56,10 +59,22 @@ class _VehicleTypeScreenState extends ConsumerState<VehicleTypeScreen> {
         label: 'Continue',
         onPressed: selected == null
             ? null
-            : () => context.push(
+            : () {
+                VehicleCategory? chosen;
+                for (final VehicleCategory row in options) {
+                  if (row.id == selected) {
+                    chosen = row;
+                    break;
+                  }
+                }
+                if (chosen == null) {
+                  return;
+                }
+                context.push(
                   RiderRoutes.vehicleDetails,
-                  extra: selected,
-                ),
+                  extra: RiderCategoryChoice(id: chosen.id, name: chosen.name),
+                );
+              },
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -72,23 +87,41 @@ class _VehicleTypeScreenState extends ConsumerState<VehicleTypeScreen> {
               style: RiderTextStyles.caption,
             ),
             const SizedBox(height: RiderSpacing.xl),
-            if (catalog.hasError)
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: RiderSpacing.lg),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (failed) ...[
               Text(
                 'Vehicle categories could not be loaded.',
-                style: RiderTextStyles.caption,
-              )
-            else if (!catalog.isLoading && options.isEmpty)
-              Text(
-                'No vehicle categories are available.',
-                style: RiderTextStyles.caption,
+                style: RiderTextStyles.body,
               ),
+              const SizedBox(height: RiderSpacing.md),
+              OutlinedButton(
+                onPressed: () =>
+                    ref.invalidate(vehicleCategoryCatalogProvider),
+                child: const Text('Try again'),
+              ),
+            ] else if (options.isEmpty) ...[
+              Text(
+                'No vehicle categories are available on this server yet.',
+                style: RiderTextStyles.body,
+              ),
+              const SizedBox(height: RiderSpacing.md),
+              OutlinedButton(
+                onPressed: () =>
+                    ref.invalidate(vehicleCategoryCatalogProvider),
+                child: const Text('Try again'),
+              ),
+            ],
             for (final category in options) ...[
               RiderVehicleOptionCard(
                 label: category.name,
                 subtitle: _subtitleFor(category.name),
                 recommended: category.name.toLowerCase() == 'bike',
-                selected: selected == category.name,
-                onTap: () => setState(() => _selected = category.name),
+                selected: selected == category.id,
+                onTap: () => setState(() => _selected = category.id),
               ),
               const SizedBox(height: RiderSpacing.md),
             ],

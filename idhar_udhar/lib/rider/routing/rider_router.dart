@@ -149,16 +149,20 @@ abstract final class RiderRouter {
         name: 'riderVehicleDetails',
         pageBuilder: (context, state) {
           final extra = state.extra;
-          final categoryName = extra is String
-              ? extra
-              : extra is RiderVehicleType
-                  ? extra.label
-                  : null;
+          final RiderCategoryChoice? choice =
+              extra is RiderCategoryChoice ? extra : null;
+          final categoryName = choice != null
+              ? choice.name
+              : extra is String
+                  ? extra
+                  : extra is RiderVehicleType
+                      ? extra.label
+                      : null;
           return _fadePage(
             state: state,
             child: VehicleDetailsScreen(
-              vehicleType: extra is RiderVehicleType ? extra : RiderVehicleTypeX.fromLabel(categoryName),
               categoryName: categoryName,
+              categoryId: choice?.id,
             ),
           );
         },

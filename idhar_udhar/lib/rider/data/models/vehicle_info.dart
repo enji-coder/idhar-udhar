@@ -45,6 +45,41 @@ extension RiderVehicleTypeX on RiderVehicleType {
   bool get isRecommended => this == RiderVehicleType.bike;
 }
 
+class RiderCategoryChoice {
+  const RiderCategoryChoice({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
+/// Active catalog row for the selected id. A missing id is not replaced
+/// with another category that happens to share a label.
+String? riderCategoryIdForSave({
+  required Iterable<({String id, String name, bool active})> rows,
+  String? categoryId,
+  String? categoryName,
+}) {
+  final String id = (categoryId ?? '').trim();
+  if (id.isNotEmpty) {
+    for (final row in rows) {
+      if (row.active && row.id == id) {
+        return row.id;
+      }
+    }
+    return null;
+  }
+  final String name = (categoryName ?? '').trim().toLowerCase();
+  if (name.isEmpty) {
+    return null;
+  }
+  for (final row in rows) {
+    if (row.active && row.name.trim().toLowerCase() == name) {
+      return row.id;
+    }
+  }
+  return null;
+}
+
 class VehicleInfo {
   const VehicleInfo({
     required this.type,
@@ -53,6 +88,7 @@ class VehicleInfo {
     required this.color,
     required this.manufacturingYear,
     this.categoryName,
+    this.categoryId,
   });
 
   final RiderVehicleType type;
@@ -61,6 +97,7 @@ class VehicleInfo {
   final String color;
   final int manufacturingYear;
   final String? categoryName;
+  final String? categoryId;
 
   static const VehicleInfo empty = VehicleInfo(
     type: RiderVehicleType.bike,
@@ -84,6 +121,7 @@ class VehicleInfo {
     String? color,
     int? manufacturingYear,
     String? categoryName,
+    String? categoryId,
   }) {
     return VehicleInfo(
       type: type ?? this.type,
@@ -92,6 +130,7 @@ class VehicleInfo {
       color: color ?? this.color,
       manufacturingYear: manufacturingYear ?? this.manufacturingYear,
       categoryName: categoryName ?? this.categoryName,
+      categoryId: categoryId ?? this.categoryId,
     );
   }
 }

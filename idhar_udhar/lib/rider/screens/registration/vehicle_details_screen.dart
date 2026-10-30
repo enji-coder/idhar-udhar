@@ -23,13 +23,13 @@ import '../../widgets/rider_text_field.dart';
 class VehicleDetailsScreen extends ConsumerStatefulWidget {
   const VehicleDetailsScreen({
     super.key,
-    this.vehicleType,
     this.categoryName,
+    this.categoryId,
     this.editMode = false,
   });
 
-  final RiderVehicleType? vehicleType;
   final String? categoryName;
+  final String? categoryId;
   final bool editMode;
 
   @override
@@ -42,8 +42,8 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
   late final TextEditingController _model;
   late final TextEditingController _color;
   late final TextEditingController _year;
-  late RiderVehicleType _type;
   late String _categoryName;
+  String? _categoryId;
   String? _numberError;
   String? _modelError;
   String? _colorError;
@@ -55,12 +55,9 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
     super.initState();
     final VehicleInfo stored = ref.read(riderVehicleProvider);
     final bool useStored = stored.hasDetails;
-    _type = widget.vehicleType ??
-        (widget.categoryName != null
-            ? RiderVehicleTypeX.fromLabel(widget.categoryName)
-            : (useStored ? stored.type : RiderVehicleType.bike));
     _categoryName = widget.categoryName ??
         (useStored ? (stored.categoryName ?? '') : '');
+    _categoryId = widget.categoryId ?? (useStored ? stored.categoryId : null);
     _number = TextEditingController(text: useStored ? stored.number : '');
     _model = TextEditingController(text: useStored ? stored.model : '');
     _color = TextEditingController(text: useStored ? stored.color : '');
@@ -116,14 +113,18 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
     final rows =
         ref.read(vehicleCategoryCatalogProvider).value ??
             const <VehicleCategory>[];
-    VehicleCategory? match;
-    for (final row in rows) {
-      if (row.name == _categoryName || row.name == _type.label) {
-        match = row;
-        break;
-      }
-    }
-    if (match == null) {
+    final String? categoryId = riderCategoryIdForSave(
+      rows: rows.map(
+        (VehicleCategory row) => (
+          id: row.id,
+          name: row.name,
+          active: row.isActive,
+        ),
+      ),
+      categoryId: _categoryId,
+      categoryName: _categoryName,
+    );
+    if (categoryId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Choose the vehicle category again before saving.'),
@@ -134,7 +135,7 @@ class _VehicleDetailsScreenState extends ConsumerState<VehicleDetailsScreen> {
     setState(() => _saving = true);
     try {
       await ref.read(riderSessionProvider.notifier).saveVehicle(
-            vehicleCategoryId: match.id,
+            vehicleCategoryId: categoryId,
             registration: _number.text.trim(),
             model: _model.text.trim(),
             color: _color.text.trim(),

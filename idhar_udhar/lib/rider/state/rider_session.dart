@@ -423,6 +423,7 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       _ref.read(riderVehicleProvider.notifier).state = VehicleInfo(
         type: RiderVehicleTypeX.fromLabel(vehicle.vehicleCategoryName),
         categoryName: vehicle.vehicleCategoryName,
+        categoryId: vehicle.vehicleCategoryId,
         number: vehicle.registration!.trim(),
         model: vehicle.model?.trim() ?? '',
         color: vehicle.color?.trim() ?? '',

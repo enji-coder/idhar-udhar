@@ -268,7 +268,12 @@ class ProfilesApi {
       'file': await MultipartFile.fromFile(filePath),
     });
     return RiderProfilePicture.fromJson(
-      await _client.postForm('/v1/rider/profile/picture', data: form),
+      await _client.postForm(
+        '/v1/rider/profile/picture',
+        data: form,
+        sendTimeout: const Duration(seconds: 45),
+        receiveTimeout: const Duration(seconds: 45),
+      ),
     );
   }
 }

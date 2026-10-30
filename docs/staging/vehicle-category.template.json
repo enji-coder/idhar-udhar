@@ -1,0 +1,22 @@
+{
+  "name": "<APPROVED_CATEGORY_NAME>",
+  "code": "<APPROVED_CATEGORY_CODE>",
+  "active": true,
+  "weight_capacity": "<APPROVED_WEIGHT_OR_OMIT>",
+  "size": "<APPROVED_SIZE_OR_OMIT>",
+  "vehicle_type": "<two_wheeler|three_wheeler|truck>",
+  "vehicle": "<bike|scooty|loader_riksha|mini_truck|tempo|large_tempo|truck>",
+  "rates": {
+    "base_fare": "<APPROVED_BASE_FARE>",
+    "per_km": "<APPROVED_PER_KM>",
+    "initial_minimum": "<APPROVED_INITIAL_MINIMUM>",
+    "waiting": "<APPROVED_FLAT_WAITING_OR_0_ONLY_IF_APPROVED>",
+    "surge": "<APPROVED_SURGE>",
+    "toll": "<APPROVED_TOLL>",
+    "parking": "<APPROVED_PARKING>",
+    "initial_waiting_minutes": "<APPROVED_FREE_WAITING_MINUTES>",
+    "waiting_charge_per_minute": "<APPROVED_WAITING_PER_MINUTE>",
+    "rider_percentage": "<APPROVED_RIDER_PERCENT>",
+    "company_commission_percentage": "<APPROVED_COMPANY_PERCENT>"
+  }
+}

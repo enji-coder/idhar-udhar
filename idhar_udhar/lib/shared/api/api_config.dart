@@ -15,22 +15,32 @@ abstract final class ApiConfig {
   /// Live production API. Rider entry uses this when `API_BASE_URL` is unset.
   static const String productionBaseUrl = 'https://api.idharudhar.co.in';
 
+  /// Staging API. Used only when Rider startup calls [useStagingDefault].
+  static const String stagingBaseUrl = 'https://staging-api.idharudhar.co.in';
+
   /// Temporary testing default. Must match backend `OTP_LENGTH`.
   static const int otpLength = 4;
 
-  static bool _useProductionDefault = false;
+  static _ApiDefaultHost _defaultHost = _ApiDefaultHost.local;
 
   /// Rider startup. Keeps Customer debug on the local default unless
   /// `--dart-define=API_BASE_URL` is passed.
   static void useProductionDefault() {
     if (_definedBaseUrl.trim().isEmpty) {
-      _useProductionDefault = true;
+      _defaultHost = _ApiDefaultHost.production;
+    }
+  }
+
+  /// Explicit Rider staging startup. An explicit `API_BASE_URL` still wins.
+  static void useStagingDefault() {
+    if (_definedBaseUrl.trim().isEmpty) {
+      _defaultHost = _ApiDefaultHost.staging;
     }
   }
 
   @visibleForTesting
   static void debugResetBaseUrl() {
-    _useProductionDefault = false;
+    _defaultHost = _ApiDefaultHost.local;
   }
 
   static String get baseUrl {
@@ -38,8 +48,11 @@ abstract final class ApiConfig {
     if (defined.isNotEmpty) {
       return _stripTrailingSlash(defined);
     }
-    if (_useProductionDefault) {
+    if (_defaultHost == _ApiDefaultHost.production) {
       return productionBaseUrl;
+    }
+    if (_defaultHost == _ApiDefaultHost.staging) {
+      return stagingBaseUrl;
     }
     if (kReleaseMode) {
       throw StateError(
@@ -75,3 +88,5 @@ abstract final class ApiConfig {
     return value;
   }
 }
+
+enum _ApiDefaultHost { local, production, staging }

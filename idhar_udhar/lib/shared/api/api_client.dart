@@ -105,15 +105,24 @@ class ApiClient {
   }
 
   /// Multipart POST. Used by rider document upload. Does not change JSON calls.
+  ///
+  /// [sendTimeout] and [receiveTimeout] override the 15-second client limits
+  /// for one call. Profile pictures wait on object storage before the response.
   Future<Map<String, Object?>> postForm(
     String path, {
     required FormData data,
+    Duration? sendTimeout,
+    Duration? receiveTimeout,
   }) {
     return _send(
       () => _dio.post<dynamic>(
         path,
         data: data,
-        options: Options(contentType: 'multipart/form-data'),
+        options: Options(
+          contentType: 'multipart/form-data',
+          sendTimeout: sendTimeout,
+          receiveTimeout: receiveTimeout,
+        ),
       ),
     );
   }

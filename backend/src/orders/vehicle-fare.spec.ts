@@ -1,5 +1,6 @@
 import {
   faresByVehicle,
+  isCustomerBookableVehicle,
   serializeCustomerVehicleFare,
   VehicleFarePreviewRow,
 } from './vehicle-fare';
@@ -49,6 +50,56 @@ describe('customer vehicle fares', () => {
     expect(fares.get(TRUCK)).toBe('819.00');
     expect(fares.get(TEMPO)).toBe('420.00');
     expect(fares.get(TEMPO)).not.toBe(fares.get(TRUCK));
+  });
+
+  it('keeps an active category with no slug and drops a mixed pair', () => {
+    const openId = '01a18c7f-0483-7740-8e37-5bdd836f2159';
+    expect(
+      isCustomerBookableVehicle({
+        active: true,
+        vehicle_type: null,
+        vehicle: null,
+      }),
+    ).toBe(true);
+    expect(
+      isCustomerBookableVehicle({
+        active: true,
+        vehicle_type: 'two_wheeler',
+        vehicle: 'bike',
+      }),
+    ).toBe(true);
+    expect(
+      isCustomerBookableVehicle({
+        active: false,
+        vehicle_type: null,
+        vehicle: null,
+      }),
+    ).toBe(false);
+    expect(
+      isCustomerBookableVehicle({
+        active: true,
+        vehicle_type: 'truck',
+        vehicle: null,
+      }),
+    ).toBe(false);
+    expect(
+      isCustomerBookableVehicle({
+        active: true,
+        vehicle_type: 'two_wheeler',
+        vehicle: 'truck',
+      }),
+    ).toBe(false);
+    const fares = faresByVehicle([
+      row({
+        vehicle_category_id: openId,
+        vehicle: null,
+        vehicle_type: null,
+        name: '3W Tempo',
+        trip_fare: '420.00',
+        net_payable: '420.00',
+      }),
+    ]);
+    expect(fares.get(openId)).toBe('420.00');
   });
 
   it('drops an inactive vehicle', () => {

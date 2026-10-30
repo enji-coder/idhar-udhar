@@ -173,6 +173,84 @@ abstract final class MockData {
     ),
   ];
 
+  /// Artwork and home-tile family for a catalog row.
+  ///
+  /// Slug pairs win. An exact display name is used only when both slug fields
+  /// are empty. Substrings such as "tempo" are not a vehicle identity.
+  static ({ServiceFamily family, VehicleType type})? presentationFor({
+    required String name,
+    String? vehicleTypeCode,
+    String? vehicleCode,
+  }) {
+    final String typeCode = (vehicleTypeCode ?? '').trim().toLowerCase();
+    final String code = (vehicleCode ?? '').trim().toLowerCase();
+    if (typeCode.isEmpty && code.isEmpty) {
+      return _presentationForExactName(name);
+    }
+    if (typeCode.isEmpty || code.isEmpty) {
+      return null;
+    }
+    return _presentationForSlug(typeCode, code);
+  }
+
+  static ({ServiceFamily family, VehicleType type})? _presentationForSlug(
+    String typeCode,
+    String code,
+  ) {
+    switch (code) {
+      case 'bike':
+        if (typeCode != 'two_wheeler') return null;
+        return (family: ServiceFamily.twoWheeler, type: VehicleType.bike);
+      case 'scooty':
+        if (typeCode != 'two_wheeler') return null;
+        return (family: ServiceFamily.twoWheeler, type: VehicleType.scooty);
+      case 'loader_riksha':
+        if (typeCode != 'three_wheeler') return null;
+        return (family: ServiceFamily.threeWheeler, type: VehicleType.auto);
+      case 'mini_truck':
+      case 'tempo':
+      case 'large_tempo':
+        if (typeCode != 'truck') return null;
+        return (family: ServiceFamily.truck, type: VehicleType.pickup);
+      case 'truck':
+        if (typeCode != 'truck') return null;
+        return (family: ServiceFamily.truck, type: VehicleType.truck);
+      default:
+        return null;
+    }
+  }
+
+  static ({ServiceFamily family, VehicleType type})? _presentationForExactName(
+    String name,
+  ) {
+    switch (name.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim()) {
+      case 'bike':
+        return (family: ServiceFamily.twoWheeler, type: VehicleType.bike);
+      case 'scooty':
+      case 'scooter':
+        return (family: ServiceFamily.twoWheeler, type: VehicleType.scooty);
+      case '3w tempo':
+      case '3w auto':
+      case 'loader riksha':
+      case 'loader rickshaw':
+      case 'loader rikshaw':
+      case 'loading riksha':
+        return (family: ServiceFamily.threeWheeler, type: VehicleType.auto);
+      case 'chhota hathi / tata ace':
+      case 'pickup':
+      case 'mini truck':
+      case 'tempo':
+      case 'large tempo':
+        return (family: ServiceFamily.truck, type: VehicleType.pickup);
+      case 'tempo 407':
+      case 'truck / eicher':
+      case 'truck':
+        return (family: ServiceFamily.truck, type: VehicleType.truck);
+      default:
+        return null;
+    }
+  }
+
   static String categoryNameOf(MockVehicle vehicle) {
     switch (vehicle.type) {
       case VehicleType.bike:
@@ -198,33 +276,11 @@ abstract final class MockData {
   }
 
   static String artworkForCategoryName(String? name) {
-    final String lower = (name ?? '').toLowerCase();
-    if (lower.contains('scoot')) {
-      return artworkFor(VehicleType.scooty);
+    final presented = presentationFor(name: name ?? '');
+    if (presented == null) {
+      return AssetPaths.parcel;
     }
-    if (lower.contains('bike') ||
-        lower.contains('2 wheeler') ||
-        lower.contains('two wheeler') ||
-        lower.contains('two-wheeler')) {
-      return artworkFor(VehicleType.bike);
-    }
-    if (lower.contains('auto') ||
-        lower.contains('rik') ||
-        lower.contains('3 wheeler') ||
-        lower.contains('three wheeler') ||
-        lower.contains('three-wheeler')) {
-      return artworkFor(VehicleType.auto);
-    }
-    if (lower.contains('pickup')) {
-      return artworkFor(VehicleType.pickup);
-    }
-    if (lower.contains('car')) {
-      return artworkFor(VehicleType.car);
-    }
-    if (lower.contains('truck') || lower.contains('tempo')) {
-      return artworkFor(VehicleType.truck);
-    }
-    return artworkFor(VehicleType.bike);
+    return artworkFor(presented.type);
   }
 
   static String artworkFor(VehicleType type) {
@@ -245,49 +301,12 @@ abstract final class MockData {
   }
 
   static MockVehicle _synthesized(VehicleCategory category) {
-    // Prefer admin vehicle_type / vehicle codes over name heuristics so
-    // "Loading Riksha" (three_wheeler / loader_riksha) is never a truck.
-    final String typeCode = (category.vehicleTypeCode ?? '').toLowerCase();
-    final String vehicleCode = (category.vehicleCode ?? '').toLowerCase();
-    final String lower = category.name.toLowerCase();
-
-    VehicleType type;
-    switch (vehicleCode) {
-      case 'bike':
-        type = VehicleType.bike;
-        break;
-      case 'scooty':
-        type = VehicleType.scooty;
-        break;
-      case 'loader_riksha':
-        type = VehicleType.auto;
-        break;
-      case 'mini_truck':
-      case 'tempo':
-      case 'large_tempo':
-        type = VehicleType.pickup;
-        break;
-      case 'truck':
-        type = VehicleType.truck;
-        break;
-      default:
-        if (typeCode == 'three_wheeler' ||
-            lower.contains('auto') ||
-            lower.contains('rik')) {
-          type = VehicleType.auto;
-        } else if (typeCode == 'two_wheeler' ||
-            lower.contains('scoot') ||
-            lower.contains('bike')) {
-          type = lower.contains('scoot') ? VehicleType.scooty : VehicleType.bike;
-        } else if (typeCode == 'truck') {
-          type = VehicleType.truck;
-        } else if (lower.contains('truck') || lower.contains('tempo')) {
-          type = VehicleType.truck;
-        } else {
-          type = VehicleType.truck;
-        }
-    }
-
+    final presented = presentationFor(
+      vehicleTypeCode: category.vehicleTypeCode,
+      vehicleCode: category.vehicleCode,
+      name: category.name,
+    );
+    final VehicleType type = presented?.type ?? VehicleType.car;
     final bool isTwo =
         type == VehicleType.bike || type == VehicleType.scooty;
     final bool isAuto = type == VehicleType.auto;
@@ -308,18 +327,8 @@ abstract final class MockData {
       etaMinutes: isTwo ? 12 : isAuto ? 15 : 28,
       baseFare: category.baseFare,
       perKm: category.perKm,
-      serviceFamily: typeCode == 'two_wheeler'
-          ? ServiceFamily.twoWheeler
-          : typeCode == 'three_wheeler'
-              ? ServiceFamily.threeWheeler
-              : typeCode == 'truck'
-                  ? ServiceFamily.truck
-                  : (isTwo
-                      ? ServiceFamily.twoWheeler
-                      : isAuto
-                          ? ServiceFamily.threeWheeler
-                          : ServiceFamily.truck),
-      imagePath: artworkFor(type),
+      serviceFamily: presented?.family,
+      imagePath: presented == null ? AssetPaths.parcel : artworkFor(type),
     );
   }
 
@@ -348,24 +357,24 @@ abstract final class MockData {
         ...extras,
       ];
     }
-    switch (family) {
-      case ServiceFamily.twoWheeler:
-        return pool
-            .where(
-              (v) =>
-                  v.type == VehicleType.bike || v.type == VehicleType.scooty,
-            )
-            .toList();
-      case ServiceFamily.threeWheeler:
-        return pool.where((v) => v.type == VehicleType.auto).toList();
-      case ServiceFamily.truck:
-        return pool
-            .where((v) =>
-                v.type == VehicleType.truck ||
-                v.type == VehicleType.pickup ||
-                v.type == VehicleType.car)
-            .toList();
+    bool matches(MockVehicle vehicle) {
+      if (vehicle.serviceFamily != null) {
+        return vehicle.serviceFamily == family;
+      }
+      switch (family) {
+        case ServiceFamily.twoWheeler:
+          return vehicle.type == VehicleType.bike ||
+              vehicle.type == VehicleType.scooty;
+        case ServiceFamily.threeWheeler:
+          return vehicle.type == VehicleType.auto;
+        case ServiceFamily.truck:
+          return vehicle.type == VehicleType.truck ||
+              vehicle.type == VehicleType.pickup ||
+              (vehicle.type == VehicleType.car && vehicle.name == 'Car');
+      }
     }
+
+    return pool.where(matches).toList();
   }
 
   static bool isTwoWheeler(MockVehicle vehicle) {

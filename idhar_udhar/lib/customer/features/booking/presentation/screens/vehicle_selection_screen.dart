@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../../../core/constants/app_copy.dart';
+import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/data/mock/mock_data.dart';
 import '../../../../core/data/mock/mock_models.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -16,71 +17,22 @@ import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
 
-/// Family from the admin `vehicle_type`, then from the category name.
+/// Family from a supported slug pair, or from an exact display name when
+/// both slug fields are empty. A name fragment is not a vehicle identity.
 ServiceFamily? serviceFamilyForCategory(VehicleCategory category) {
-  switch ((category.vehicleTypeCode ?? '').toLowerCase()) {
-    case 'two_wheeler':
-      return ServiceFamily.twoWheeler;
-    case 'three_wheeler':
-      return ServiceFamily.threeWheeler;
-    case 'truck':
-      return ServiceFamily.truck;
-  }
-  final String name = category.name.toLowerCase();
-  if (name.contains('scoot') ||
-      name.contains('bike') ||
-      name.contains('2 wheeler') ||
-      name.contains('2-wheeler') ||
-      name.contains('two wheeler')) {
-    return ServiceFamily.twoWheeler;
-  }
-  if (name.contains('auto') ||
-      name.contains('riksha') ||
-      name.contains('rikshaw') ||
-      name.contains('3 wheeler') ||
-      name.contains('3-wheeler') ||
-      name.contains('three wheeler')) {
-    return ServiceFamily.threeWheeler;
-  }
-  if (name.contains('truck') || name.contains('tempo')) {
-    return ServiceFamily.truck;
-  }
-  return null;
+  return MockData.presentationFor(
+    vehicleTypeCode: category.vehicleTypeCode,
+    vehicleCode: category.vehicleCode,
+    name: category.name,
+  )?.family;
 }
 
-VehicleType vehicleTypeForCategory(VehicleCategory category) {
-  switch ((category.vehicleCode ?? '').toLowerCase()) {
-    case 'bike':
-      return VehicleType.bike;
-    case 'scooty':
-      return VehicleType.scooty;
-    case 'loader_riksha':
-      return VehicleType.auto;
-    case 'mini_truck':
-    case 'tempo':
-    case 'large_tempo':
-      return VehicleType.pickup;
-    case 'truck':
-      return VehicleType.truck;
-  }
-  final String name = category.name.toLowerCase();
-  if (name.contains('scoot')) {
-    return VehicleType.scooty;
-  }
-  if (name.contains('bike')) {
-    return VehicleType.bike;
-  }
-  if (name.contains('auto') || name.contains('rik')) {
-    return VehicleType.auto;
-  }
-  final ServiceFamily? family = serviceFamilyForCategory(category);
-  if (family == ServiceFamily.threeWheeler) {
-    return VehicleType.auto;
-  }
-  if (family == ServiceFamily.twoWheeler) {
-    return VehicleType.bike;
-  }
-  return VehicleType.truck;
+VehicleType? vehicleTypeForCategory(VehicleCategory category) {
+  return MockData.presentationFor(
+    vehicleTypeCode: category.vehicleTypeCode,
+    vehicleCode: category.vehicleCode,
+    name: category.name,
+  )?.type;
 }
 
 /// Display order for Select Vehicle. Catalog codes are the size source:
@@ -159,29 +111,16 @@ List<MockVehicle> vehiclesForBookingFamily(
   if (family == null) {
     return vehicles;
   }
-  return vehicles.where((MockVehicle vehicle) {
-    if (vehicle.serviceFamily != null) {
-      return vehicle.serviceFamily == family;
-    }
-    switch (family) {
-      case ServiceFamily.twoWheeler:
-        return vehicle.type == VehicleType.bike ||
-            vehicle.type == VehicleType.scooty;
-      case ServiceFamily.threeWheeler:
-        return vehicle.type == VehicleType.auto;
-      case ServiceFamily.truck:
-        return vehicle.type == VehicleType.truck ||
-            vehicle.type == VehicleType.pickup ||
-            vehicle.type == VehicleType.car;
-    }
-  }).toList(growable: false);
+  return vehicles
+      .where((MockVehicle vehicle) => vehicle.serviceFamily == family)
+      .toList(growable: false);
 }
 
 MockVehicle customerVehicleFromCategory(VehicleCategory category) {
-  final VehicleType type = vehicleTypeForCategory(category);
+  final VehicleType? type = vehicleTypeForCategory(category);
   return MockVehicle(
     id: category.id,
-    type: type,
+    type: type ?? VehicleType.car,
     name: category.name,
     description: (category.size ?? '').trim().isEmpty
         ? 'Available for deliveries'
@@ -200,7 +139,9 @@ MockVehicle customerVehicleFromCategory(VehicleCategory category) {
     toll: category.toll,
     parking: category.parking,
     serviceFamily: serviceFamilyForCategory(category),
-    imagePath: MockData.artworkFor(type),
+    imagePath: type == null
+        ? AssetPaths.parcel
+        : MockData.artworkFor(type),
   );
 }
 

@@ -19,4 +19,15 @@ void main() {
     ApiConfig.debugResetBaseUrl();
     expect(ApiConfig.baseUrl.contains('idharudhar.in'), isFalse);
   });
+
+  test('rider staging default is explicit and does not replace production', () {
+    expect(ApiConfig.stagingBaseUrl, 'https://staging-api.idharudhar.co.in');
+    expect(ApiConfig.productionBaseUrl, 'https://api.idharudhar.co.in');
+    ApiConfig.useStagingDefault();
+    expect(ApiConfig.baseUrl, 'https://staging-api.idharudhar.co.in');
+    ApiConfig.debugResetBaseUrl();
+    ApiConfig.useProductionDefault();
+    expect(ApiConfig.baseUrl, 'https://api.idharudhar.co.in');
+    ApiConfig.debugResetBaseUrl();
+  });
 }

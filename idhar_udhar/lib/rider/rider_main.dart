@@ -22,10 +22,20 @@ import 'theme/rider_theme.dart';
 /// flutter run --flavor rider -t lib/rider/rider_main.dart
 /// ```
 ///
+/// Staging, without changing the production default:
+/// ```bash
+/// flutter run --flavor rider -t lib/rider/rider_main.dart --dart-define=RIDER_API_TARGET=staging
+/// ```
+///
 /// Isolated from Customer entry / router / theme.
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  ApiConfig.useProductionDefault();
+  const String riderApiTarget = String.fromEnvironment('RIDER_API_TARGET');
+  if (riderApiTarget == 'staging') {
+    ApiConfig.useStagingDefault();
+  } else {
+    ApiConfig.useProductionDefault();
+  }
   final bool firebaseReady = await _initializeRiderFirebase();
   riderFirebaseReady = firebaseReady;
   try {

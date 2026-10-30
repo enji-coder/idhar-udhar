@@ -339,10 +339,149 @@ describe('vehicle fare booking', () => {
   );
 
   it.each([
-    { vehicle_type: null, vehicle: null, name: 'Auto' },
-    { vehicle_type: 'two_wheeler', vehicle: 'truck', name: 'Legacy truck' },
+    {
+      vehicle_category_id: '01a18c7f-0435-720a-824d-7cb9a618da57',
+      name: 'Bike',
+      vehicle_type: 'two_wheeler',
+      vehicle: 'bike',
+    },
+    {
+      vehicle_category_id: '01a18c7f-045c-7542-af93-0e07e40a6ef7',
+      name: 'Scooty',
+      vehicle_type: 'two_wheeler',
+      vehicle: 'scooty',
+    },
+    {
+      vehicle_category_id: '01a18c7f-0483-7740-8e37-5bdd836f2159',
+      name: '3W Tempo',
+      vehicle_type: null,
+      vehicle: null,
+    },
+    {
+      vehicle_category_id: '01a18c7f-04ac-7aa4-ae2e-11519aea01de',
+      name: '3W Auto',
+      vehicle_type: null,
+      vehicle: null,
+    },
+    {
+      vehicle_category_id: '01a18c7f-04d7-7a83-bb64-91afe3935cd0',
+      name: 'Chhota Hathi / Tata Ace',
+      vehicle_type: null,
+      vehicle: null,
+    },
+    {
+      vehicle_category_id: '01a18c7f-0505-7105-a040-9ac900edc5b7',
+      name: 'Pickup',
+      vehicle_type: null,
+      vehicle: null,
+    },
+    {
+      vehicle_category_id: '01a18c7f-053b-725b-84fa-bf4407562056',
+      name: 'Tempo 407',
+      vehicle_type: null,
+      vehicle: null,
+    },
+    {
+      vehicle_category_id: '01a18c7f-0567-7eb1-94eb-7ff7c530e107',
+      name: 'Truck / Eicher',
+      vehicle_type: null,
+      vehicle: null,
+    },
   ])(
-    'rejects an active non-canonical category ($name)',
+    'accepts $name by category id on create, quote, confirm, and preview',
+    async (row) => {
+      const { service, catalog, orders, fares } = build();
+      const stored = category({ ...row, size: '36 cm', weight_capacity: '20 kg' });
+      catalog.findActiveVehicleCategory.mockResolvedValue(stored);
+      orders.lockById.mockResolvedValue(
+        orderRow({
+          vehicle_category_id: row.vehicle_category_id,
+          package_weight_kg: '1.000',
+        }),
+      );
+      orders.compareAndSetStatus.mockResolvedValue(
+        orderRow({
+          vehicle_category_id: row.vehicle_category_id,
+          canonical_status: 'SEARCHING',
+        }),
+      );
+      fares.findQuote.mockResolvedValue(
+        quote({ vehicle_category_id: row.vehicle_category_id, trip_fare: '819.00' }),
+      );
+      fares.insertQuoteFromActiveConfig.mockResolvedValue(
+        quote({ vehicle_category_id: row.vehicle_category_id, trip_fare: '819.00' }),
+      );
+      fares.previewActiveVehicleFares.mockResolvedValue([
+        previewRow({
+          vehicle_category_id: row.vehicle_category_id,
+          name: row.name,
+          vehicle_type: row.vehicle_type,
+          vehicle: row.vehicle,
+          trip_fare: '120.00',
+          net_payable: '120.00',
+        }),
+      ]);
+
+      const created = (await service.create(
+        auth,
+        {
+          city_id: CITY,
+          vehicle_category_id: row.vehicle_category_id,
+          package_weight_kg: 1,
+          package_size_cm: 30,
+          stops: stops(),
+        },
+        `idem-${row.name}`,
+      )) as { vehicle_category_id: string };
+      expect(created.vehicle_category_id).toBe(row.vehicle_category_id);
+      expect(orders.insertOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ vehicleCategoryId: row.vehicle_category_id }),
+        expect.anything(),
+      );
+
+      const quoted = await service.quote(auth, ORDER);
+      expect(quoted.vehicle_category_id).toBe(row.vehicle_category_id);
+      expect(fares.insertQuoteFromActiveConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ vehicleCategoryId: row.vehicle_category_id }),
+        expect.anything(),
+      );
+
+      const confirmed = await service.confirm(auth, ORDER, QUOTE);
+      expect(confirmed.vehicle_category_id).toBe(row.vehicle_category_id);
+      expect(fares.insertSnapshotFromQuote).toHaveBeenCalled();
+
+      const preview = await service.previewVehicleFares(auth, {
+        city_id: CITY,
+        stops: stops(),
+      });
+      expect(preview.vehicles.map((item) => item.vehicle_category_id)).toEqual([
+        row.vehicle_category_id,
+      ]);
+    },
+  );
+
+  it('rejects an unknown category id', async () => {
+    const { service, catalog, orders } = build();
+    catalog.findActiveVehicleCategory.mockResolvedValue(null as never);
+    await expect(
+      service.create(
+        auth,
+        { city_id: CITY, vehicle_category_id: TRUCK, package_weight_kg: 1, stops: stops() },
+        'idem-missing',
+      ),
+    ).rejects.toMatchObject({
+      code: 'VEHICLE_CATEGORY_INVALID',
+      status: 400,
+    });
+    expect(orders.insertOrder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { vehicle_type: 'truck', vehicle: null, name: 'type only' },
+    { vehicle_type: null, vehicle: 'truck', name: 'slug only' },
+    { vehicle_type: 'two_wheeler', vehicle: 'truck', name: 'mixed pair' },
+  ])(
+    'rejects an active category with an incomplete or illegal slug ($name)',
     async (row) => {
       const { service, catalog, orders, fares } = build();
       catalog.findActiveVehicleCategory.mockResolvedValue(category(row));

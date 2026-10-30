@@ -31,8 +31,17 @@ export function isCustomerBookableVehicle(row: {
   vehicle_type: string | null;
   vehicle: string | null;
 }): boolean {
-  if (!row.active || !row.vehicle_type || !row.vehicle) return false;
-  return isVehiclePair(row.vehicle_type, row.vehicle);
+  if (!row.active) return false;
+  const vehicleType = blankToNull(row.vehicle_type);
+  const vehicle = blankToNull(row.vehicle);
+  if (vehicleType == null && vehicle == null) return true;
+  if (vehicleType == null || vehicle == null) return false;
+  return isVehiclePair(vehicleType, vehicle);
+}
+
+function blankToNull(value: string | null): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed ? trimmed : null;
 }
 
 /** Customer fare lines only. Commission and GST are not part of this payload. */

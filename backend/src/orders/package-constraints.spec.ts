@@ -5,6 +5,7 @@ import {
   packageExceedsCapacity,
   packageExceedsSize,
   parseCapacityKg,
+  parseLabeledBoxCm,
   parseSizeCm,
 } from './package-constraints';
 
@@ -45,15 +46,64 @@ describe('package capacity', () => {
 });
 
 describe('package size', () => {
-  it('reads centimetres from admin size text', () => {
+  it('reads an explicit centimetre limit and ignores a missing unit', () => {
     expect(parseSizeCm('36cm')).toBe(36);
-    expect(parseSizeCm('36')).toBe(36);
+    expect(parseSizeCm('36 cm')).toBe(36);
     expect(parseSizeCm('30 CM')).toBe(30);
+    expect(parseSizeCm('36')).toBeNull();
     expect(parseSizeCm('large')).toBeNull();
+    expect(parseSizeCm('about 8 ft')).toBeNull();
   });
 
-  it('rejects a parcel larger than the vehicle limit', () => {
+  it('converts feet, inches, millimetres, and metres into centimetres', () => {
+    expect(parseSizeCm('8 ft')).toBe(243.84);
+    expect(parseSizeCm('8 feet')).toBe(243.84);
+    expect(parseSizeCm('10 ft')).toBe(304.8);
+    expect(parseSizeCm('14 ft')).toBe(426.72);
+    expect(parseSizeCm('5 ft')).toBe(152.4);
+    expect(parseSizeCm('4.5 ft')).toBe(137.16);
+    expect(parseSizeCm('7.2 ft')).toBe(219.456);
+    expect(parseSizeCm('5.5 ft')).toBe(167.64);
+    expect(parseSizeCm('1 in')).toBe(2.54);
+    expect(parseSizeCm('2 inch')).toBe(5.08);
+    expect(parseSizeCm('12 inches')).toBe(30.48);
+    expect(parseSizeCm('10 mm')).toBe(1);
+    expect(parseSizeCm('1.5 m')).toBe(150);
+  });
+
+  it('keeps each side of a labeled box and does not pick one limit', () => {
+    expect(
+      parseLabeledBoxCm('5.5 ft long, 4.5 ft wide, 5 ft high'),
+    ).toEqual({
+      lengthCm: 167.64,
+      widthCm: 137.16,
+      heightCm: 152.4,
+    });
+    expect(
+      parseLabeledBoxCm('7.2 ft long, 5 ft wide, 2 ft high'),
+    ).toEqual({
+      lengthCm: 219.456,
+      widthCm: 152.4,
+      heightCm: 60.96,
+    });
+    expect(parseSizeCm('5.5 ft long, 4.5 ft wide, 5 ft high')).toBeNull();
+    expect(() =>
+      assertPackageForVehicle({
+        weightKg: 10,
+        weightCapacity: '500 kg',
+        packageSizeCm: 90,
+        sizeLimit: '5.5 ft long, 4.5 ft wide, 5 ft high',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a parcel larger than the vehicle limit and allows an exact fit', () => {
     expect(packageExceedsSize(60, '36cm')).toBe(true);
+    expect(packageExceedsSize(36, '36 cm')).toBe(false);
+    expect(packageExceedsSize(243.84, '8 ft')).toBe(false);
+    expect(packageExceedsSize(243.841, '8 ft')).toBe(true);
+    expect(packageExceedsSize(30.48, '12 in')).toBe(false);
+    expect(packageExceedsSize(100, '36')).toBe(false);
     expect(() =>
       assertPackageForVehicle({
         weightKg: 5,
@@ -62,9 +112,17 @@ describe('package size', () => {
         sizeLimit: '36cm',
       }),
     ).toThrow('Package size exceeds this vehicle limit');
+    expect(() =>
+      assertPackageForVehicle({
+        weightKg: 5,
+        weightCapacity: '20 kg',
+        packageSizeCm: 36,
+        sizeLimit: '36 cm',
+      }),
+    ).not.toThrow();
   });
 
-  it('requires size when the vehicle has a numeric size limit', () => {
+  it('requires size when the vehicle has a single explicit size limit', () => {
     expect(() =>
       assertPackageForVehicle({
         weightKg: 5,
@@ -73,6 +131,17 @@ describe('package size', () => {
         sizeLimit: '36cm',
       }),
     ).toThrow('Package size is required for this vehicle');
+  });
+
+  it('does not apply a size limit when the unit is missing', () => {
+    expect(() =>
+      assertPackageForVehicle({
+        weightKg: 5,
+        weightCapacity: '20 kg',
+        packageSizeCm: null,
+        sizeLimit: '36',
+      }),
+    ).not.toThrow();
   });
 });
 

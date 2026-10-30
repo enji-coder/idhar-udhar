@@ -1,0 +1,206 @@
+﻿{
+    "taskDefinitionArn": "arn:aws:ecs:ap-south-1:635738235470:task-definition/idhar-udhar-staging-api:2",
+    "containerDefinitions": [
+        {
+            "name": "api",
+            "image": "635738235470.dkr.ecr.ap-south-1.amazonaws.com/iu-staging-backend:staging-20261027-01",
+            "cpu": 0,
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "hostPort": 3000,
+                    "protocol": "tcp"
+                }
+            ],
+            "essential": true,
+            "environment": [
+                {
+                    "name": "AWS_REGION",
+                    "value": "ap-south-1"
+                },
+                {
+                    "name": "DATABASE_NAME",
+                    "value": "idhar_udhar_staging"
+                },
+                {
+                    "name": "PORT",
+                    "value": "3000"
+                },
+                {
+                    "name": "DATABASE_HOST",
+                    "value": "iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com"
+                },
+                {
+                    "name": "CASHFREE_ENVIRONMENT",
+                    "value": "sandbox"
+                },
+                {
+                    "name": "IU_DEPLOYMENT_TIER",
+                    "value": "staging"
+                },
+                {
+                    "name": "DATABASE_PORT",
+                    "value": "5432"
+                },
+                {
+                    "name": "CASHFREE_API_VERSION",
+                    "value": "2025-01-01"
+                },
+                {
+                    "name": "PAYMENT_PROVIDER",
+                    "value": "cashfree"
+                },
+                {
+                    "name": "CORS_ORIGIN",
+                    "value": "http://localhost:5173,http://127.0.0.1:5173"
+                },
+                {
+                    "name": "S3_DOCUMENTS_BUCKET",
+                    "value": "iu-staging-documents-635738235470"
+                },
+                {
+                    "name": "DATABASE_SSL",
+                    "value": "true"
+                },
+                {
+                    "name": "DATABASE_SSL_ROOT_CERT",
+                    "value": "/app/certs/rds-global-bundle.pem"
+                },
+                {
+                    "name": "REDIS_ENABLED",
+                    "value": "false"
+                },
+                {
+                    "name": "NODE_ENV",
+                    "value": "production"
+                },
+                {
+                    "name": "CASHFREE_TIMEOUT_MS",
+                    "value": "10000"
+                },
+                {
+                    "name": "LOCATION_STORE",
+                    "value": "memory"
+                },
+                {
+                    "name": "DATABASE_USER",
+                    "value": "iu_staging_admin"
+                },
+                {
+                    "name": "ROUTING_PROVIDER",
+                    "value": "google"
+                }
+            ],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "secrets": [
+                {
+                    "name": "DATABASE_PASSWORD",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:DATABASE_PASSWORD::"
+                },
+                {
+                    "name": "JWT_ACCESS_SECRET",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:JWT_ACCESS_SECRET::"
+                },
+                {
+                    "name": "REFRESH_TOKEN_PEPPER",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:REFRESH_TOKEN_PEPPER::"
+                },
+                {
+                    "name": "OTP_HASH_PEPPER",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:OTP_HASH_PEPPER::"
+                },
+                {
+                    "name": "CASHFREE_CLIENT_ID",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:CASHFREE_CLIENT_ID::"
+                },
+                {
+                    "name": "CASHFREE_CLIENT_SECRET",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:CASHFREE_CLIENT_SECRET::"
+                },
+                {
+                    "name": "PAYOUT_INSTRUMENT_KEY",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:PAYOUT_INSTRUMENT_KEY::"
+                },
+                {
+                    "name": "GOOGLE_MAPS_API_KEY",
+                    "valueFrom": "arn:aws:secretsmanager:ap-south-1:635738235470:secret:iu-staging/backend-oQygYo:GOOGLE_MAPS_API_KEY::"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/iu-staging-backend",
+                    "awslogs-region": "ap-south-1",
+                    "awslogs-stream-prefix": "api"
+                }
+            },
+            "healthCheck": {
+                "command": [
+                    "CMD-SHELL",
+                    "node -e \"fetch('http://127.0.0.1:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+                ],
+                "interval": 30,
+                "timeout": 5,
+                "retries": 3,
+                "startPeriod": 60
+            },
+            "systemControls": []
+        }
+    ],
+    "family": "idhar-udhar-staging-api",
+    "taskRoleArn": "arn:aws:iam::635738235470:role/iu-staging-ecs-task-role",
+    "executionRoleArn": "arn:aws:iam::635738235470:role/iu-staging-ecs-execution-role",
+    "networkMode": "awsvpc",
+    "revision": 2,
+    "volumes": [],
+    "status": "ACTIVE",
+    "requiresAttributes": [
+        {
+            "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+        },
+        {
+            "name": "ecs.capability.execution-role-awslogs"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.ecr-auth"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+        },
+        {
+            "name": "ecs.capability.secrets.asm.environment-variables"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.task-iam-role"
+        },
+        {
+            "name": "ecs.capability.container-health-check"
+        },
+        {
+            "name": "ecs.capability.execution-role-ecr-pull"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+        },
+        {
+            "name": "ecs.capability.task-eni"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
+        }
+    ],
+    "placementConstraints": [],
+    "compatibilities": [
+        "EC2",
+        "MANAGED_INSTANCES",
+        "FARGATE"
+    ],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "512",
+    "memory": "1024",
+    "registeredAt": "2026-10-27T16:59:53.818000+05:30",
+    "registeredBy": "arn:aws:iam::635738235470:user/swiftsend-admin"
+}

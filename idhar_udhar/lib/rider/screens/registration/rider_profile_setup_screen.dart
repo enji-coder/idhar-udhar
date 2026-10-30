@@ -156,7 +156,9 @@ class _RiderProfileSetupScreenState
     if (source == null || !mounted) return;
     final XFile? photo = await ImagePicker().pickImage(
       source: source,
-      imageQuality: 85,
+      maxWidth: 1280,
+      maxHeight: 1280,
+      imageQuality: 80,
     );
     if (photo == null || !mounted) return;
     setState(() => _photoPath = photo.path);
