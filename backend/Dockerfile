@@ -33,6 +33,9 @@ COPY backend/scripts ./scripts
 COPY backend/rds-global-bundle.pem /app/certs/rds-global-bundle.pem
 COPY records_database/migrations ./records_database/migrations
 
+# Same pin as the migration image: production checksums must match the copied bytes.
+RUN node --input-type=module -e "import { readFileSync } from 'node:fs'; import { PRODUCTION_FILE_CHECKSUMS, sha256Hex } from './scripts/migrate.mjs'; for (const [version, expected] of Object.entries(PRODUCTION_FILE_CHECKSUMS)) { const actual = sha256Hex(readFileSync('/app/records_database/migrations/' + version + '.sql')); if (actual !== expected) { process.stderr.write('Pinned migration checksum mismatch: ' + version + '\n'); process.exit(1); } }"
+
 EXPOSE 3000
 
 CMD ["node", "dist/main.js"]

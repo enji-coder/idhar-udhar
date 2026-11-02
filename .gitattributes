@@ -1,2 +1,1 @@
-records_database/migrations/0026_rider_wallet_topup_withdrawal.sql text eol=lf
-records_database/migrations/0027_wallet_idempotency_scopes.sql text eol=lf
+records_database/migrations/*.sql text eol=lf

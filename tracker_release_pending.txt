@@ -1,5 +1,5 @@
 IDHAR UDHAR — LIVE RELEASE TRACKER
-Last Updated: 02-Nov-2026
+Last Updated: 02-Nov-2026 22:15 IST
 
 ==================================================
 OVERALL RELEASE STATUS
@@ -23,9 +23,9 @@ Production changes require explicit approval.
 
 Phase    Work                              Status
 
-1        Release baseline & scope          IN PROGRESS
+1        Release baseline & scope          BASELINE RECORDED
 2        Backend + database changes        IMPLEMENTATION COMPLETE
-3        Staging deployment + QA           PENDING
+3        Staging deployment + QA           PARTIAL — API DEPLOYED, DRY-RUN FAILED
 4        Cashfree sandbox E2E               BLOCKED
 5        Production readiness & security   PENDING
 6        AWS production deployment         PENDING
@@ -101,9 +101,16 @@ PACKAGE SIZE / VEHICLE LIMIT SNAPSHOT FIX
 
 LATEST TEST RESULTS
 
-[VERIFIED]
-- Order-related Jest tests: 105 passed, 0 failed.
-- Migration runner tests: 13 passed, 0 failed.
+[VERIFIED 02-Nov-2026]
+- Backend Jest: 89 suites, 567 tests, 0 failed. Exit 0.
+  One worker needed Jest force-exit after the run.
+- Migration runner tests: 14 passed, 0 failed.
+- Earlier order-related Jest result remains 105 passed.
+  Do not add these runs together as a unique count.
+- Flutter analyze: 144 issues. Errors are confined to the
+  unimported snippet
+  lib/rider/screens/orders/backup_rider_order_details_screen.dart.
+  No other analyzer errors. No staging APK was built.
 
 IMPORTANT:
 These are separate test runs. Do not add them to
@@ -114,30 +121,37 @@ checking overlap.
 4. CRITICAL BLOCKERS / PENDING VERIFICATION
 ==================================================
 
-1. Staging ECS image is based on an older source
-   commit than current Git main.
+1. Staging checksum reconciliation committed 31 metadata
+   updates. Task 3f5193c762384b48a96d39cf7b6afea2 exited 0.
+   Backup:
+   staging-schema-migrations-backup-20261102T171529Z.json.
+   No migration SQL was applied.
 
-2. Staging migration history must be verified.
+2. Dry-run task 1025e0a540d14a25bc7ca59365f7a477 exited 0.
+   33 versions were already applied. The only pending file
+   is 0035_order_vehicle_limit_snapshots.sql.
+   0028 remains absent. 0035 has not been applied.
 
-3. Migration 0035 has not been applied to staging.
+3. Migration 0035 trigger execution is not verified.
 
-4. Migration 0035 PostgreSQL trigger execution
-   has not yet been verified against staging.
+4. Authenticated booking, fare, wallet, cancellation,
+   notification, and Cashfree sandbox payment flows
+   were not exercised. No test-account credentials
+   were used. No charge was created.
 
-5. Production migration 0028 historical checksum
-   and migration history need resolution.
+5. Customer debug defaults to localhost. Customer
+   release requires API_BASE_URL. Rider defaults to
+   https://api.idharudhar.co.in unless
+   RIDER_API_TARGET=staging. No staging APK was built.
 
 6. Cashfree sandbox payment -> webhook -> ledger
    end-to-end verification is pending.
 
-7. Production Cashfree LIVE readiness is pending.
+7. Production migration 0028 bytes remain unrecovered.
+   Production database access was not used.
 
-8. Production infrastructure, security and rollback
-   verification is pending.
-
-9. Play Console readiness is pending.
-
-10. Real-device testing is pending.
+8. Production infrastructure, Cashfree LIVE, Play
+   Console, and real-device testing remain pending.
 
 ==================================================
 5. CURRENT TASK
@@ -147,57 +161,53 @@ checking overlap.
 5. CURRENT TASK
 ==================================================
 
-TASK ID: A03
+TASK ID: A04
 
 TASK NAME:
-Build and push the latest staging backend image to ECR.
+Reconcile staging migration checksums, then repeat
+the dry-run. Do not apply migrations.
 
-STATUS: PENDING
+STATUS: CHECKSUMS RECONCILED — 0035 NOT APPLIED
 
 CURRENT VERIFIED STATE:
-- Docker Desktop is running.
-- Docker daemon verified using docker info.
-- AWS account and staging ECR repository verified.
-- Target image tag: staging-20261102-01
-- Image has NOT been built or pushed.
-- Backend implementation and migration 0035 are locally staged for GitHub sync.
+- Branch main, HEAD 87ca46993984d440a969bb7f23c1b94134e20cfe.
+- Uncommitted checksum fix, not pushed:
+  .gitattributes
+  backend/Dockerfile
+  backend/Dockerfile.migrate
+  backend/scripts/migrate.test.mjs
+- Untracked staging-migration-taskdef.json was preserved
+  and was not used for registration.
+- Images were built from that working tree.
+- ECR iu-staging-backend:
+  staging-20261102-02
+  sha256:89f540b486c6f8ac718acfdaed157c2527c2fcb13f67bda7ff4c613d09ac1a9f
+  staging-20261102-02-migrate
+  sha256:c170f74dc3ba054b2c49604a53b0ca00817a6118c5efcb75445d355e62bc5d6a
+- Tag staging-20261102-01 was not overwritten.
+- Both images contain the LF pins for 0026 and 0027.
+- Migration task definition idhar-udhar-staging-migration:2
+  uses the migrate digest, MIGRATIONS_DIR=/app/migrations,
+  staging host, idhar_udhar_staging, iu_staging_admin,
+  IU_DEPLOYMENT_TIER=staging, CASHFREE_ENVIRONMENT=sandbox,
+  DATABASE_SSL=true, and MIGRATE_DRY_RUN=1.
+  Revision 1 pointed at /app/records_database/migrations,
+  which this migrate image does not use.
+- API task definition idhar-udhar-staging-api:4 is
+  deployed on iu-staging-api-service. Rollout COMPLETED.
+  Desired 1, running 1, failed tasks 0.
+- GET /health, /health/live, and /health/db returned
+  HTTP 200. Database name idhar_udhar_staging,
+  PostgreSQL 17.11. Cashfree environment remains sandbox.
+- Production cluster and production database were not used.
 
-REQUIRED WORK:
-- Complete GitHub commit and push.
-- Build image from the exact committed source.
-- Push image to staging ECR.
-- Verify image digest and source commit.
-- Run staging migration dry-run using the exact image digest.
-- Confirm migration 0035 is planned.
-- Confirm migration 0028 is NOT reapplied.
-
-IMPORTANT SEQUENCE:
-
-GitHub sync
-        |
-        v
-Staging image build and ECR push
-        |
-        v
-Migration dry-run
-        |
-        v
-Review and explicit approval
-        |
-        v
-Staging migration apply
-        |
-        v
-Schema verification
-        |
-        v
-Matching API deployment
-        |
-        v
-Staging functional QA
-
-No migration apply or deployment is authorized
-by this tracker update.
+NEXT:
+- Checksum reconciliation and dry-run are complete.
+- Do not apply 0035 without explicit authorization.
+- Authenticated staging QA can use the currently
+  applied schema. Snapshot behavior in 0035 is not live.
+- Staging app builds still require RIDER_API_TARGET=staging
+  and customer API_BASE_URL.
 ==================================================
 6. SAFETY RULES
 ==================================================
@@ -227,16 +237,27 @@ COMPLETED:
 - Order-related tests: 105/105 passed.
 - Migration runner tests: 13/13 passed.
 - No database migration applied.
-- No AWS deployment performed.
 - No Git push or commit performed.
 
+02-Nov-2026 EVENING
+
+COMPLETED:
+- LF migration checksum fix verified in Git blobs,
+  migration tests, and both new images.
+- Staging images pushed under new tags.
+- Staging migration dry-run executed and refused.
+- Staging API revision 4 reached steady state.
+- Public health and unauthenticated route checks run.
+
 CURRENT:
-- Prepare latest staging image.
-- Verify migration dry-run using that image.
+- 31 staging checksums were updated to LF Git digests
+  and the transaction committed.
+- Dry-run passes. Only 0035 is pending.
+- 0028 is absent. No migration SQL was applied.
 
 NEXT:
-- Review dry-run evidence.
-- Obtain explicit approval before staging migration apply.
+- Authorized staging checksum reconciliation.
+- Repeat the dry-run before any apply.
 
 ==================================================
 END OF TRACKER

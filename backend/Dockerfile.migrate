@@ -12,6 +12,10 @@ COPY backend/scripts/migrate.mjs ./scripts/migrate.mjs
 COPY backend/rds-global-bundle.pem /app/certs/rds-global-bundle.pem
 COPY records_database/migrations /app/migrations
 
+# Refuse an image whose pinned migration bytes differ from production.
+# Windows CRLF checkouts must not be copied in unchanged.
+RUN node --input-type=module -e "import { readFileSync } from 'node:fs'; import { PRODUCTION_FILE_CHECKSUMS, sha256Hex } from './scripts/migrate.mjs'; for (const [version, expected] of Object.entries(PRODUCTION_FILE_CHECKSUMS)) { const actual = sha256Hex(readFileSync('/app/migrations/' + version + '.sql')); if (actual !== expected) { process.stderr.write('Pinned migration checksum mismatch: ' + version + '\n'); process.exit(1); } }"
+
 ENV NODE_ENV=production
 ENV MIGRATIONS_DIR=/app/migrations
 ENV DATABASE_SSL_ROOT_CERT=/app/certs/rds-global-bundle.pem

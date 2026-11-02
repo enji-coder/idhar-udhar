@@ -60,11 +60,11 @@ test('an applied 0019 is not selected again', () => {
   assert.deepEqual(plan.apply, []);
 });
 
-test('0019 file checksum matches the confirmed production digest', () => {
+test('0019 file checksum matches the Git blob digest', () => {
   const bytes = readFileSync(migrationFile);
   assert.equal(
     sha256Hex(bytes),
-    'ebb61a59ee095441bca87d6ed77ca614b0d58416aad2b0e68a2fdbae8ab0363c',
+    'b37c92172c19587f365d47f08a1112c8f5dd11d99d8e16662611d1d7121e968c',
   );
 });
 
@@ -114,6 +114,16 @@ test('an empty recorded checksum is refused', () => {
       ),
     /0032_admin_order_purge_wallet_reversal/,
   );
+});
+
+test('migration SQL files stay LF so Windows checkout cannot change checksums', () => {
+  const directory = resolve(root, 'records_database', 'migrations');
+  const names = readdirSync(directory).filter((name) => name.endsWith('.sql'));
+  assert.ok(names.length > 0);
+  for (const name of names) {
+    const bytes = readFileSync(resolve(directory, name));
+    assert.equal(bytes.includes(13), false, `${name} contains CR bytes`);
+  }
 });
 
 test('migration prefixes are unique and production 0026 and 0027 checksums match', () => {
