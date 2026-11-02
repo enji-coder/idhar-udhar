@@ -123,6 +123,10 @@ export class OrdersService {
             vehicleCategoryId: category.vehicle_category_id,
             vehicleCategoryName: category.name,
             packageWeightKg: body.package_weight_kg ?? null,
+            packageSizeCm: body.package_size_cm ?? null,
+            vehicleSizeLimitSnapshot: category.size,
+            vehicleWeightCapacitySnapshot: category.weight_capacity,
+            vehicleLimitsSnapshotted: true,
           },
           tx,
         );
@@ -349,6 +353,13 @@ export class OrdersService {
         );
       }
       await this.requireCategory(order.vehicle_category_id, tx);
+      // A snapshotted order keeps the limits stored at create. A historical
+      // order has no stored size or category-limit text. Quote does not invent
+      // those values from the live category, and it does not add a package check
+      // that this path never had.
+      if (order.vehicle_limits_snapshotted) {
+        this.assertSnapshottedPackage(order);
+      }
       const stops = await this.orders.listStops(order.order_id, tx);
       const routed = await this.routing.routeStops(stops);
       const quote = await this.fareService.quoteFromActiveConfig(
@@ -439,11 +450,17 @@ export class OrdersService {
         stopCount: stops.length,
         distanceKm,
       });
-      assertPackageForVehicle({
-        weightKg:
-          order.package_weight_kg == null ? null : Number(order.package_weight_kg),
-        weightCapacity: category.weight_capacity,
-      });
+      if (order.vehicle_limits_snapshotted) {
+        this.assertSnapshottedPackage(order);
+      } else {
+        // Historical rows never stored a size or a category-limit snapshot.
+        // Confirm still checks the stored weight against the live capacity
+        // and still does not require a package size.
+        assertPackageForVehicle({
+          weightKg: this.packageKilograms(order),
+          weightCapacity: category.weight_capacity,
+        });
+      }
       const recalculated = await this.fares.tripFareForVersion(
         {
           fareConfigVersionId: quote.fare_config_version_id,
@@ -1569,6 +1586,26 @@ export class OrdersService {
       throw new ApiError(ErrorCodes.CITY_INVALID, 'City was not found or is inactive', 400);
     }
     return city;
+  }
+
+  private packageKilograms(order: OrderRow): number | null {
+    if (order.package_weight_kg == null) return null;
+    return Number(order.package_weight_kg);
+  }
+
+  private packageCentimetres(order: OrderRow): number | null {
+    if (order.package_size_cm == null) return null;
+    return Number(order.package_size_cm);
+  }
+
+  /** Limits copied onto the order at insert. Never the live category row. */
+  private assertSnapshottedPackage(order: OrderRow): void {
+    assertPackageForVehicle({
+      weightKg: this.packageKilograms(order),
+      weightCapacity: order.vehicle_weight_capacity_snapshot,
+      packageSizeCm: this.packageCentimetres(order),
+      sizeLimit: order.vehicle_size_limit_snapshot,
+    });
   }
 
   private async requireCategory(vehicleCategoryId: string, db: Queryable) {

@@ -18,6 +18,10 @@ export type OrderRow = {
   vehicle_id: string | null;
   canonical_status: OrderStatus;
   package_weight_kg: string | null;
+  package_size_cm: string | null;
+  vehicle_size_limit_snapshot: string | null;
+  vehicle_weight_capacity_snapshot: string | null;
+  vehicle_limits_snapshotted: boolean;
   parent_order_id: string | null;
   scheduled_at: Date | null;
   created_at: Date;
@@ -92,6 +96,10 @@ const ORDER_SELECT = `
   o.vehicle_id,
   o.canonical_status,
   o.package_weight_kg::text AS package_weight_kg,
+  o.package_size_cm::text AS package_size_cm,
+  o.vehicle_size_limit_snapshot,
+  o.vehicle_weight_capacity_snapshot,
+  o.vehicle_limits_snapshotted,
   o.parent_order_id,
   o.scheduled_at,
   o.created_at,
@@ -119,6 +127,10 @@ export class OrdersRepository {
       vehicleCategoryId: string;
       vehicleCategoryName: string;
       packageWeightKg: number | null;
+      packageSizeCm: number | null;
+      vehicleSizeLimitSnapshot: string | null;
+      vehicleWeightCapacitySnapshot: string | null;
+      vehicleLimitsSnapshotted: boolean;
     },
     db: Queryable,
   ): Promise<OrderRow> {
@@ -132,9 +144,15 @@ export class OrdersRepository {
         vehicle_category_id,
         vehicle_category_name_snapshot,
         canonical_status,
-        package_weight_kg
+        package_weight_kg,
+        package_size_cm,
+        vehicle_size_limit_snapshot,
+        vehicle_weight_capacity_snapshot,
+        vehicle_limits_snapshotted
       )
-      VALUES ($1, crn_from_display_id($1), $2, $3, $4, $5, 'CREATED', $7)
+      VALUES (
+        $1, crn_from_display_id($1), $2, $3, $4, $5, 'CREATED', $7, $8, $9, $10, $11
+      )
       RETURNING
         order_id,
         display_id,
@@ -148,6 +166,10 @@ export class OrdersRepository {
         vehicle_id,
         canonical_status,
         package_weight_kg::text AS package_weight_kg,
+        package_size_cm::text AS package_size_cm,
+        vehicle_size_limit_snapshot,
+        vehicle_weight_capacity_snapshot,
+        vehicle_limits_snapshotted,
         parent_order_id,
         scheduled_at,
         created_at,
@@ -161,6 +183,10 @@ export class OrdersRepository {
         input.vehicleCategoryName,
         input.cityCode,
         input.packageWeightKg,
+        input.packageSizeCm,
+        input.vehicleSizeLimitSnapshot,
+        input.vehicleWeightCapacitySnapshot,
+        input.vehicleLimitsSnapshotted,
       ],
     );
     return result.rows[0];

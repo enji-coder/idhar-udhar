@@ -1,0 +1,243 @@
+IDHAR UDHAR — LIVE RELEASE TRACKER
+Last Updated: 02-Nov-2026
+
+==================================================
+OVERALL RELEASE STATUS
+==================================================
+
+Release Status: NOT READY
+
+Technical audit: Completed
+Backend implementation: Completed
+Staging verification: Pending
+Production release gates: Pending
+
+Note:
+Verified work ko dobara zero se nahi karna hai.
+Koi task evidence ke bina Complete mark nahi hoga.
+Production changes require explicit approval.
+
+==================================================
+1. COMPLETE RELEASE ROADMAP
+==================================================
+
+Phase    Work                              Status
+
+1        Release baseline & scope          IN PROGRESS
+2        Backend + database changes        IMPLEMENTATION COMPLETE
+3        Staging deployment + QA           PENDING
+4        Cashfree sandbox E2E               BLOCKED
+5        Production readiness & security   PENDING
+6        AWS production deployment         PENDING
+7        Cashfree LIVE verification        PENDING
+8        Customer + Rider app builds       PENDING
+9        Real-device testing               PENDING
+10       Google Play Store submission      PENDING
+11       Public launch + monitoring        PENDING
+
+==================================================
+2. TIME ESTIMATE
+==================================================
+
+Original estimates (not yet recalculated):
+
+Backend + DB                  24 hrs
+Staging + QA                  24 hrs
+Cashfree sandbox               9 hrs
+Production readiness          11 hrs
+AWS production                  6 hrs
+Mobile + Play Store           19 hrs
+Launch monitoring               5 hrs
+Baseline & planning             3 hrs
+
+Original stated total: 113 hrs
+
+NOTE:
+The detailed estimates above currently add up to
+101 hours, not 113 hours. This discrepancy must
+be reconciled before publishing a revised estimate.
+
+Completed implementation effort will be deducted
+only after the remaining work is properly assessed.
+
+External approvals and waiting time are excluded.
+
+==================================================
+3. VERIFIED COMPLETED WORK
+==================================================
+
+STAGING INFRASTRUCTURE
+
+[VERIFIED]
+- Staging API health: HTTP 200.
+- Database connectivity through API health check.
+- Staging ECS service: 1/1 task running.
+- Staging image provenance traced to source commit.
+- Staging Cashfree environment: sandbox.
+- Staging security group connectivity inspected.
+
+BACKEND TESTING — EARLIER BASELINE
+
+[VERIFIED]
+- Targeted backend tests: 51/51 passed.
+
+PACKAGE SIZE / VEHICLE LIMIT SNAPSHOT FIX
+
+[COMPLETED]
+- Booking-Time Snapshot Pattern approved.
+- Migration 0035 created.
+- package_size_cm added to migration.
+- vehicle_size_limit_snapshot added.
+- vehicle_weight_capacity_snapshot added.
+- vehicle_limits_snapshotted added.
+- Snapshot immutability trigger added.
+- New orders persist booking-time vehicle limits.
+- Quote uses saved snapshots.
+- Confirm uses saved snapshots.
+- Historical orders remain unmarked.
+- No fabricated historical snapshots.
+- Public API response compatibility preserved.
+- Existing migration files were not modified.
+
+LATEST TEST RESULTS
+
+[VERIFIED]
+- Order-related Jest tests: 105 passed, 0 failed.
+- Migration runner tests: 13 passed, 0 failed.
+
+IMPORTANT:
+These are separate test runs. Do not add them to
+the earlier 51/51 as a unique test count without
+checking overlap.
+
+==================================================
+4. CRITICAL BLOCKERS / PENDING VERIFICATION
+==================================================
+
+1. Staging ECS image is based on an older source
+   commit than current Git main.
+
+2. Staging migration history must be verified.
+
+3. Migration 0035 has not been applied to staging.
+
+4. Migration 0035 PostgreSQL trigger execution
+   has not yet been verified against staging.
+
+5. Production migration 0028 historical checksum
+   and migration history need resolution.
+
+6. Cashfree sandbox payment -> webhook -> ledger
+   end-to-end verification is pending.
+
+7. Production Cashfree LIVE readiness is pending.
+
+8. Production infrastructure, security and rollback
+   verification is pending.
+
+9. Play Console readiness is pending.
+
+10. Real-device testing is pending.
+
+==================================================
+5. CURRENT TASK
+==================================================
+
+==================================================
+5. CURRENT TASK
+==================================================
+
+TASK ID: A03
+
+TASK NAME:
+Build and push the latest staging backend image to ECR.
+
+STATUS: PENDING
+
+CURRENT VERIFIED STATE:
+- Docker Desktop is running.
+- Docker daemon verified using docker info.
+- AWS account and staging ECR repository verified.
+- Target image tag: staging-20261102-01
+- Image has NOT been built or pushed.
+- Backend implementation and migration 0035 are locally staged for GitHub sync.
+
+REQUIRED WORK:
+- Complete GitHub commit and push.
+- Build image from the exact committed source.
+- Push image to staging ECR.
+- Verify image digest and source commit.
+- Run staging migration dry-run using the exact image digest.
+- Confirm migration 0035 is planned.
+- Confirm migration 0028 is NOT reapplied.
+
+IMPORTANT SEQUENCE:
+
+GitHub sync
+        |
+        v
+Staging image build and ECR push
+        |
+        v
+Migration dry-run
+        |
+        v
+Review and explicit approval
+        |
+        v
+Staging migration apply
+        |
+        v
+Schema verification
+        |
+        v
+Matching API deployment
+        |
+        v
+Staging functional QA
+
+No migration apply or deployment is authorized
+by this tracker update.
+==================================================
+6. SAFETY RULES
+==================================================
+
+- Staging first.
+- Production database must not be modified
+  without explicit approval.
+- Never recreate or reuse migration 0028.
+- Never backfill unknown historical limits
+  using current vehicle-category configuration.
+- No Cashfree LIVE transaction without approval.
+- No unrelated feature changes.
+- Preserve existing approved business rules.
+- Verify every deployment using image digest
+  and source commit.
+- Record test results and evidence.
+
+==================================================
+7. CHANGE HISTORY
+==================================================
+
+02-Nov-2026
+
+COMPLETED:
+- Backend booking-time snapshot implementation.
+- Migration 0035 created.
+- Order-related tests: 105/105 passed.
+- Migration runner tests: 13/13 passed.
+- No database migration applied.
+- No AWS deployment performed.
+- No Git push or commit performed.
+
+CURRENT:
+- Prepare latest staging image.
+- Verify migration dry-run using that image.
+
+NEXT:
+- Review dry-run evidence.
+- Obtain explicit approval before staging migration apply.
+
+==================================================
+END OF TRACKER
+==================================================

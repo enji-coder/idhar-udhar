@@ -53,6 +53,10 @@ function orderRow(overrides: Partial<OrderRow> = {}): OrderRow {
     vehicle_id: null,
     canonical_status: 'CREATED',
     package_weight_kg: '10.000',
+    package_size_cm: null,
+    vehicle_size_limit_snapshot: null,
+    vehicle_weight_capacity_snapshot: null,
+    vehicle_limits_snapshotted: false,
     parent_order_id: null,
     scheduled_at: null,
     created_at: new Date('2026-09-28T00:00:00.000Z'),
@@ -174,11 +178,23 @@ function build() {
   const orders = {
     allocateDisplayId: jest.fn(async () => 'IU-AMD-0000000001'),
     insertOrder: jest.fn(
-      async (input: { packageWeightKg: number | null; vehicleCategoryId: string }) =>
+      async (input: {
+        packageWeightKg: number | null;
+        packageSizeCm: number | null;
+        vehicleCategoryId: string;
+        vehicleSizeLimitSnapshot: string | null;
+        vehicleWeightCapacitySnapshot: string | null;
+        vehicleLimitsSnapshotted: boolean;
+      }) =>
         orderRow({
           vehicle_category_id: input.vehicleCategoryId,
           package_weight_kg:
             input.packageWeightKg == null ? null : input.packageWeightKg.toFixed(3),
+          package_size_cm:
+            input.packageSizeCm == null ? null : input.packageSizeCm.toFixed(1),
+          vehicle_size_limit_snapshot: input.vehicleSizeLimitSnapshot,
+          vehicle_weight_capacity_snapshot: input.vehicleWeightCapacitySnapshot,
+          vehicle_limits_snapshotted: input.vehicleLimitsSnapshotted,
         }),
     ),
     insertStops: jest.fn(async () => []),
@@ -207,7 +223,7 @@ function build() {
   };
   const fares = {
     previewActiveVehicleFares: jest.fn(),
-    findSnapshotByOrder: jest.fn(async () => null),
+    findSnapshotByOrder: jest.fn(async (): Promise<FareSnapshotRow | null> => null),
     findQuote: jest.fn(async () => quote()),
     tripFareForVersion: jest.fn(async () => '819.00'),
     insertSnapshotFromQuote: jest.fn(async () => snapshot()),
@@ -397,6 +413,10 @@ describe('vehicle fare booking', () => {
         orderRow({
           vehicle_category_id: row.vehicle_category_id,
           package_weight_kg: '1.000',
+          package_size_cm: '30.0',
+          vehicle_size_limit_snapshot: '36 cm',
+          vehicle_weight_capacity_snapshot: '20 kg',
+          vehicle_limits_snapshotted: true,
         }),
       );
       orders.compareAndSetStatus.mockResolvedValue(
@@ -435,7 +455,15 @@ describe('vehicle fare booking', () => {
       )) as { vehicle_category_id: string };
       expect(created.vehicle_category_id).toBe(row.vehicle_category_id);
       expect(orders.insertOrder).toHaveBeenCalledWith(
-        expect.objectContaining({ vehicleCategoryId: row.vehicle_category_id }),
+        expect.objectContaining({
+          vehicleCategoryId: row.vehicle_category_id,
+          vehicleCategoryName: row.name,
+          packageWeightKg: 1,
+          packageSizeCm: 30,
+          vehicleSizeLimitSnapshot: '36 cm',
+          vehicleWeightCapacitySnapshot: '20 kg',
+          vehicleLimitsSnapshotted: true,
+        }),
         expect.anything(),
       );
 
@@ -617,5 +645,227 @@ describe('vehicle fare booking', () => {
       forbidNonWhitelisted: true,
     });
     expect(confirmErrors.map((error) => error.property)).toContain('trip_fare');
+  });
+
+  it('persists the accepted package size and the category limits used for validation', async () => {
+    const { service, catalog, orders } = build();
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ name: 'Bike', size: '36 cm', weight_capacity: '20 kg' }),
+    );
+    const created = await service.create(
+      auth,
+      {
+        city_id: CITY,
+        vehicle_category_id: TRUCK,
+        package_weight_kg: 10,
+        package_size_cm: 30,
+        stops: stops(),
+      },
+      'idem-snapshot',
+    );
+    expect(orders.insertOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vehicleCategoryId: TRUCK,
+        vehicleCategoryName: 'Bike',
+        packageWeightKg: 10,
+        packageSizeCm: 30,
+        vehicleSizeLimitSnapshot: '36 cm',
+        vehicleWeightCapacitySnapshot: '20 kg',
+        vehicleLimitsSnapshotted: true,
+      }),
+      expect.anything(),
+    );
+    expect(created).not.toHaveProperty('package_size_cm');
+    expect(created).not.toHaveProperty('vehicle_size_limit_snapshot');
+    expect(created).not.toHaveProperty('vehicle_weight_capacity_snapshot');
+    expect(created).not.toHaveProperty('vehicle_limits_snapshotted');
+    expect(created).toMatchObject({
+      package_weight_kg: '10.000',
+      vehicle_category_id: TRUCK,
+    });
+  });
+
+  it('marks a new order snapshotted when the category limits are null', async () => {
+    const { service, catalog, orders, fares } = build();
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ size: null, weight_capacity: null }),
+    );
+    await service.create(
+      auth,
+      {
+        city_id: CITY,
+        vehicle_category_id: TRUCK,
+        package_weight_kg: 10,
+        package_size_cm: 40,
+        stops: stops(),
+      },
+      'idem-null-limits',
+    );
+    expect(orders.insertOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        packageSizeCm: 40,
+        vehicleSizeLimitSnapshot: null,
+        vehicleWeightCapacitySnapshot: null,
+        vehicleLimitsSnapshotted: true,
+      }),
+      expect.anything(),
+    );
+
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ size: '10 cm', weight_capacity: '1 kg' }),
+    );
+    orders.lockById.mockResolvedValue(
+      orderRow({
+        package_weight_kg: '10.000',
+        package_size_cm: '40.0',
+        vehicle_size_limit_snapshot: null,
+        vehicle_weight_capacity_snapshot: null,
+        vehicle_limits_snapshotted: true,
+      }),
+    );
+    fares.insertQuoteFromActiveConfig.mockResolvedValue(quote());
+    await expect(service.quote(auth, ORDER)).resolves.toMatchObject({
+      trip_fare: '819.00',
+    });
+    const confirmed = await service.confirm(auth, ORDER, QUOTE);
+    expect(confirmed.canonical_status).toBe('SEARCHING');
+    expect(fares.tripFareForVersion).toHaveBeenCalledWith(
+      {
+        fareConfigVersionId: VERSION,
+        vehicleCategoryId: TRUCK,
+        distanceKm: '12.000',
+      },
+      expect.anything(),
+    );
+  });
+
+  it('quotes and confirms a new order with its booking-time limits after the category changes', async () => {
+    const { service, catalog, orders, fares } = build();
+    const booked = orderRow({
+      package_weight_kg: '10.000',
+      package_size_cm: '30.0',
+      vehicle_size_limit_snapshot: '36 cm',
+      vehicle_weight_capacity_snapshot: '20 kg',
+      vehicle_limits_snapshotted: true,
+    });
+    orders.lockById.mockResolvedValue(booked);
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ size: '10 cm', weight_capacity: '5 kg' }),
+    );
+    fares.insertQuoteFromActiveConfig.mockResolvedValue(quote());
+
+    const quoted = await service.quote(auth, ORDER);
+    expect(quoted).toMatchObject({ trip_fare: '819.00', vehicle_category_id: TRUCK });
+    expect(quoted).not.toHaveProperty('vehicle_size_limit_snapshot');
+    expect(fares.insertQuoteFromActiveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vehicleCategoryId: TRUCK,
+        distanceKm: '12.000',
+        stopCount: 2,
+      }),
+      expect.anything(),
+    );
+
+    const confirmed = await service.confirm(auth, ORDER, QUOTE);
+    expect(confirmed.canonical_status).toBe('SEARCHING');
+    expect(confirmed.fare_snapshot).toMatchObject({ trip_fare: '819.00', tax: '0.00' });
+    expect(confirmed).not.toHaveProperty('vehicle_limits_snapshotted');
+    expect(orders.compareAndSetStatus).toHaveBeenCalled();
+    expect(fares.insertSnapshotFromQuote).toHaveBeenCalledWith(
+      expect.objectContaining({ quoteId: QUOTE, orderId: ORDER }),
+      expect.anything(),
+    );
+    expect(booked.vehicle_size_limit_snapshot).toBe('36 cm');
+    expect(booked.vehicle_weight_capacity_snapshot).toBe('20 kg');
+  });
+
+  it('rejects a package that exceeds the booking-time size limit', async () => {
+    const { service, catalog, orders, fares } = build();
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ size: '36 cm', weight_capacity: '20 kg' }),
+    );
+    await expect(
+      service.create(
+        auth,
+        {
+          city_id: CITY,
+          vehicle_category_id: TRUCK,
+          package_weight_kg: 10,
+          package_size_cm: 60,
+          stops: stops(),
+        },
+        'idem-too-big',
+      ),
+    ).rejects.toThrow('Package size exceeds this vehicle limit');
+    expect(orders.insertOrder).not.toHaveBeenCalled();
+
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ size: '14 ft', weight_capacity: '4000 kg' }),
+    );
+    orders.lockById.mockResolvedValue(
+      orderRow({
+        package_weight_kg: '10.000',
+        package_size_cm: '60.0',
+        vehicle_size_limit_snapshot: '36 cm',
+        vehicle_weight_capacity_snapshot: '1000 kg',
+        vehicle_limits_snapshotted: true,
+      }),
+    );
+    await expect(service.quote(auth, ORDER)).rejects.toThrow(
+      'Package size exceeds this vehicle limit',
+    );
+    expect(fares.insertQuoteFromActiveConfig).not.toHaveBeenCalled();
+    await expect(service.confirm(auth, ORDER, QUOTE)).rejects.toThrow(
+      'Package size exceeds this vehicle limit',
+    );
+    expect(fares.insertSnapshotFromQuote).not.toHaveBeenCalled();
+    expect(fares.tripFareForVersion).not.toHaveBeenCalled();
+    expect(orders.compareAndSetStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not invent limits for a historical order and still quotes and confirms it', async () => {
+    const { service, catalog, orders, fares } = build();
+    const historical = orderRow({
+      package_weight_kg: '10.000',
+      package_size_cm: null,
+      vehicle_size_limit_snapshot: null,
+      vehicle_weight_capacity_snapshot: null,
+      vehicle_limits_snapshotted: false,
+    });
+    orders.lockById.mockResolvedValue(historical);
+    catalog.findActiveVehicleCategory.mockResolvedValue(
+      category({ size: '36 cm', weight_capacity: '20 kg' }),
+    );
+    fares.insertQuoteFromActiveConfig.mockResolvedValue(quote());
+
+    await expect(service.quote(auth, ORDER)).resolves.toMatchObject({
+      trip_fare: '819.00',
+    });
+    const confirmed = await service.confirm(auth, ORDER, QUOTE);
+    expect(confirmed.canonical_status).toBe('SEARCHING');
+    expect(orders.insertOrder).not.toHaveBeenCalled();
+    expect(historical.vehicle_limits_snapshotted).toBe(false);
+    expect(historical.package_size_cm).toBeNull();
+    expect(historical.vehicle_size_limit_snapshot).toBeNull();
+    expect(historical.vehicle_weight_capacity_snapshot).toBeNull();
+  });
+
+  it('returns an existing fare snapshot without rechecking a later size limit', async () => {
+    const { service, orders, fares } = build();
+    orders.lockById.mockResolvedValue(
+      orderRow({
+        package_weight_kg: '10.000',
+        package_size_cm: '60.0',
+        vehicle_size_limit_snapshot: '36 cm',
+        vehicle_weight_capacity_snapshot: '20 kg',
+        vehicle_limits_snapshotted: true,
+      }),
+    );
+    fares.findSnapshotByOrder.mockResolvedValue(snapshot());
+    const confirmed = await service.confirm(auth, ORDER, QUOTE);
+    expect(confirmed.fare_snapshot).toMatchObject({ trip_fare: '819.00' });
+    expect(confirmed.canonical_status).toBe('CREATED');
+    expect(fares.insertSnapshotFromQuote).not.toHaveBeenCalled();
+    expect(orders.compareAndSetStatus).not.toHaveBeenCalled();
   });
 });
