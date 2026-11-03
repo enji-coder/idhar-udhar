@@ -15,3 +15,8 @@ cd .\idhar_udhar
 & "C:\Users\baps\AppData\Local\Android\Sdk\platform-tools\adb.exe" devices
 
 flutter run --debug --flavor rider -t lib/rider/rider_main.dart --dart-define=API_BASE_URL=https://api.idharudhar.co.in
+
+
+for staging APK generation
+-------------------------------
+flutter build apk --release --flavor customer -t lib/customer/customer_main.dart --dart-define=API_BASE_URL=https://staging-api.idharudhar.co.in

@@ -262,3 +262,37 @@ NEXT:
 ==================================================
 END OF TRACKER
 ==================================================
+03-Nov-2026 - STAGING ADMIN PANEL UPDATE
+==================================================
+
+NETLIFY STAGING ADMIN:
+- Created a separate Netlify site:
+  https://idhar-udhar-admin-staging.netlify.app
+- Source repository: enji-coder/idhar-udhar
+- Branch: main
+- Base directory: IDHAR_UDHAR_ADMIN
+- Build command: npm run build
+- Publish directory: dist
+- VITE_API_BASE_URL points to staging API:
+  https://staging-api.idharudhar.co.in
+- Netlify deployment completed successfully.
+- Login and Admin functionality are not yet verified.
+- Staging API CORS update for hosted Netlify origin is pending.
+- Production Admin Netlify site was not modified.
+
+APK COMMAND DOCUMENTATION:
+- Added customer staging APK build command.
+- Staging API URL is used in the documented command.
+- APK generation using this new command is not yet verified.
+
+NEXT:
+- Resolve staging Admin login issue.
+- Verify staging API CORS for the new Netlify origin.
+- Verify Admin login and dashboard functionality.
+- Review ECS migration task-definition template separately.
+- Continue staging QA before production release.
+
+SAFETY:
+- No production deployment or database modification.
+- No Cashfree LIVE transaction.
+- Existing production Admin site remains untouched.
