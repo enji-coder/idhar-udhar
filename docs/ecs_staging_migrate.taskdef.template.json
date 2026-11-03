@@ -9,11 +9,12 @@
   "containerDefinitions": [
     {
       "name": "migrate",
-      "image": "635738235470.dkr.ecr.ap-south-1.amazonaws.com/iu-staging-backend:staging-20261027-01",
+      "image": "635738235470.dkr.ecr.ap-south-1.amazonaws.com/iu-staging-backend@sha256:d2eeada356160f65dcd93aa293d7ce31de4fc7486e879a056b2af6f544fdcd3f",
       "essential": true,
       "command": ["node", "scripts/migrate.mjs"],
       "environment": [
         { "name": "MIGRATE_DRY_RUN", "value": "1" },
+        { "name": "MIGRATIONS_DIR", "value": "/app/records_database/migrations" },
         { "name": "IU_DEPLOYMENT_TIER", "value": "staging" },
         { "name": "CASHFREE_ENVIRONMENT", "value": "sandbox" },
         { "name": "DATABASE_HOST", "value": "iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com" },
