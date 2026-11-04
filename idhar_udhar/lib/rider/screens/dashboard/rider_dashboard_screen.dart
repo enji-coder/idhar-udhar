@@ -520,21 +520,23 @@ class _HomeTab extends ConsumerWidget {
                     try {
                       final walletApi = ref.read(walletApiProvider);
                       final session = await walletApi.beginTopUp(amount);
-                      await openRiderWalletTopUpCheckout(session);
-                      await verifyRiderWalletTopUpAfterCheckout(
+                      final RiderWalletTopUpFeedback feedback =
+                          await finishRiderWalletTopUpCheckout(
                         walletApi: walletApi,
-                        paymentTransactionId: session.paymentTransactionId,
+                        session: session,
                       );
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Payment submitted. Balance updates after confirmation.',
-                            ),
-                          ),
+                          SnackBar(content: Text(feedback.message)),
                         );
                       }
-                      for (var i = 0; i < 5; i++) {
+                      if (feedback.refreshImmediately) {
+                        ref.invalidate(riderWalletLedgerProvider);
+                        await ref
+                            .read(riderSessionProvider.notifier)
+                            .refreshWallet();
+                      }
+                      for (var i = 0; i < feedback.delayedRefreshes; i++) {
                         await Future<void>.delayed(const Duration(seconds: 2));
                         await ref
                             .read(riderSessionProvider.notifier)

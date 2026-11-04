@@ -1,5 +1,6 @@
 import {
   CashfreePaymentService,
+  cashfreeHeaderValueIsSafe,
   cashfreeTransportErrorFields,
   defaultCashfreeHttp,
   sanitizeCashfreeLogMessage,
@@ -74,6 +75,15 @@ describe('sanitizeCashfreeLogMessage', () => {
     expect(logged).toContain('Basic [redacted]');
   });
 
+  it('redacts the credential inside an invalid-header TypeError', () => {
+    const secret = 'HEADER_PROBE_VALUE';
+    const logged = sanitizeCashfreeLogMessage(
+      `Headers.append: "${secret}\u0000" is an invalid header value.`,
+    );
+    expect(logged).toBe('invalid header value');
+    expect(logged).not.toContain(secret);
+  });
+
   it('redacts the same secret on a second call', () => {
     const first = sanitizeCashfreeLogMessage('Bearer first_secret');
     const second = sanitizeCashfreeLogMessage('Basic second_secret');
@@ -81,6 +91,14 @@ describe('sanitizeCashfreeLogMessage', () => {
     expect(second).toBe('Basic [redacted]');
     expect(first + second).not.toContain('first_secret');
     expect(second).not.toContain('second_secret');
+  });
+});
+
+describe('cashfreeHeaderValueIsSafe', () => {
+  it('rejects NUL and embedded line breaks and accepts a trimmed credential', () => {
+    expect(cashfreeHeaderValueIsSafe('sandbox_client_id')).toBe(true);
+    expect(cashfreeHeaderValueIsSafe('sandbox_client_id\nmore')).toBe(false);
+    expect(cashfreeHeaderValueIsSafe('sandbox_client_id\u0000')).toBe(false);
   });
 });
 
@@ -143,6 +161,46 @@ describe('defaultCashfreeHttp', () => {
       expect(logged).not.toContain('x-client-id');
       expect(logged).not.toContain('customer_phone');
       expect(logged).not.toContain('api.cashfree.com');
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it('does not call fetch when a header contains a control character', async () => {
+    const warn = jest.fn();
+    const secret = 'HEADER_PROBE_VALUE';
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    try {
+      await expect(
+        defaultCashfreeHttp(
+          'https://sandbox.cashfree.com/pg/orders',
+          {
+            method: 'POST',
+            headers: {
+              'x-client-id': 'cid',
+              'x-client-secret': `${secret}\u0000`,
+            },
+            timeoutMs: 1000,
+          },
+          { warn },
+        ),
+      ).rejects.toMatchObject({
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE',
+        message: 'Cashfree credentials contain a character that cannot be sent',
+        status: 503,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith('cashfree_transport_failed', {
+        method: 'POST',
+        timeout_ms: 1000,
+        error_name: 'TypeError',
+        error_code: null,
+        cause_name: null,
+        cause_code: null,
+        error_message: 'invalid header value',
+        cause_message: null,
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain(secret);
     } finally {
       fetchMock.mockRestore();
     }

@@ -63,3 +63,76 @@ Future<WalletTopUpPaymentStatus?> verifyRiderWalletTopUpAfterCheckout({
     return null;
   }
 }
+
+/// Server status after checkout. The SDK callback is not a wallet credit.
+class RiderWalletTopUpFeedback {
+  const RiderWalletTopUpFeedback({
+    required this.message,
+    required this.refreshImmediately,
+    required this.delayedRefreshes,
+  });
+
+  final String message;
+  final bool refreshImmediately;
+  final int delayedRefreshes;
+}
+
+const Set<String> _failedTopUpStatuses = <String>{
+  'FAILED',
+  'REFUNDED',
+  'USER_DROPPED',
+  'EXPIRED',
+  'CANCELLED',
+  'TERMINATED',
+};
+
+RiderWalletTopUpFeedback riderWalletTopUpFeedback(
+  WalletTopUpPaymentStatus? status,
+) {
+  final String raw = status?.transactionStatus.trim().toUpperCase() ?? '';
+  if (raw == 'PAID') {
+    return const RiderWalletTopUpFeedback(
+      message: 'Payment confirmed. Your wallet balance has been updated.',
+      refreshImmediately: true,
+      delayedRefreshes: 0,
+    );
+  }
+  if (_failedTopUpStatuses.contains(raw)) {
+    return const RiderWalletTopUpFeedback(
+      message: 'Payment was not completed. Your wallet was not credited.',
+      refreshImmediately: true,
+      delayedRefreshes: 0,
+    );
+  }
+  if (status == null) {
+    return const RiderWalletTopUpFeedback(
+      message:
+          'Payment status could not be confirmed. Your wallet updates only after the server verifies it.',
+      refreshImmediately: true,
+      delayedRefreshes: 2,
+    );
+  }
+  return const RiderWalletTopUpFeedback(
+    message: 'Payment submitted. Balance updates after confirmation.',
+    refreshImmediately: false,
+    delayedRefreshes: 5,
+  );
+}
+
+/// Checkout return is not settlement. A gateway error still asks the server.
+Future<RiderWalletTopUpFeedback> finishRiderWalletTopUpCheckout({
+  required WalletApi walletApi,
+  required WalletTopUpSession session,
+}) async {
+  try {
+    await openRiderWalletTopUpCheckout(session);
+  } on ApiException {
+    // The SDK error is not a payment result.
+  }
+  final WalletTopUpPaymentStatus? status =
+      await verifyRiderWalletTopUpAfterCheckout(
+    walletApi: walletApi,
+    paymentTransactionId: session.paymentTransactionId,
+  );
+  return riderWalletTopUpFeedback(status);
+}

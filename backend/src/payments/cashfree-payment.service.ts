@@ -61,6 +61,14 @@ const SECRET_ASSIGNMENT = new RegExp(
   String.raw`\b((?:x-)?client[-_\s]?secret|(?:x-)?client[-_\s]?id|(?:x-)?api[-_\s]?key|(?:x-)?access[-_\s]?token|authorization)\b\s*["']?\s*[:=]\s*(?:(?:bearer|basic)\b\s+)?${SECRET_VALUE.source}`,
   'gi',
 );
+const INVALID_HEADER_MESSAGE =
+  /Headers\.append:\s*"(?:\\.|[^"\\])*"\s*is an invalid header value\.?/gi;
+const SAFE_CASHFREE_HEADER_VALUE = /^[\t\u0020-\u007E\u0080-\u00FF]*$/;
+
+/** Undici rejects these before DNS. The thrown text can contain the value. */
+export function cashfreeHeaderValueIsSafe(value: string): boolean {
+  return SAFE_CASHFREE_HEADER_VALUE.test(value);
+}
 
 /**
  * Allowlisted transport diagnostics only. Never includes message text, URLs,
@@ -120,7 +128,11 @@ export function sanitizeCashfreeLogMessage(raw: string): string {
         LOOSE_QUERY_OR_FRAGMENT,
         redact(
           URL_QUERY_OR_FRAGMENT,
-          redact(URL_WITH_USERINFO, raw, '$1***@'),
+          redact(
+            URL_WITH_USERINFO,
+            redact(INVALID_HEADER_MESSAGE, raw, 'invalid header value'),
+            '$1***@',
+          ),
           '$1',
         ),
         '',
@@ -174,6 +186,25 @@ export async function defaultCashfreeHttp(
   },
   log?: CashfreeTransportLogger,
 ): Promise<{ status: number; json: unknown }> {
+  for (const value of Object.values(init.headers)) {
+    if (!cashfreeHeaderValueIsSafe(value)) {
+      log?.warn('cashfree_transport_failed', {
+        method: init.method,
+        timeout_ms: init.timeoutMs,
+        error_name: 'TypeError',
+        error_code: null,
+        cause_name: null,
+        cause_code: null,
+        error_message: 'invalid header value',
+        cause_message: null,
+      });
+      throw new ApiError(
+        ErrorCodes.PAYMENT_PROVIDER_UNAVAILABLE,
+        'Cashfree credentials contain a character that cannot be sent',
+        503,
+      );
+    }
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs);
   try {

@@ -106,6 +106,32 @@ describe('payment configuration', () => {
     expect(withPayout.payoutClientSecret).not.toBe(withPayout.clientSecret);
   });
 
+  it('refuses Cashfree credentials that cannot be sent as HTTP headers', () => {
+    useCashfree('sandbox');
+    process.env.CASHFREE_CLIENT_SECRET = 'test_client_secret\n';
+    expect(loadAppConfig().payment.cashfree.clientSecret).toBe('test_client_secret');
+    const secret = 'embedded_line_break_secret';
+    for (const name of [
+      'CASHFREE_CLIENT_ID',
+      'CASHFREE_CLIENT_SECRET',
+      'CASHFREE_PAYOUT_CLIENT_ID',
+      'CASHFREE_PAYOUT_CLIENT_SECRET',
+    ]) {
+      useCashfree('sandbox');
+      process.env.CASHFREE_PAYOUT_CLIENT_ID = 'payout_client_id';
+      process.env.CASHFREE_PAYOUT_CLIENT_SECRET = 'payout_client_secret';
+      process.env[name] = `${secret}\n${secret}`;
+      expect(() => loadAppConfig()).toThrow(new RegExp(name));
+      try {
+        loadAppConfig();
+      } catch (err) {
+        expect(String(err)).not.toContain(secret);
+      }
+      process.env[name] = `nul_${secret}\u0000`;
+      expect(() => loadAppConfig()).toThrow(new RegExp(name));
+    }
+  });
+
   it('requires Cashfree credentials before selecting the gateway', () => {
     process.env.PAYMENT_PROVIDER = 'cashfree';
     process.env.CASHFREE_ENVIRONMENT = 'sandbox';

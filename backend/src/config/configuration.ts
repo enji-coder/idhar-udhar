@@ -177,6 +177,25 @@ function booleanFlag(name: string, fallback: boolean): boolean {
   throw new Error(`Invalid boolean environment variable: ${name}`);
 }
 
+/**
+ * Cashfree client id/secret are copied into HTTP headers. trim() removes a
+ * trailing line break, but an embedded control character or NUL still reaches
+ * fetch and throws before any socket opens. The thrown text can contain the
+ * credential, so refuse it here and never include the value in the error.
+ */
+function readCashfreeCredential(name: string): string | null {
+  const value = (process.env[name] ?? '').trim();
+  if (!value) {
+    return null;
+  }
+  if (!/^[\t\u0020-\u007E\u0080-\u00FF]*$/.test(value)) {
+    throw new Error(
+      `${name} contains a character that cannot be sent in an HTTP header. Re-save the secret without line breaks or other control characters.`,
+    );
+  }
+  return value;
+}
+
 function integer(name: string, fallback: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) {
@@ -352,12 +371,12 @@ export function loadAppConfig(): AppConfig {
     throw new Error('CASHFREE_ENVIRONMENT must be sandbox or production');
   }
   const cashfreeEnvironment = cashfreeEnvironmentRaw as 'sandbox' | 'production';
-  const cashfreeClientId = (process.env.CASHFREE_CLIENT_ID ?? '').trim() || null;
-  const cashfreeClientSecret = (process.env.CASHFREE_CLIENT_SECRET ?? '').trim() || null;
-  const cashfreePayoutClientId =
-    (process.env.CASHFREE_PAYOUT_CLIENT_ID ?? '').trim() || null;
-  const cashfreePayoutClientSecret =
-    (process.env.CASHFREE_PAYOUT_CLIENT_SECRET ?? '').trim() || null;
+  const cashfreeClientId = readCashfreeCredential('CASHFREE_CLIENT_ID');
+  const cashfreeClientSecret = readCashfreeCredential('CASHFREE_CLIENT_SECRET');
+  const cashfreePayoutClientId = readCashfreeCredential('CASHFREE_PAYOUT_CLIENT_ID');
+  const cashfreePayoutClientSecret = readCashfreeCredential(
+    'CASHFREE_PAYOUT_CLIENT_SECRET',
+  );
   const cashfreeApiVersion =
     (process.env.CASHFREE_API_VERSION ?? '').trim() || '2025-01-01';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(cashfreeApiVersion)) {

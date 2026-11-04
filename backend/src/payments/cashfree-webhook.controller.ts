@@ -4,6 +4,7 @@ import { Request } from 'express';
 import { Public } from '../common/decorators/public.decorator';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
+import { AppLogger } from '../common/logger/app-logger';
 import { AppConfig } from '../config/configuration';
 import { verifyCashfreeWebhookSignature } from './cashfree-signature';
 import { cashfreeEventId, parseCashfreeWebhook } from './cashfree-webhook.parse';
@@ -24,6 +25,7 @@ export class CashfreeWebhookController {
   constructor(
     private readonly configService: ConfigService,
     private readonly webhooks: CashfreeWebhookService,
+    private readonly logger: AppLogger,
   ) {}
 
   @Public()
@@ -58,6 +60,7 @@ export class CashfreeWebhookController {
       signature: headerValue(req.headers['x-webhook-signature']),
     });
     if (!check.ok) {
+      this.logStagingRejection(check.reason);
       throw webhookRejected();
     }
     let parsedBody: unknown;
@@ -76,5 +79,17 @@ export class CashfreeWebhookController {
       parsed: parseCashfreeWebhook(parsedBody),
     });
     return { received: true, result };
+  }
+
+  /**
+   * Staging diagnosis only. `reason` is the verifier enum. The timestamp,
+   * signature, raw body, and secret stay out of the log.
+   */
+  private logStagingRejection(reason: 'signature' | 'timestamp'): void {
+    const tier = (process.env.IU_DEPLOYMENT_TIER ?? '').trim().toLowerCase();
+    if (tier !== 'staging') {
+      return;
+    }
+    this.logger.warn('cashfree_webhook_rejected', { reason });
   }
 }
