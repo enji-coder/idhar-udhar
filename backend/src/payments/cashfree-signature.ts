@@ -42,16 +42,13 @@ function digitClass(timestamp: string): TimestampDigitClass | undefined {
   return 'other_digit_length';
 }
 
-function skewSeconds(timestamp: string, nowMs: number): number | undefined {
-  if (!/^\d+$/.test(timestamp)) {
+function skewSecondsFromMs(timestampMs: number, nowMs: number): number | undefined {
+  if (!Number.isSafeInteger(timestampMs) || !Number.isSafeInteger(nowMs)) {
     return undefined;
   }
-  const value = BigInt(timestamp);
-  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-    return undefined;
-  }
-  const now = BigInt(nowMs);
-  const deltaMs = value > now ? value - now : now - value;
+  const left = BigInt(timestampMs);
+  const right = BigInt(nowMs);
+  const deltaMs = left > right ? left - right : right - left;
   const seconds = deltaMs / 1000n;
   if (seconds > BigInt(Number.MAX_SAFE_INTEGER)) {
     return undefined;
@@ -63,19 +60,39 @@ function timestampDiagnostic(
   bucket: TimestampRejectionBucket,
   timestamp: string,
   nowMs: number,
+  freshnessMs?: number,
 ): TimestampRejectionDiagnostic {
   const diagnostic: TimestampRejectionDiagnostic = { timestamp_bucket: bucket };
   const digits = digitClass(timestamp);
   if (digits) {
     diagnostic.timestamp_digits = digits;
   }
-  if (bucket === 'stale' || bucket === 'future') {
-    const skew = skewSeconds(timestamp, nowMs);
+  if ((bucket === 'stale' || bucket === 'future') && freshnessMs !== undefined) {
+    const skew = skewSecondsFromMs(freshnessMs, nowMs);
     if (skew !== undefined) {
       diagnostic.skew_seconds = skew;
     }
   }
   return diagnostic;
+}
+
+/**
+ * Freshness unit only. HMAC must keep using the original header string.
+ * A current millisecond value is 13 digits, so a 10-digit value cannot be one.
+ */
+function freshnessMilliseconds(timestamp: string): number | undefined {
+  const value = Number(timestamp);
+  if (!Number.isSafeInteger(value)) {
+    return undefined;
+  }
+  if (timestamp.length === 10) {
+    const asMilliseconds = value * 1000;
+    if (!Number.isSafeInteger(asMilliseconds)) {
+      return undefined;
+    }
+    return asMilliseconds;
+  }
+  return value;
 }
 
 /**
@@ -101,8 +118,8 @@ export function verifyCashfreeWebhookSignature(input: {
     }
     return { ok: false, reason: 'signature' };
   }
-  const timestampMs = Number(timestamp);
-  if (!Number.isSafeInteger(timestampMs)) {
+  const timestampMs = freshnessMilliseconds(timestamp);
+  if (timestampMs === undefined) {
     return {
       ok: false,
       reason: 'timestamp',
@@ -113,14 +130,14 @@ export function verifyCashfreeWebhookSignature(input: {
     return {
       ok: false,
       reason: 'timestamp',
-      timestampDiagnostic: timestampDiagnostic('future', timestamp, now),
+      timestampDiagnostic: timestampDiagnostic('future', timestamp, now, timestampMs),
     };
   }
   if (now - timestampMs > MAX_AGE_MS) {
     return {
       ok: false,
       reason: 'timestamp',
-      timestampDiagnostic: timestampDiagnostic('stale', timestamp, now),
+      timestampDiagnostic: timestampDiagnostic('stale', timestamp, now, timestampMs),
     };
   }
   const expected = createHmac('sha256', input.secret)

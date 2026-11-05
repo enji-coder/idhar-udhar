@@ -98,25 +98,6 @@ describe('Cashfree signature and webhook parsing', () => {
       },
     });
 
-    const secondsValue = '1700000000';
-    const secondsCheck = verifyCashfreeWebhookSignature({
-      secret: SECRET,
-      rawBody: raw,
-      timestamp: secondsValue,
-      signature: sign(raw, secondsValue),
-      nowMs: now,
-    });
-    expect(secondsCheck).toEqual({
-      ok: false,
-      reason: 'timestamp',
-      timestampDiagnostic: {
-        timestamp_bucket: 'stale',
-        skew_seconds: (now - Number(secondsValue)) / 1000,
-        timestamp_digits: '10_digit',
-      },
-    });
-    expect(JSON.stringify(secondsCheck)).not.toContain(secondsValue);
-
     const nonInteger = '1700000000000abc';
     const nonIntegerCheck = verifyCashfreeWebhookSignature({
       secret: SECRET,
@@ -170,6 +151,160 @@ describe('Cashfree signature and webhook parsing', () => {
         nowMs: now,
       }).ok,
     ).toBe(true);
+  });
+
+  it('accepts current seconds and milliseconds only when the original string is signed', () => {
+    const raw = '{"type":"PAYMENT_SUCCESS_WEBHOOK","data":{"order":{"order_id":"iu"}}}';
+    const seconds = String(now / 1000);
+    const milliseconds = String(now);
+    expect(seconds).toHaveLength(10);
+    expect(milliseconds).toHaveLength(13);
+    expect(String(Number(seconds) * 1000)).toBe(milliseconds);
+
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: seconds,
+        signature: sign(raw, seconds),
+        nowMs: now,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: milliseconds,
+        signature: sign(raw, milliseconds),
+        nowMs: now,
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: seconds,
+        signature: sign(raw, milliseconds),
+        nowMs: now,
+      }),
+    ).toEqual({ ok: false, reason: 'signature' });
+  });
+
+  it('rejects stale, future, invalid, and mismatched signatures for both timestamp units', () => {
+    const raw = '{"order_amount":10.50}';
+    const otherBody = '{"order_amount":10.5}';
+    expect(otherBody).not.toBe(raw);
+    const cases = [
+      { timestamp: String(now / 1000 - 73 * 60 * 60), digits: '10_digit' as const },
+      { timestamp: String(now - 73 * 60 * 60 * 1000), digits: '13_digit' as const },
+    ];
+    for (const item of cases) {
+      expect(
+        verifyCashfreeWebhookSignature({
+          secret: SECRET,
+          rawBody: raw,
+          timestamp: item.timestamp,
+          signature: sign(raw, item.timestamp),
+          nowMs: now,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: 'timestamp',
+        timestampDiagnostic: {
+          timestamp_bucket: 'stale',
+          skew_seconds: 73 * 60 * 60,
+          timestamp_digits: item.digits,
+        },
+      });
+    }
+
+    const futureCases = [
+      { timestamp: String(now / 1000 + 6 * 60), digits: '10_digit' as const },
+      { timestamp: String(now + 6 * 60 * 1000), digits: '13_digit' as const },
+    ];
+    for (const item of futureCases) {
+      expect(
+        verifyCashfreeWebhookSignature({
+          secret: SECRET,
+          rawBody: raw,
+          timestamp: item.timestamp,
+          signature: sign(raw, item.timestamp),
+          nowMs: now,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: 'timestamp',
+        timestampDiagnostic: {
+          timestamp_bucket: 'future',
+          skew_seconds: 6 * 60,
+          timestamp_digits: item.digits,
+        },
+      });
+    }
+
+    for (const timestamp of [String(now / 1000), String(now)]) {
+      const valid = sign(raw, timestamp);
+      const invalid = `${valid.slice(0, -1)}${valid.endsWith('A') ? 'B' : 'A'}`;
+      expect(invalid).not.toBe(valid);
+      expect(
+        verifyCashfreeWebhookSignature({
+          secret: SECRET,
+          rawBody: raw,
+          timestamp,
+          signature: invalid,
+          nowMs: now,
+        }),
+      ).toEqual({ ok: false, reason: 'signature' });
+      expect(
+        verifyCashfreeWebhookSignature({
+          secret: SECRET,
+          rawBody: raw,
+          timestamp,
+          signature: sign(otherBody, timestamp),
+          nowMs: now,
+        }),
+      ).toEqual({ ok: false, reason: 'signature' });
+    }
+
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: String(now / 1000 - 72 * 60 * 60),
+        signature: sign(raw, String(now / 1000 - 72 * 60 * 60)),
+        nowMs: now,
+      }).ok,
+    ).toBe(true);
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: String(now / 1000 + 5 * 60),
+        signature: sign(raw, String(now / 1000 + 5 * 60)),
+        nowMs: now,
+      }).ok,
+    ).toBe(true);
+
+    for (const timestamp of ['17000000000', '170000000000']) {
+      expect(timestamp).toMatch(/^\d{11,12}$/);
+      expect(
+        verifyCashfreeWebhookSignature({
+          secret: SECRET,
+          rawBody: raw,
+          timestamp,
+          signature: sign(raw, timestamp),
+          nowMs: now,
+        }),
+      ).toEqual({
+        ok: false,
+        reason: 'timestamp',
+        timestampDiagnostic: {
+          timestamp_bucket: 'stale',
+          skew_seconds: Math.floor((now - Number(timestamp)) / 1000),
+          timestamp_digits: 'other_digit_length',
+        },
+      });
+    }
   });
 
   it('parses a success webhook and keeps paise', () => {
