@@ -44,9 +44,9 @@ abstract final class ApiConfig {
   }
 
   static String get baseUrl {
-    final String defined = _definedBaseUrl.trim();
+    final String defined = normalizeBaseUrl(_definedBaseUrl);
     if (defined.isNotEmpty) {
-      return _stripTrailingSlash(defined);
+      return defined;
     }
     if (_defaultHost == _ApiDefaultHost.production) {
       return productionBaseUrl;
@@ -80,6 +80,20 @@ abstract final class ApiConfig {
   }
 
   static bool get enableRequestLogging => !kReleaseMode;
+
+  /// Host only. Call sites already prefix `/v1`, and Dio joins with
+  /// `baseUrl + path`. A define of `https://host/v1` would otherwise request
+  /// `/v1/v1/...`, which staging answers with HTTP 404 `NOT_FOUND`.
+  @visibleForTesting
+  static String normalizeBaseUrl(String value) {
+    var normalized = _stripTrailingSlash(value.trim());
+    while (normalized.endsWith('/v1')) {
+      normalized = _stripTrailingSlash(
+        normalized.substring(0, normalized.length - 3),
+      );
+    }
+    return normalized;
+  }
 
   static String _stripTrailingSlash(String value) {
     if (value.endsWith('/')) {

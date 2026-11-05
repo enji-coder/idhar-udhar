@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idhar_udhar/shared/api/api_config.dart';
 
@@ -29,5 +30,40 @@ void main() {
     ApiConfig.useProductionDefault();
     expect(ApiConfig.baseUrl, 'https://api.idharudhar.co.in');
     ApiConfig.debugResetBaseUrl();
+  });
+
+  test('a base URL that already includes /v1 is not joined twice', () {
+    const String releaseBase = 'https://staging-api.idharudhar.co.in/v1';
+    expect(
+      ApiConfig.normalizeBaseUrl(releaseBase),
+      'https://staging-api.idharudhar.co.in',
+    );
+    expect(
+      ApiConfig.normalizeBaseUrl('$releaseBase/'),
+      'https://staging-api.idharudhar.co.in',
+    );
+    expect(
+      ApiConfig.normalizeBaseUrl(ApiConfig.stagingBaseUrl),
+      ApiConfig.stagingBaseUrl,
+    );
+    expect(
+      ApiConfig.normalizeBaseUrl(ApiConfig.productionBaseUrl),
+      ApiConfig.productionBaseUrl,
+    );
+
+    final Uri doubled = RequestOptions(
+      baseUrl: releaseBase,
+      path: '/v1/auth/otp/request',
+    ).uri;
+    expect(doubled.path, '/v1/v1/auth/otp/request');
+
+    final Uri once = RequestOptions(
+      baseUrl: ApiConfig.normalizeBaseUrl(releaseBase),
+      path: '/v1/auth/otp/request',
+    ).uri;
+    expect(
+      once.toString(),
+      'https://staging-api.idharudhar.co.in/v1/auth/otp/request',
+    );
   });
 }

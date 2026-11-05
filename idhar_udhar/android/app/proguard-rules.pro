@@ -10,3 +10,7 @@
 # Keep the entry points the installer calls. Do not request READ_SMS.
 -keep class com.google.android.gms.auth.api.phone.SmsRetriever { *; }
 -keep class com.google.android.gms.auth.api.phone.SmsRetrieverClient { *; }
+
+# Rider release startup loads these by name from flutter_secure_storage.
+# R8 otherwise deletes KeyCipher and startup throws NoClassDefFoundError.
+-keep class com.it_nomads.fluttersecurestorage.** { *; }

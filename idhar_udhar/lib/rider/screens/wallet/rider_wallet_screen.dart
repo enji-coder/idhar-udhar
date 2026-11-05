@@ -275,6 +275,12 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    _amountFocus.requestFocus();
+  }
+
+  @override
   void dispose() {
     _amountFocus.dispose();
     _controller.dispose();
@@ -357,7 +363,12 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
             label: 'Amount (₹)',
             hint: '500',
             prefixIcon: Icons.currency_rupee_rounded,
-            keyboardType: TextInputType.number,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+              signed: false,
+            ),
+            textInputAction: TextInputAction.done,
+            onTap: () => _amountFocus.requestFocus(),
             errorText: _error,
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
