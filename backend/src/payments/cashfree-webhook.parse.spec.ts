@@ -57,7 +57,15 @@ describe('Cashfree signature and webhook parsing', () => {
         signature: sign(raw, timestamp),
         nowMs: now,
       }),
-    ).toEqual({ ok: false, reason: 'timestamp' });
+    ).toEqual({
+      ok: false,
+      reason: 'timestamp',
+      timestampDiagnostic: {
+        timestamp_bucket: 'stale',
+        skew_seconds: 73 * 60 * 60,
+        timestamp_digits: '13_digit',
+      },
+    });
     expect(
       verifyCashfreeWebhookSignature({
         secret: 'other',
@@ -67,6 +75,101 @@ describe('Cashfree signature and webhook parsing', () => {
         nowMs: now,
       }),
     ).toEqual({ ok: false, reason: 'signature' });
+  });
+
+  it('classifies future, non-integer, and unsafe timestamps without changing acceptance', () => {
+    const raw = '{}';
+    const future = String(now + 6 * 60 * 1000);
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: future,
+        signature: sign(raw, future),
+        nowMs: now,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'timestamp',
+      timestampDiagnostic: {
+        timestamp_bucket: 'future',
+        skew_seconds: 6 * 60,
+        timestamp_digits: '13_digit',
+      },
+    });
+
+    const secondsValue = '1700000000';
+    const secondsCheck = verifyCashfreeWebhookSignature({
+      secret: SECRET,
+      rawBody: raw,
+      timestamp: secondsValue,
+      signature: sign(raw, secondsValue),
+      nowMs: now,
+    });
+    expect(secondsCheck).toEqual({
+      ok: false,
+      reason: 'timestamp',
+      timestampDiagnostic: {
+        timestamp_bucket: 'stale',
+        skew_seconds: (now - Number(secondsValue)) / 1000,
+        timestamp_digits: '10_digit',
+      },
+    });
+    expect(JSON.stringify(secondsCheck)).not.toContain(secondsValue);
+
+    const nonInteger = '1700000000000abc';
+    const nonIntegerCheck = verifyCashfreeWebhookSignature({
+      secret: SECRET,
+      rawBody: raw,
+      timestamp: nonInteger,
+      signature: 'present-signature',
+      nowMs: now,
+    });
+    expect(nonIntegerCheck).toEqual({
+      ok: false,
+      reason: 'signature',
+      timestampDiagnostic: { timestamp_bucket: 'not_integer' },
+    });
+    expect(JSON.stringify(nonIntegerCheck)).not.toContain(nonInteger);
+
+    const unsafe = '9'.repeat(20);
+    const unsafeCheck = verifyCashfreeWebhookSignature({
+      secret: SECRET,
+      rawBody: raw,
+      timestamp: unsafe,
+      signature: sign(raw, unsafe),
+      nowMs: now,
+    });
+    expect(unsafeCheck).toEqual({
+      ok: false,
+      reason: 'timestamp',
+      timestampDiagnostic: {
+        timestamp_bucket: 'unsafe_integer',
+        timestamp_digits: 'other_digit_length',
+      },
+    });
+    expect(JSON.stringify(unsafeCheck)).not.toContain(unsafe);
+
+    const exactAge = String(now - 72 * 60 * 60 * 1000);
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: exactAge,
+        signature: sign(raw, exactAge),
+        nowMs: now,
+      }).ok,
+    ).toBe(true);
+    const exactFuture = String(now + 5 * 60 * 1000);
+    expect(
+      verifyCashfreeWebhookSignature({
+        secret: SECRET,
+        rawBody: raw,
+        timestamp: exactFuture,
+        signature: sign(raw, exactFuture),
+        nowMs: now,
+      }).ok,
+    ).toBe(true);
   });
 
   it('parses a success webhook and keeps paise', () => {

@@ -6,7 +6,10 @@ import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { AppLogger } from '../common/logger/app-logger';
 import { AppConfig } from '../config/configuration';
-import { verifyCashfreeWebhookSignature } from './cashfree-signature';
+import {
+  SignatureCheck,
+  verifyCashfreeWebhookSignature,
+} from './cashfree-signature';
 import { cashfreeEventId, parseCashfreeWebhook } from './cashfree-webhook.parse';
 import {
   CashfreeWebhookService,
@@ -60,7 +63,7 @@ export class CashfreeWebhookController {
       signature: headerValue(req.headers['x-webhook-signature']),
     });
     if (!check.ok) {
-      this.logStagingRejection(check.reason);
+      this.logStagingRejection(check);
       throw webhookRejected();
     }
     let parsedBody: unknown;
@@ -82,14 +85,32 @@ export class CashfreeWebhookController {
   }
 
   /**
-   * Staging diagnosis only. `reason` is the verifier enum. The timestamp,
-   * signature, raw body, and secret stay out of the log.
+   * Staging diagnosis only. The timestamp, signature, raw body, headers, and
+   * secret stay out of the log. Acceptance is unchanged.
    */
-  private logStagingRejection(reason: 'signature' | 'timestamp'): void {
+  private logStagingRejection(check: Exclude<SignatureCheck, { ok: true }>): void {
     const tier = (process.env.IU_DEPLOYMENT_TIER ?? '').trim().toLowerCase();
     if (tier !== 'staging') {
       return;
     }
-    this.logger.warn('cashfree_webhook_rejected', { reason });
+    const fields: Record<string, string | number> = { reason: check.reason };
+    const diagnostic = check.timestampDiagnostic;
+    if (diagnostic) {
+      fields.timestamp_bucket = diagnostic.timestamp_bucket;
+      if (
+        typeof diagnostic.skew_seconds === 'number' &&
+        Number.isSafeInteger(diagnostic.skew_seconds)
+      ) {
+        fields.skew_seconds = diagnostic.skew_seconds;
+      }
+      if (
+        diagnostic.timestamp_digits === '10_digit' ||
+        diagnostic.timestamp_digits === '13_digit' ||
+        diagnostic.timestamp_digits === 'other_digit_length'
+      ) {
+        fields.timestamp_digits = diagnostic.timestamp_digits;
+      }
+    }
+    this.logger.warn('cashfree_webhook_rejected', fields);
   }
 }

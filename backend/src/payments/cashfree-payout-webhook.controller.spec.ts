@@ -190,12 +190,118 @@ describe('Cashfree payment webhook credentials', () => {
     ).rejects.toMatchObject({ status: 401, code: 'PAYMENT_WEBHOOK_INVALID' });
     expect(warn).toHaveBeenCalledWith('cashfree_webhook_rejected', {
       reason: 'timestamp',
+      timestamp_bucket: 'stale',
+      skew_seconds: expect.any(Number),
+      timestamp_digits: '13_digit',
     });
     const logged = JSON.stringify(warn.mock.calls);
+    const skew = warn.mock.calls[0][1].skew_seconds as number;
+    expect(skew).toBeGreaterThanOrEqual(73 * 60 * 60);
+    expect(skew).toBeLessThanOrEqual(73 * 60 * 60 + 1);
     expect(logged).not.toContain(timestamp);
     expect(logged).not.toContain(signature);
     expect(logged).not.toContain(raw);
     expect(logged).not.toContain(PG_SECRET);
+  });
+
+  it('logs future, non-integer, and unsafe timestamp buckets on staging only', async () => {
+    process.env.IU_DEPLOYMENT_TIER = 'staging';
+    const warn = jest.fn();
+    const controller = controllerWith(jest.fn(), warn);
+    const raw = '{"type":"PAYMENT_USER_DROPPED_WEBHOOK"}';
+
+    const future = String(Date.now() + 6 * 60 * 1000);
+    const futureSignature = sign(PG_SECRET, raw, future);
+    await expect(
+      controller.webhook({
+        rawBody: Buffer.from(raw),
+        headers: {
+          'x-webhook-timestamp': future,
+          'x-webhook-signature': futureSignature,
+        },
+      } as never),
+    ).rejects.toMatchObject({ status: 401, code: 'PAYMENT_WEBHOOK_INVALID' });
+    expect(warn).toHaveBeenLastCalledWith(
+      'cashfree_webhook_rejected',
+      expect.objectContaining({
+        reason: 'timestamp',
+        timestamp_bucket: 'future',
+        timestamp_digits: '13_digit',
+      }),
+    );
+    const futureSkew = warn.mock.calls.at(-1)[1].skew_seconds as number;
+    expect(futureSkew).toBeGreaterThanOrEqual(6 * 60 - 1);
+    expect(futureSkew).toBeLessThanOrEqual(6 * 60);
+
+    const nonInteger = 'header-not-an-integer';
+    const nonIntegerSignature = 'signature-must-stay-out-of-logs';
+    await expect(
+      controller.webhook({
+        rawBody: Buffer.from(raw),
+        headers: {
+          'x-webhook-timestamp': nonInteger,
+          'x-webhook-signature': nonIntegerSignature,
+        },
+      } as never),
+    ).rejects.toMatchObject({ status: 401, code: 'PAYMENT_WEBHOOK_INVALID' });
+    expect(warn).toHaveBeenLastCalledWith('cashfree_webhook_rejected', {
+      reason: 'signature',
+      timestamp_bucket: 'not_integer',
+    });
+
+    const unsafe = '9'.repeat(20);
+    const unsafeSignature = sign(PG_SECRET, raw, unsafe);
+    await expect(
+      controller.webhook({
+        rawBody: Buffer.from(raw),
+        headers: {
+          'x-webhook-timestamp': unsafe,
+          'x-webhook-signature': unsafeSignature,
+        },
+      } as never),
+    ).rejects.toMatchObject({ status: 401, code: 'PAYMENT_WEBHOOK_INVALID' });
+    expect(warn).toHaveBeenLastCalledWith('cashfree_webhook_rejected', {
+      reason: 'timestamp',
+      timestamp_bucket: 'unsafe_integer',
+      timestamp_digits: 'other_digit_length',
+    });
+
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).not.toContain(future);
+    expect(logged).not.toContain(futureSignature);
+    expect(logged).not.toContain(nonInteger);
+    expect(logged).not.toContain(nonIntegerSignature);
+    expect(logged).not.toContain(unsafe);
+    expect(logged).not.toContain(unsafeSignature);
+    expect(logged).not.toContain(raw);
+    expect(logged).not.toContain(PG_SECRET);
+    expect(logged).not.toContain('x-webhook-timestamp');
+  });
+
+  it('does not log timestamp diagnostics in production or when the tier is unset', async () => {
+    const raw = '{"type":"PAYMENT_SUCCESS_WEBHOOK"}';
+    const timestamp = String(Date.now() + 6 * 60 * 1000);
+    const request = {
+      rawBody: Buffer.from(raw),
+      headers: {
+        'x-webhook-timestamp': timestamp,
+        'x-webhook-signature': sign(PG_SECRET, raw, timestamp),
+      },
+    };
+
+    process.env.IU_DEPLOYMENT_TIER = 'production';
+    const productionWarn = jest.fn();
+    await expect(
+      controllerWith(jest.fn(), productionWarn).webhook(request as never),
+    ).rejects.toMatchObject({ status: 401, code: 'PAYMENT_WEBHOOK_INVALID' });
+    expect(productionWarn).not.toHaveBeenCalled();
+
+    delete process.env.IU_DEPLOYMENT_TIER;
+    const unsetWarn = jest.fn();
+    await expect(
+      controllerWith(jest.fn(), unsetWarn).webhook(request as never),
+    ).rejects.toMatchObject({ status: 401, code: 'PAYMENT_WEBHOOK_INVALID' });
+    expect(unsetWarn).not.toHaveBeenCalled();
   });
 
   it('does not log the rejection reason outside staging', async () => {
