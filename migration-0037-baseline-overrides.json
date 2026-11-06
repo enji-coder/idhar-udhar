@@ -1,0 +1,12 @@
+{
+  "containerOverrides": [
+    {
+      "name": "migrate",
+      "command": [
+        "node",
+        "-e",
+        "const {Client}=require('pg'); const fs=require('fs'); (async()=>{ const host=process.env.DATABASE_HOST; const database=process.env.DATABASE_NAME; if (host!=='iu-staging-db.crc48wu0snqv.ap-south-1.rds.amazonaws.com' || database!=='idhar_udhar_staging') { console.error('refusing non-staging database target'); process.exitCode=2; return; } const c=new Client({host, port:Number(process.env.DATABASE_PORT), database, user:process.env.DATABASE_USER, password:process.env.DATABASE_PASSWORD, ssl:{rejectUnauthorized:true, ca:fs.readFileSync(process.env.DATABASE_SSL_ROOT_CERT,'utf8')}}); await c.connect(); try { const names=await c.query(\"SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name = ANY($1::text[]) ORDER BY table_name\", [['wallet_ledger_entries','cod_ledger_entries']]); if (names.rows.length!==2) { console.error('expected ledger tables were not both present'); process.exitCode=3; return; } const column=await c.query(\"SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='rider_profiles' AND column_name='cod_operational_status'\"); if (column.rowCount!==1) { console.error('rider status column was not present'); process.exitCode=3; return; } const db=await c.query('SELECT current_database() AS database'); const counts=await c.query('SELECT (SELECT COUNT(*)::bigint FROM wallet_ledger_entries) AS wallet_ledger_entries, (SELECT COUNT(*)::bigint FROM cod_ledger_entries) AS cod_ledger_entries'); const statuses=await c.query('SELECT cod_operational_status AS status, COUNT(*)::bigint AS riders FROM rider_profiles GROUP BY cod_operational_status ORDER BY cod_operational_status'); const walletHold=await c.query(\"SELECT COUNT(*)::bigint AS riders FROM rider_profiles WHERE cod_operational_status='SUSPENDED_FOR_WALLET'\"); console.log(JSON.stringify({database:db.rows[0].database, wallet_ledger_entries:counts.rows[0].wallet_ledger_entries, cod_ledger_entries:counts.rows[0].cod_ledger_entries, rider_operational_status:statuses.rows, suspended_for_wallet:walletHold.rows[0].riders})); } finally { await c.end(); } })().catch(()=>{ console.error('baseline query failed'); process.exitCode=1; });"
+      ]
+    }
+  ]
+}
