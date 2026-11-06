@@ -18,18 +18,29 @@ import { CreateOfferDto } from './dto/create-offer.dto';
 import { TransitionOrderDto } from './dto/transition-order.dto';
 import { OrderAdminDeletionService } from './order-admin-deletion.service';
 import { OrdersService } from './orders.service';
+import { InvoiceReadService } from '../settlement/invoice-read.service';
 
 @Controller('admin/orders')
 export class AdminOrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly deletion: OrderAdminDeletionService,
+    private readonly invoices: InvoiceReadService,
   ) {}
 
   @Roles('ADMIN')
   @Get()
   list(@CurrentAuth() auth: AuthContext) {
     return this.orders.listForAdmin(auth);
+  }
+
+  @Roles('ADMIN')
+  @Get(':id/invoice')
+  invoice(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.invoices.getForAdmin(auth, id);
   }
 
   @Roles('ADMIN')
