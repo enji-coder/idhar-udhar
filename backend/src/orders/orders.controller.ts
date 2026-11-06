@@ -20,10 +20,14 @@ import { QuoteOrderDto } from './dto/quote-order.dto';
 import { TransitionOrderDto } from './dto/transition-order.dto';
 import { readIdempotencyKey } from './idempotency-key';
 import { OrdersService } from './orders.service';
+import { InvoiceReadService } from '../settlement/invoice-read.service';
 
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly invoices: InvoiceReadService,
+  ) {}
 
   @Roles('CUSTOMER')
   @Post('vehicle-fares')
@@ -65,6 +69,15 @@ export class OrdersController {
     @Param('id', UuidParamPipe) id: string,
   ) {
     return this.orders.getById(auth, id);
+  }
+
+  @Roles('CUSTOMER')
+  @Get(':id/invoice')
+  invoice(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', UuidParamPipe) id: string,
+  ) {
+    return this.invoices.getForCustomer(auth, id);
   }
 
   @Roles('CUSTOMER')

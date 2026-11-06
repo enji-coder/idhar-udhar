@@ -6,7 +6,6 @@ import Field, { inputClass } from '../common/Field';
 import OrderTimeline from './OrderTimeline';
 import MockRouteMap from './MockRouteMap';
 import { formatINR } from '../../utils/format';
-import { buildInvoice } from '../../services/invoiceService';
 import { buildTimeline, getOrderActions, validateOrderEdits } from '../../services/orderRules';
 import { useState } from 'react';
 
@@ -25,8 +24,8 @@ export default function OrderDetailDrawer({
   if (!order) return null;
 
   const actions = getOrderActions(order);
-  const invoice = buildInvoice(order);
   const timeline = buildTimeline(order);
+  const delivered = order.status === 'Delivered' || order.canonicalStatus === 'DELIVERED';
   const isEdit = mode === 'edit';
   const isTrack = mode === 'track';
 
@@ -63,7 +62,7 @@ export default function OrderDetailDrawer({
       {isTrack ? <Button size="sm" variant="secondary" onClick={() => onAction('view', order)}>View Timeline</Button> : null}
       {can('orders', 'edit') && actions.edit ? <Button size="sm" variant="edit" icon={Pencil} onClick={() => onAction('edit', order)}>Edit</Button> : null}
       {can('orders', 'assign') && actions.reassign ? <Button size="sm" variant="approve" icon={RefreshCw} onClick={() => onAction('reassign', order)}>{actions.assign ? 'Assign' : 'Reassign'}</Button> : null}
-      {can('orders', 'invoice') ? <Button size="sm" variant="export" icon={FileText} onClick={() => onAction('invoice', order)}>{order.status === 'Delivered' ? 'View Invoice' : 'Invoice'}</Button> : null}
+      {can('orders', 'invoice') && delivered ? <Button size="sm" variant="export" icon={FileText} onClick={() => onAction('invoice', order)}>View Invoice</Button> : null}
       {actions.proof ? <Button size="sm" variant="secondary" icon={ShieldCheck} onClick={() => onAction('proof', order)}>Proof</Button> : null}
       {can('orders', 'cancel') && actions.cancel ? <Button size="sm" variant="danger" icon={XCircle} onClick={() => onAction('cancel', order)}>Cancel</Button> : null}
     </>
@@ -188,13 +187,13 @@ export default function OrderDetailDrawer({
             {order.fareRiderPercentage != null ? <DetailRow label="Rider money part (%)" value={order.fareRiderPercentage} /> : null}
             {order.fareCompanyPercentage != null ? <DetailRow label="Company commission (%)" value={order.fareCompanyPercentage} /> : null}
             <DetailRow label="Additional charge" value={formatINR(order.additionalCharge || order.resendCharge || 0)} />
-            <DetailRow label="Amount payable" value={formatINR(invoice.total)} />
+            <DetailRow label="Amount payable" value={formatINR(order.netPayable ?? order.amount)} />
             <DetailRow label="Customer responsibility" value={formatINR(order.customerResponsibility)} />
             <DetailRow label="Receiver responsibility" value={formatINR(order.receiverResponsibility)} />
             <DetailRow label="Customer paid" value={formatINR(order.customerPaid)} />
             <DetailRow label="Receiver paid" value={formatINR(order.receiverPaid)} />
             <DetailRow label="Outstanding" value={formatINR(order.outstandingAmount)} />
-            <DetailRow label="Payment status" value={order.paymentStatus || invoice.payment.status} />
+            <DetailRow label="Payment status" value={order.paymentStatus || '—'} />
             <DetailRow label="Payment methods" value={order.payment} />
             <DetailRow label="Rider amount" value={formatINR(order.riderEarning || order.riderCommission || order.financeSnapshot?.riderAmount)} />
             <DetailRow label="Company amount" value={formatINR(order.companyCommission || order.financeSnapshot?.companyCommission)} />

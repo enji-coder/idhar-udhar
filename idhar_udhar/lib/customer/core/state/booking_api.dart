@@ -59,21 +59,61 @@ final orderServerViewProvider =
   return ref.watch(ordersApiProvider).getById(orderId);
 });
 
+/// True when [hold] is the backend quote for this vehicle and these stops.
+/// An expired quote is not current. The phone route distance is not compared.
+bool quoteHoldIsCurrent(
+  BackendQuoteHold? hold,
+  BookingDraft draft, [
+  DateTime? now,
+]) {
+  if (hold == null) {
+    return false;
+  }
+  if (hold.vehicleCategoryId != (draft.vehicle?.id ?? '')) {
+    return false;
+  }
+  if (hold.bookingKey != draft.quoteBookingKey) {
+    return false;
+  }
+  return !hold.quote.isExpiredAt(now ?? DateTime.now());
+}
+
+/// Customer-facing text for a failed fare request. No local amount is implied.
+String customerFareFailureMessage(Object error) {
+  if (error is ApiException) {
+    final String message = error.message.trim();
+    if (message.isNotEmpty) {
+      return message;
+    }
+  }
+  return 'Unable to calculate fare';
+}
+
 /// Booking fares from POST /v1/orders/vehicle-fares, keyed by category id.
-/// Empty when the route or city is not ready. Waiting is not part of these amounts.
+/// Empty until pickup and drop coordinates exist. Waiting is not included.
 ///
-/// Watches only the route geometry key so parcel weight/notes/quote updates do
-/// not cancel an in-flight vehicle-fares request (that left Parcel Details on "—").
+/// The phone's Google route is not required. The backend measures the route.
+/// Parcel weight and notes do not change this key, so they do not cancel
+/// an in-flight request.
 final vehicleFarePreviewProvider =
     FutureProvider.autoDispose<Map<String, String>>((Ref ref) async {
   final String routeKey = ref.watch(
     bookingDraftProvider.select((BookingDraft draft) {
-      if (!draft.hasRouteForCurrentStops) {
+      if (draft.hasInvalidFareCoordinate) {
+        return 'invalid';
+      }
+      if (!draft.hasFareCoordinates) {
         return '';
       }
       return draft.currentRouteKey;
     }),
   );
+  if (routeKey == 'invalid') {
+    throw const ApiException(
+      code: 'INVALID_COORDINATES',
+      message: 'Pickup and drop need a valid map pin before the fare can be calculated.',
+    );
+  }
   if (routeKey.isEmpty) {
     return const <String, String>{};
   }
@@ -191,9 +231,13 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
     );
   }
   final BackendQuoteHold? existing = ref.read(backendQuoteHoldProvider);
-  if (existing != null &&
-      existing.vehicleCategoryId == vehicleCategoryId &&
-      existing.bookingKey == draft.quoteBookingKey) {
+  if (quoteHoldIsCurrent(existing, draft) &&
+      existing!.vehicleCategoryId == vehicleCategoryId) {
+    // A phone-route update must not leave the booking payable at zero
+    // while this quote is still the one confirm will charge.
+    ref
+        .read(bookingDraftProvider.notifier)
+        .applyQuotedPayable(existing.quote.netPayable);
     return existing;
   }
   final String cityId = await resolveBookingCityId(
@@ -204,6 +248,13 @@ Future<BackendQuoteHold> ensureCustomerQuote(WidgetRef ref) async {
       code: 'CITY_INVALID',
       message:
           'Delivery city is not configured for this build. Set IU_CITY_ID.',
+    );
+  }
+  if (draft.hasInvalidFareCoordinate || !draft.hasFareCoordinates) {
+    throw const ApiException(
+      code: 'INVALID_COORDINATES',
+      message:
+          'Pickup and drop need a valid map pin before the fare can be calculated.',
     );
   }
   final String? blocked = draft.incompleteStopMessage;

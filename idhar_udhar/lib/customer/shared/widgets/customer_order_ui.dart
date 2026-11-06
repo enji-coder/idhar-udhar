@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../core/data/mock/mock_models.dart';
 import '../../core/state/booking_api.dart';
@@ -65,12 +66,7 @@ abstract final class CustomerOrderFormat {
         'Address unavailable';
   }
 
-  static String currency(double amount) {
-    final bool whole = amount == amount.roundToDouble();
-    return whole
-        ? '₹${amount.toStringAsFixed(0)}'
-        : '₹${amount.toStringAsFixed(1)}';
-  }
+  static String currency(double amount) => formatInr(amount);
 
   static String? contactLine(String? name, String? phone) {
     final String n = (name ?? '').trim();

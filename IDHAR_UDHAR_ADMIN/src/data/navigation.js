@@ -104,8 +104,8 @@ export const pageMeta = {
   '/states': { title: 'States', subtitle: 'Manage operating states.', crumbs: ['Operations', 'States'] },
   '/cities': { title: 'Cities', subtitle: 'Manage cities under each state.', crumbs: ['Operations', 'Cities'] },
   '/zones': { title: 'Zones', subtitle: 'Service areas and rider coverage.', crumbs: ['Operations', 'Zones'] },
-  '/invoices': { title: 'Invoices', subtitle: 'Customer invoices and billing.', crumbs: ['Finance', 'Invoices'] },
-  '/purchase-invoices': { title: 'Purchase Invoices', subtitle: 'Vendor, vehicle and expense invoices.', crumbs: ['Finance', 'Purchase Invoices'] },
+  '/invoices': { title: 'Invoices', subtitle: 'Demo billing records. Official trip invoices open from Orders.', crumbs: ['Finance', 'Invoices'] },
+  '/purchase-invoices': { title: 'Purchase Invoices', subtitle: 'Demo vendor records. Not official customer trip invoices.', crumbs: ['Finance', 'Purchase Invoices'] },
   '/announcements': { title: 'Company Announcements', subtitle: 'Internal and customer-facing notices.', crumbs: ['Management', 'Company Announcements'] },
   '/gst-reports': { title: 'GST Reports', subtitle: 'GST on company commission from frozen finance snapshots.', crumbs: ['Finance', 'GST Reports'] },
 };

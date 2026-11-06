@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,12 +9,11 @@ import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/routing/app_routes.dart';
 import '../../../../core/state/booking_api.dart';
 import '../../../../core/state/booking_draft_provider.dart';
-import '../../../../core/state/session_provider.dart';
-import '../widgets/waiting_charge_prompt.dart';
 import '../../../../core/theme/theme.dart';
 import '../../../../core/widgets/widgets.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
+import '../widgets/waiting_charge_prompt.dart';
 
 class DeliveryCompletedScreen extends ConsumerWidget {
   const DeliveryCompletedScreen({super.key});
@@ -25,11 +25,7 @@ class DeliveryCompletedScreen extends ConsumerWidget {
     final ApiOrder? serverOrder = serverId == null
         ? null
         : ref.watch(orderServerViewProvider(serverId)).asData?.value;
-    final profileEmail = ref.watch(sessionProvider).user?.email.trim() ?? '';
-    final invoiceEmail =
-        (order?.invoiceEmail.isNotEmpty == true)
-            ? order!.invoiceEmail
-            : profileEmail;
+    final bool serverDelivered = serverOrder?.canonicalStatus == 'DELIVERED';
 
     return GlassPageScaffold(
       bottom: Column(
@@ -89,24 +85,18 @@ class DeliveryCompletedScreen extends ConsumerWidget {
             child: Column(
               children: [
                 const Icon(
-                  Icons.mark_email_read_outlined,
+                  Icons.receipt_long_outlined,
                   color: AppColors.orange,
                   size: 36,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
-                  'Invoice Generated & Sent to Email',
-                  style: AppTextStyles.headingS,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  invoiceEmail.isEmpty
-                      ? 'Invoice generated (demo)'
-                      : 'Sent to $invoiceEmail',
-                  style: AppTextStyles.caption.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
+                  serverId == null
+                      ? 'Demo orders do not include an official invoice.'
+                      : serverDelivered
+                          ? 'The invoice can be downloaded from Order Details when the server has issued it.'
+                          : 'An official invoice is available only after the server confirms delivery.',
+                  style: AppTextStyles.body,
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -117,11 +107,9 @@ class DeliveryCompletedScreen extends ConsumerWidget {
             child: Column(
               children: [
                 _line('Order', order?.id ?? '—'),
-                _line('Fare', '₹${order?.fare.toStringAsFixed(0) ?? '—'}'),
+                _line('Fare', order?.fare == null ? '—' : formatInr(order!.fare)),
                 _line('Vehicle', order?.vehicle.name ?? '—'),
                 _line('Rider', order?.rider?.name ?? '—'),
-                if (invoiceEmail.isNotEmpty)
-                  _line('Invoice email', invoiceEmail),
               ],
             ),
           ),

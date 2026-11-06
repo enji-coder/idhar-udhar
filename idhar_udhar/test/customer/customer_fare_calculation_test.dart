@@ -5,6 +5,7 @@ import 'package:idhar_udhar/customer/core/data/mock/mock_data.dart';
 import 'package:idhar_udhar/customer/core/data/mock/mock_models.dart';
 import 'package:idhar_udhar/customer/core/state/booking_api.dart';
 import 'package:idhar_udhar/customer/core/state/booking_draft_provider.dart';
+import 'package:idhar_udhar/customer/features/booking/presentation/screens/booking_summary_screen.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/package_details_screen.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/pickup_to_drop_preview_screen.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/vehicle_selection_screen.dart';
@@ -13,6 +14,7 @@ import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/token_store.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
@@ -321,7 +323,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Estimated Fare'), findsOneWidget);
-    expect(find.text('₹160'), findsOneWidget);
+    expect(find.text(formatInr(160)), findsOneWidget);
     expect(find.text('Calculating...'), findsNothing);
     expect(find.text('Unable to calculate fare'), findsNothing);
     expect(find.text('Fare calculated at summary'), findsNothing);
@@ -389,6 +391,34 @@ void main() {
     );
   });
 
+  test('a phone route result does not replace the backend quote amount', () {
+    seedRoute(10);
+    notifier.setVehicle(
+      vehicle(
+        id: 'bike-1',
+        type: VehicleType.bike,
+        name: 'Bike',
+        base: 40,
+        perKm: 8,
+      ),
+    );
+    notifier.applyQuotedPayable(160);
+    expect(draft().payableTotal, 160);
+    expect(draft().customerVisibleFare, 160);
+
+    notifier.applyRouteResult(
+      signature: draft().currentRouteKey,
+      distanceKm: 4,
+      durationSeconds: 600,
+    );
+
+    expect(draft().routeDistanceKm, 4);
+    expect(draft().estimatedFare, 72);
+    expect(draft().payableTotal, 160);
+    expect(draft().customerVisibleFare, 160);
+    expect(draft().payableTotal, isNot(draft().estimatedFare));
+  });
+
   test('a new drop clears the previous calculated fare', () {
     seedRoute(10);
     notifier.setVehicle(
@@ -448,5 +478,240 @@ void main() {
     expect(find.text('Estimated Fare'), findsNothing);
     expect(find.text('₹130'), findsNothing);
     expect(find.textContaining('Base ₹'), findsNothing);
+  });
+
+  testWidgets('a failed fare request does not show the local fare', (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final ProviderContainer failed = ProviderContainer(
+      overrides: <Override>[
+        vehicleFarePreviewProvider.overrideWith(
+          (Ref ref) async => throw const ApiException(
+            code: 'ROUTING_PROVIDER_UNAVAILABLE',
+            message: 'Routing provider is unavailable',
+          ),
+        ),
+        ordersApiProvider.overrideWithValue(_SkipQuoteOrdersApi()),
+      ],
+    );
+    addTearDown(failed.dispose);
+    final BookingDraftNotifier failedDraft =
+        failed.read(bookingDraftProvider.notifier);
+    failedDraft.setPickup(
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
+    );
+    failedDraft.setDrop(
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
+    );
+    failedDraft.applyRouteResult(
+      signature: failed.read(bookingDraftProvider).currentRouteKey,
+      distanceKm: 10,
+      durationSeconds: 1200,
+    );
+    failedDraft.setVehicle(
+      vehicle(
+        id: 'bike-1',
+        type: VehicleType.bike,
+        name: 'Bike',
+        base: 40,
+        perKm: 8,
+      ),
+    );
+    expect(failed.read(bookingDraftProvider).estimatedFare, 120);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: failed,
+        child: const MaterialApp(home: PackageDetailsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Routing provider is unavailable'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('₹120'), findsNothing);
+    expect(find.text('₹120.00'), findsNothing);
+    expect(find.textContaining('Base ₹'), findsNothing);
+  });
+
+  testWidgets('summary distance is the backend quote distance', (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    seedRoute(10);
+    notifier.setVehicle(
+      vehicle(
+        id: 'bike-1',
+        type: VehicleType.bike,
+        name: 'Bike',
+        base: 40,
+        perKm: 8,
+      ),
+    );
+    notifier.setReceiver(name: 'Asha', mobile: '9876543210');
+    expect(draft().estimatedFare, 120);
+    container.read(backendQuoteHoldProvider.notifier).state = BackendQuoteHold(
+      orderId: 'order-1',
+      vehicleCategoryId: 'bike-1',
+      bookingKey: draft().quoteBookingKey,
+      quote: const ApiQuote(
+        orderId: 'order-1',
+        displayId: 'IU-1',
+        fareQuoteId: 'fq-1',
+        tripFare: 160,
+        netPayable: 160,
+        distanceKm: 12.4,
+      ),
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: BookingSummaryScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('12.4 km'), findsOneWidget);
+    expect(find.text('10.0 km'), findsNothing);
+    expect(find.text('₹120'), findsNothing);
+    expect(find.text('₹120.00'), findsNothing);
+  });
+
+  testWidgets(
+    'a priced vehicle missing from the preview is not replaced with a local fare',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // Live staging category "Pickup": rates exist, both slug fields are null.
+      const String pickupId = '01a18c7f-0505-7105-a040-9ac900edc5b7';
+      final ProviderContainer omitted = ProviderContainer(
+        overrides: <Override>[
+          vehicleFarePreviewProvider.overrideWith(
+            (Ref ref) async => <String, String>{'bike-1': '108.00'},
+          ),
+          ordersApiProvider.overrideWithValue(_SkipQuoteOrdersApi()),
+        ],
+      );
+      addTearDown(omitted.dispose);
+      final BookingDraftNotifier omittedDraft =
+          omitted.read(bookingDraftProvider.notifier);
+      omittedDraft.setPickup(
+        MockData.locations
+            .firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
+      );
+      omittedDraft.setDrop(
+        MockData.locations
+            .firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
+      );
+      omittedDraft.applyRouteResult(
+        signature: omitted.read(bookingDraftProvider).currentRouteKey,
+        distanceKm: 10,
+        durationSeconds: 1200,
+      );
+      omittedDraft.setVehicle(
+        vehicle(
+          id: pickupId,
+          type: VehicleType.pickup,
+          name: 'Pickup',
+          base: 300,
+          perKm: 24,
+        ),
+      );
+      expect(omitted.read(bookingDraftProvider).estimatedFare, 540);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: omitted,
+          child: const MaterialApp(home: PackageDetailsScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Fare is not available for this vehicle.'), findsOneWidget);
+      expect(find.text('Unable to calculate fare'), findsNothing);
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.text(formatInr(540)), findsNothing);
+      expect(find.text('₹0'), findsNothing);
+      expect(find.text('₹0.00'), findsNothing);
+    },
+  );
+
+  testWidgets('retry loads the backend fare after a routing failure', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var attempts = 0;
+    final ProviderContainer retried = ProviderContainer(
+      overrides: <Override>[
+        vehicleFarePreviewProvider.overrideWith((Ref ref) async {
+          attempts += 1;
+          if (attempts == 1) {
+            throw const ApiException(
+              code: 'ROUTING_PROVIDER_UNAVAILABLE',
+              message: 'Could not calculate the route. Try again shortly.',
+            );
+          }
+          return <String, String>{'bike-1': '108.00'};
+        }),
+        ordersApiProvider.overrideWithValue(_SkipQuoteOrdersApi()),
+      ],
+    );
+    addTearDown(retried.dispose);
+    final BookingDraftNotifier retriedDraft =
+        retried.read(bookingDraftProvider.notifier);
+    retriedDraft.setPickup(
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_paldi'),
+    );
+    retriedDraft.setDrop(
+      MockData.locations
+          .firstWhere((MockLocation loc) => loc.id == 'loc_bopal'),
+    );
+    retriedDraft.setVehicle(
+      vehicle(
+        id: 'bike-1',
+        type: VehicleType.bike,
+        name: 'Bike',
+        base: 40,
+        perKm: 8,
+      ),
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: retried,
+        child: const MaterialApp(home: PackageDetailsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Could not calculate the route. Try again shortly.'),
+      findsOneWidget,
+    );
+    expect(find.text(formatInr(108)), findsNothing);
+
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+
+    expect(attempts, 2);
+    expect(find.text(formatInr(108)), findsOneWidget);
+    expect(find.text('Unable to calculate fare'), findsNothing);
+    expect(find.text('₹0.00'), findsNothing);
   });
 }

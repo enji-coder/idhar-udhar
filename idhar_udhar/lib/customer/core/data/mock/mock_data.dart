@@ -542,8 +542,6 @@ abstract final class MockData {
         packageLabel: 'Package',
         weightKg: 8,
         etaMinutes: 0,
-        invoiceSent: true,
-        invoiceEmail: 'customer@example.com',
       ),
       MockOrder(
         id: 'IU-1766',

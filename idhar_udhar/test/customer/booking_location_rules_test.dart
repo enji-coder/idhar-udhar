@@ -20,6 +20,7 @@ import 'package:idhar_udhar/customer/features/booking/presentation/screens/recei
 import 'package:idhar_udhar/customer/features/booking/presentation/screens/vehicle_selection_screen.dart';
 import 'package:idhar_udhar/customer/features/booking/presentation/widgets/booking_route_preview.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/maps/geo_point.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
@@ -615,7 +616,7 @@ void main() {
     expect(find.text('Asha'), findsOneWidget);
     expect(find.text('9876543210'), findsOneWidget);
     expect(find.text('Trip Fare'), findsOneWidget);
-    expect(find.text('₹160'), findsWidgets);
+    expect(find.text(formatInr(160)), findsWidgets);
     expect(find.text('₹150'), findsNothing);
     expect(find.text('Estimated Fare'), findsNothing);
     expect(find.textContaining('Fare - calculated'), findsNothing);

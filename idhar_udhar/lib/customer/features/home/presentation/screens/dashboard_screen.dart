@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/maps/maps.dart';
@@ -558,7 +559,7 @@ class _RecentDeliveryRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               Text(
-                '${order.id} · ₹${order.fare.toStringAsFixed(0)}',
+                '${order.id} · ${formatInr(order.fare)}',
                 style: AppTextStyles.caption.copyWith(
                   color: AppColors.textSecondary,
                 ),

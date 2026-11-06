@@ -1,5 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { ApiError } from '../common/errors/api-error';
+import { ErrorCodes } from '../common/errors/error-codes';
 import { AuthContext } from '../auth/types/auth-context';
 import { FareQuoteRow, FareSnapshotRow } from '../fare/fare.repository';
 import { FareService } from '../fare/fare.service';
@@ -296,6 +298,43 @@ describe('vehicle fare booking', () => {
     expect(body.vehicles.map((row) => row.fare.trip_fare)).toEqual(['819.00', '420.00']);
     expect(JSON.stringify(body)).not.toContain('rider_percentage');
     expect(body.vehicles[0].fare.tax).toBe('0.00');
+  });
+
+  it('does not price a preview when the route provider fails', async () => {
+    const { service, fares, routing } = build();
+    routing.routeStops.mockRejectedValue(
+      new ApiError(
+        ErrorCodes.ROUTING_PROVIDER_UNAVAILABLE,
+        'Routing provider is unavailable',
+        503,
+      ),
+    );
+
+    await expect(
+      service.previewVehicleFares(auth, { city_id: CITY, stops: stops() }),
+    ).rejects.toMatchObject({
+      code: 'ROUTING_PROVIDER_UNAVAILABLE',
+      status: 503,
+    });
+    expect(fares.previewActiveVehicleFares).not.toHaveBeenCalled();
+  });
+
+  it('prices the preview from the routed distance, not a caller-supplied amount', async () => {
+    const { service, fares, routing } = build();
+    routing.distanceKm.mockReturnValue('4.250');
+    fares.previewActiveVehicleFares.mockResolvedValue([
+      previewRow({ vehicle_category_id: TRUCK, vehicle: 'truck', trip_fare: '200.00', net_payable: '200.00' }),
+    ]);
+
+    const body = await service.previewVehicleFares(auth, {
+      city_id: CITY,
+      stops: stops(),
+    });
+
+    expect(routing.routeStops).toHaveBeenCalled();
+    expect(fares.previewActiveVehicleFares).toHaveBeenCalledWith('4.250');
+    expect(body.distance_km).toBe('4.250');
+    expect(body.vehicles[0].fare.net_payable).toBe('200.00');
   });
 
   it('rejects an inactive vehicle before an order is stored', async () => {

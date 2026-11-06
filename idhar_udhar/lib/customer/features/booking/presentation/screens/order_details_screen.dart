@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -23,6 +24,7 @@ import '../../../../shared/widgets/customer_order_ui.dart';
 import '../../../../shared/widgets/glass_container.dart';
 import '../../../../shared/widgets/glass_page_scaffold.dart';
 import '../../../../shared/widgets/iu_back_button.dart';
+import '../widgets/delivered_invoice_button.dart';
 import '../widgets/waiting_charge_prompt.dart';
 
 class OrderDetailsScreen extends ConsumerWidget {
@@ -517,13 +519,9 @@ class OrderDetailsScreen extends ConsumerWidget {
                   _DetailRow('Resend', current.resendCaseLabel!),
                 if (current.failedReason != null)
                   _DetailRow('Failure', current.failedReason!),
-                if (current.invoiceSent)
-                  _DetailRow(
-                    'Invoice',
-                    current.invoiceEmail.isEmpty
-                        ? 'Generated & sent'
-                        : 'Sent to ${current.invoiceEmail}',
-                  ),
+                if (serverOrder?.canonicalStatus == 'DELIVERED' &&
+                    serverId != null)
+                  DeliveredInvoiceButton(orderId: serverId),
               ],
             ),
           ),
@@ -547,8 +545,8 @@ class OrderDetailsScreen extends ConsumerWidget {
       baseFare: ended ? current.confirmedTripFare : 0,
     );
     final String detail = ended
-        ? 'Ride ended.\nBase fare ₹${quote.baseFare.toStringAsFixed(0)} + ₹10/km resend ₹${quote.resendSurcharge.toStringAsFixed(0)}.\nYou pay ₹${quote.customerPays.toStringAsFixed(0)}.'
-        : 'Ride is still active.\n₹10/km = ₹${quote.customerPays.toStringAsFixed(0)} (₹8/km rider, ₹2/km company).';
+        ? 'Ride ended.\nBase fare ${formatInr(quote.baseFare)} + ₹10/km resend ${formatInr(quote.resendSurcharge)}.\nYou pay ${formatInr(quote.customerPays)}.'
+        : 'Ride is still active.\n₹10/km = ${formatInr(quote.customerPays)} (${formatInr(8)}/km rider, ${formatInr(2)}/km company).';
     final bool? ok = await CustomDialog.show(
       context: context,
       title: 'Resend Parcel',

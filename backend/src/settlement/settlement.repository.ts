@@ -2,6 +2,25 @@ import { Injectable } from '@nestjs/common';
 import { Queryable } from '../database/queryable';
 import { PostgresService } from '../database/postgres.service';
 import { formatInr } from '../fare/money';
+import { InvoiceHeaderRecord, InvoiceLineRecord } from './invoice-document';
+
+/** Inserts one invoice. A repeat delivery does not update the stored row. */
+export const INVOICE_INSERT_SQL = `
+      INSERT INTO invoices (
+        invoice_number, order_id, status, issued_at,
+        trip_fare, discount, additional_locked_charges, rounding, billed_total,
+        customer_paid, receiver_paid, gst_on_fare, payment_status_snapshot
+      )
+      SELECT
+        $1, o.order_id, 'ISSUED', now(),
+        $3::numeric(12,2), $9::numeric(12,2), $4::numeric(12,2), $10::numeric(12,2), $5::numeric(12,2),
+        $6::numeric(12,2), $7::numeric(12,2), 0, $8
+      FROM orders o
+      WHERE o.order_id = $2
+        AND o.canonical_status = 'DELIVERED'
+      ON CONFLICT (order_id) DO NOTHING
+      RETURNING invoice_id
+      `;
 
 export type WaitingChargeRow = {
   order_waiting_charge_id: string;
@@ -391,6 +410,8 @@ export class SettlementRepository {
       invoiceNumber: string;
       orderId: string;
       tripFare: string;
+      discount?: string;
+      rounding?: string;
       additional: string;
       billedTotal: string;
       customerPaid: string;
@@ -399,54 +420,172 @@ export class SettlementRepository {
     },
     db: Queryable,
   ): Promise<void> {
-    const inserted = await db.query<{ invoice_id: string }>(
-      `
-      INSERT INTO invoices (
-        invoice_number, order_id, status, issued_at,
-        trip_fare, discount, additional_locked_charges, rounding, billed_total,
-        customer_paid, receiver_paid, gst_on_fare, payment_status_snapshot
-      )
-      SELECT
-        $1, o.order_id, 'ISSUED', now(),
-        $3::numeric(12,2), 0, $4::numeric(12,2), 0, $5::numeric(12,2),
-        $6::numeric(12,2), $7::numeric(12,2), 0, $8
-      FROM orders o
-      WHERE o.order_id = $2
-        AND o.canonical_status = 'DELIVERED'
-      ON CONFLICT (order_id) DO NOTHING
-      RETURNING invoice_id
-      `,
-      [
-        input.invoiceNumber,
-        input.orderId,
-        input.tripFare,
-        input.additional,
-        input.billedTotal,
-        input.customerPaid,
-        input.receiverPaid,
-        input.paymentStatus,
-      ],
-    );
+    const discount = input.discount ?? '0.00';
+    const rounding = input.rounding ?? '0.00';
+    const inserted = await db.query<{ invoice_id: string }>(INVOICE_INSERT_SQL, [
+      input.invoiceNumber,
+      input.orderId,
+      input.tripFare,
+      input.additional,
+      input.billedTotal,
+      input.customerPaid,
+      input.receiverPaid,
+      input.paymentStatus,
+      discount,
+      rounding,
+    ]);
     const invoiceId = inserted.rows[0]?.invoice_id;
     if (!invoiceId) {
       return;
     }
-    await db.query(
-      `
-      INSERT INTO invoice_lines (invoice_id, sequence, line_type, label, amount)
-      VALUES ($1, 0, 'TRIP_FARE', 'Trip Fare', $2::numeric(12,2))
-      `,
-      [invoiceId, input.tripFare],
-    );
+    const lines: Array<{ sequence: number; lineType: string; label: string; amount: string }> = [
+      { sequence: 0, lineType: 'TRIP_FARE', label: 'Trip Fare', amount: input.tripFare },
+    ];
+    let sequence = 1;
+    if (discount !== '0.00') {
+      lines.push({
+        sequence,
+        lineType: 'DISCOUNT',
+        label: 'Discount',
+        amount: discount,
+      });
+      sequence += 1;
+    }
     if (input.additional !== '0.00') {
+      lines.push({
+        sequence,
+        lineType: 'WAITING',
+        label: 'Waiting Charges',
+        amount: input.additional,
+      });
+      sequence += 1;
+    }
+    if (rounding !== '0.00') {
+      lines.push({
+        sequence,
+        lineType: 'ROUNDING',
+        label: 'Rounding',
+        amount: rounding,
+      });
+    }
+    for (const line of lines) {
       await db.query(
         `
         INSERT INTO invoice_lines (invoice_id, sequence, line_type, label, amount)
-        VALUES ($1, 1, 'WAITING', 'Waiting Charges', $2::numeric(12,2))
+        VALUES ($1, $2, $3, $4, $5::numeric(12,2))
         `,
-        [invoiceId, input.additional],
+        [invoiceId, line.sequence, line.lineType, line.label, line.amount],
       );
     }
+  }
+
+  async findInvoiceAccess(
+    orderId: string,
+    db: Queryable = this.postgres,
+  ): Promise<{
+    order_id: string;
+    customer_profile_id: string;
+    canonical_status: string;
+    crn: string;
+  } | null> {
+    const result = await db.query<{
+      order_id: string;
+      customer_profile_id: string;
+      canonical_status: string;
+      crn: string;
+    }>(
+      `
+      SELECT order_id, customer_profile_id, canonical_status, crn
+      FROM orders
+      WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findInvoiceHeader(
+    orderId: string,
+    db: Queryable = this.postgres,
+  ): Promise<InvoiceHeaderRecord | null> {
+    const result = await db.query<InvoiceHeaderRecord>(
+      `
+      SELECT
+        i.invoice_number,
+        i.status,
+        i.issued_at,
+        i.trip_fare::text AS trip_fare,
+        i.discount::text AS discount,
+        i.additional_locked_charges::text AS additional_locked_charges,
+        i.rounding::text AS rounding,
+        i.billed_total::text AS billed_total,
+        i.customer_paid::text AS customer_paid,
+        i.receiver_paid::text AS receiver_paid,
+        i.payment_status_snapshot,
+        o.order_id,
+        o.crn,
+        o.canonical_status,
+        pickup.address_text AS pickup_address,
+        pickup.contact_name AS pickup_contact_name,
+        pickup.contact_phone AS pickup_contact_phone,
+        drop_stop.address_text AS drop_address,
+        drop_stop.contact_name AS drop_contact_name,
+        drop_stop.contact_phone AS drop_contact_phone,
+        drop_stop.completed_at AS trip_completed_at,
+        o.vehicle_category_name_snapshot AS vehicle_category,
+        vehicle.registration AS vehicle_registration,
+        plan.customer_planned_online::text AS customer_planned_online,
+        plan.customer_planned_cash::text AS customer_planned_cash,
+        plan.receiver_planned_online::text AS receiver_planned_online,
+        plan.receiver_planned_cash::text AS receiver_planned_cash
+      FROM invoices i
+      JOIN orders o ON o.order_id = i.order_id
+      LEFT JOIN LATERAL (
+        SELECT address_text, contact_name, contact_phone
+        FROM order_stops
+        WHERE order_id = o.order_id AND stop_type = 'PICKUP'
+        ORDER BY sequence ASC
+        LIMIT 1
+      ) pickup ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT address_text, contact_name, contact_phone, completed_at
+        FROM order_stops
+        WHERE order_id = o.order_id AND stop_type = 'DROP'
+        ORDER BY sequence DESC
+        LIMIT 1
+      ) drop_stop ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT registration
+        FROM vehicles
+        WHERE rider_profile_id = o.rider_profile_id
+          AND active = TRUE
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) vehicle ON TRUE
+      LEFT JOIN order_payment_plans plan ON plan.order_id = o.order_id
+      WHERE i.order_id = $1
+        AND o.canonical_status = 'DELIVERED'
+      `,
+      [orderId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findInvoiceLines(
+    orderId: string,
+    db: Queryable = this.postgres,
+  ): Promise<InvoiceLineRecord[]> {
+    const result = await db.query<InvoiceLineRecord>(
+      `
+      SELECT l.sequence, l.line_type, l.label, l.amount::text AS amount
+      FROM invoice_lines l
+      JOIN invoices i ON i.invoice_id = l.invoice_id
+      WHERE i.order_id = $1
+      ORDER BY l.sequence ASC
+      `,
+      [orderId],
+    );
+    return result.rows;
   }
 
   async markInvoicePaidIfSettled(orderId: string, db: Queryable): Promise<void> {

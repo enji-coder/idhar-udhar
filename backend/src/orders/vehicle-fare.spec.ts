@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   faresByVehicle,
   isCustomerBookableVehicle,
@@ -138,5 +140,19 @@ describe('customer vehicle fares', () => {
         }),
       ),
     ).toThrow('Customer vehicle fare tax must be 0');
+  });
+
+  it('prices active categories that have rates even when both slugs are blank', () => {
+    const source = readFileSync(
+      join(__dirname, '../fare/fare.repository.ts'),
+      'utf8',
+    );
+    const start = source.indexOf('async previewActiveVehicleFares');
+    const end = source.indexOf('async tripFareForVersion');
+    const query = source.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(query).toContain('WHERE c.active = TRUE');
+    expect(query).not.toContain('vehicle_type IS NOT NULL');
+    expect(query).not.toContain('vehicle IS NOT NULL');
   });
 });

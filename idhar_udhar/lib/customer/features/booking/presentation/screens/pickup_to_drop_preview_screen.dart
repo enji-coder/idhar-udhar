@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/maps/maps.dart';
@@ -93,7 +94,7 @@ class PickupToDropPreviewScreen extends ConsumerWidget {
               ),
             ),
             Text(
-              '₹${fare.toStringAsFixed(0)}',
+              formatInr(fare),
               style: AppTextStyles.headingS.copyWith(color: AppColors.orange),
             ),
           ],

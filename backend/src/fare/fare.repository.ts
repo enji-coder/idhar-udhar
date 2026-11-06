@@ -454,8 +454,6 @@ export class FareRepository {
           ON r.fare_config_version_id = v.fare_config_version_id
          AND r.vehicle_category_id = c.vehicle_category_id
         WHERE c.active = TRUE
-          AND c.vehicle_type IS NOT NULL
-          AND c.vehicle IS NOT NULL
       ),
       calc AS (
         SELECT

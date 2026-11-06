@@ -323,13 +323,74 @@ class BookingDraft {
 
   FareConfig get _fareConfig => fareConfigFor(vehicle);
 
-  /// Vehicle, stop coordinates, and route distance for one server quote.
+  /// Vehicle plus stop coordinates for one server quote.
+  ///
+  /// The phone's route kilometres are not part of this key. The backend
+  /// measures the route again when it prices and confirms the quote.
   String get quoteBookingKey {
     final String vehicleId = vehicle?.id ?? '';
-    final String distance = routeDistanceKm == null
-        ? ''
-        : routeDistanceKm!.toStringAsFixed(3);
-    return '$vehicleId|$currentRouteKey|$distance';
+    return '$vehicleId|$currentRouteKey';
+  }
+
+  bool _fareCoordinateOk(double? latitude, double? longitude) {
+    if (latitude == null || longitude == null) {
+      return false;
+    }
+    if (!latitude.isFinite || !longitude.isFinite) {
+      return false;
+    }
+    if (latitude.abs() > 90 || longitude.abs() > 180) {
+      return false;
+    }
+    if (latitude == 0 && longitude == 0) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _fareCoordinateInvalid(MockLocation? location) {
+    if (location == null) {
+      return false;
+    }
+    final double? latitude = location.latitude;
+    final double? longitude = location.longitude;
+    if (latitude == null && longitude == null) {
+      return false;
+    }
+    return !_fareCoordinateOk(latitude, longitude);
+  }
+
+  /// A stop has a coordinate that cannot be sent to the fare API.
+  bool get hasInvalidFareCoordinate {
+    if (_fareCoordinateInvalid(pickup)) {
+      return true;
+    }
+    for (final MockLocation drop in allDrops) {
+      if (_fareCoordinateInvalid(drop)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Pickup and every selected drop have coordinates the fare API can route.
+  bool get hasFareCoordinates {
+    if (hasInvalidFareCoordinate) {
+      return false;
+    }
+    final MockLocation? from = pickup;
+    if (!_fareCoordinateOk(from?.latitude, from?.longitude)) {
+      return false;
+    }
+    if (allDrops.isEmpty) {
+      return false;
+    }
+    for (final MockLocation drop in allDrops) {
+      if (!_fareCoordinateOk(drop.latitude, drop.longitude)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Coordinate key for the current stops. Matches [routePointKey].
@@ -761,7 +822,10 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
     );
   }
 
-  /// Stores one directions result. Identical coordinates do not replace it.
+  /// Stores the phone's directions result for the map. Identical coordinates
+  /// do not replace it.
+  ///
+  /// This distance is not the booking fare. The backend quote stays in place.
   void applyRouteResult({
     required String signature,
     required double distanceKm,
@@ -776,7 +840,6 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
       routeSignature: signature,
       routeDistanceKm: distanceKm,
       routeDurationSeconds: durationSeconds,
-      clearQuotedNetPayable: true,
     );
   }
 
@@ -1185,7 +1248,7 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
     );
   }
 
-  MockOrder? markDelivered({String invoiceEmail = '', MockOrder? order}) {
+  MockOrder? markDelivered({MockOrder? order}) {
     final MockOrder? current = order ?? state.activeOrder;
     if (current == null) {
       return null;
@@ -1195,8 +1258,8 @@ class BookingDraftNotifier extends StateNotifier<BookingDraft> {
       (o) => o.copyWith(
         status: OrderStatus.delivered,
         etaMinutes: 0,
-        invoiceSent: invoiceEmail.trim().isNotEmpty,
-        invoiceEmail: invoiceEmail.trim(),
+        invoiceSent: false,
+        invoiceEmail: '',
       ),
     );
   }

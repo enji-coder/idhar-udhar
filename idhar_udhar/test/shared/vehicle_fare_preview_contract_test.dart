@@ -330,4 +330,238 @@ void main() {
         await container.read(vehicleFarePreviewProvider.future);
     expect(fares['bike-1'], '160.00');
   });
+
+  test('vehicleFarePreviewProvider quotes from coordinates without a phone route', () async {
+    VehicleCategoryCatalog.launchCityId =
+        '01a0fc52-fafe-72d5-b4cc-ed34ebb3b9cc';
+    var calls = 0;
+    final _RecordingAdapter adapter = _RecordingAdapter((_) async {
+      calls += 1;
+      return _json(200, <String, Object?>{
+        'distance_km': '8.500',
+        'vehicles': <Map<String, Object?>>[
+          <String, Object?>{
+            'vehicle_category_id': 'bike-1',
+            'fare': <String, Object?>{'net_payable': '108.00'},
+          },
+          <String, Object?>{
+            'vehicle_category_id': 'scooty-1',
+            'fare': <String, Object?>{'net_payable': '132.00'},
+          },
+        ],
+      });
+    });
+    final Dio dio = Dio(BaseOptions(baseUrl: ApiConfig.productionBaseUrl))
+      ..httpClientAdapter = adapter;
+    final ProviderContainer container = ProviderContainer(
+      overrides: <Override>[
+        apiClientProvider.overrideWithValue(
+          ApiClient(tokenStore: _MemoryTokenStore(), dio: dio),
+        ),
+        vehicleCategoryCatalogProvider.overrideWith(
+          (Ref ref) async => const <VehicleCategory>[
+            VehicleCategory(id: 'bike-1', name: 'Bike'),
+            VehicleCategory(id: 'scooty-1', name: 'Scooty'),
+          ],
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final BookingDraftNotifier draft =
+        container.read(bookingDraftProvider.notifier);
+    draft.setPickup(
+      const MockLocation(
+        id: 'p',
+        label: 'Paldi',
+        address: 'Paldi',
+        latitude: 23.011612,
+        longitude: 72.562599,
+      ),
+    );
+    draft.setDrop(
+      const MockLocation(
+        id: 'd',
+        label: 'Bopal',
+        address: 'Bopal',
+        latitude: 23.030012,
+        longitude: 72.470099,
+      ),
+    );
+
+    expect(container.read(bookingDraftProvider).hasRouteForCurrentStops, isFalse);
+    final Map<String, String> fares =
+        await container.read(vehicleFarePreviewProvider.future);
+    expect(calls, 1);
+    expect(fares, <String, String>{
+      'bike-1': '108.00',
+      'scooty-1': '132.00',
+    });
+  });
+
+  test('missing or zero coordinates do not request a fare or invent one', () async {
+    VehicleCategoryCatalog.launchCityId =
+        '01a0fc52-fafe-72d5-b4cc-ed34ebb3b9cc';
+    var calls = 0;
+    final _RecordingAdapter adapter = _RecordingAdapter((_) async {
+      calls += 1;
+      return _json(500, <String, Object?>{'error': 'should not be called'});
+    });
+    final Dio dio = Dio(BaseOptions(baseUrl: ApiConfig.productionBaseUrl))
+      ..httpClientAdapter = adapter;
+    final ProviderContainer missing = ProviderContainer(
+      overrides: <Override>[
+        apiClientProvider.overrideWithValue(
+          ApiClient(tokenStore: _MemoryTokenStore(), dio: dio),
+        ),
+      ],
+    );
+    addTearDown(missing.dispose);
+    missing.read(bookingDraftProvider.notifier).setPickup(
+          const MockLocation(
+            id: 'p',
+            label: 'Paldi',
+            address: 'Paldi',
+            latitude: 23.01,
+            longitude: 72.56,
+          ),
+        );
+    expect(
+      await missing.read(vehicleFarePreviewProvider.future),
+      isEmpty,
+    );
+    expect(calls, 0);
+
+    final ProviderContainer zero = ProviderContainer(
+      overrides: <Override>[
+        apiClientProvider.overrideWithValue(
+          ApiClient(tokenStore: _MemoryTokenStore(), dio: dio),
+        ),
+      ],
+    );
+    addTearDown(zero.dispose);
+    final BookingDraftNotifier zeroDraft =
+        zero.read(bookingDraftProvider.notifier);
+    zeroDraft.setPickup(
+      const MockLocation(
+        id: 'p',
+        label: 'Zero',
+        address: 'Zero',
+        latitude: 0,
+        longitude: 0,
+      ),
+    );
+    zeroDraft.setDrop(
+      const MockLocation(
+        id: 'd',
+        label: 'Bopal',
+        address: 'Bopal',
+        latitude: 23.03,
+        longitude: 72.47,
+      ),
+    );
+    await expectLater(
+      zero.read(vehicleFarePreviewProvider.future),
+      throwsA(
+        isA<ApiException>().having(
+          (ApiException error) => error.code,
+          'code',
+          'INVALID_COORDINATES',
+        ),
+      ),
+    );
+    expect(calls, 0);
+  });
+
+  test('a malformed fare payload is not parsed as zero', () {
+    expect(
+      () => ApiQuote.fromJson(<String, Object?>{
+        'fare_quote_id': 'fq-1',
+        'net_payable': 'not-money',
+        'trip_fare': '10.00',
+        'distance_km': '1.000',
+      }),
+      throwsA(isA<ApiException>()),
+    );
+    expect(
+      () => ApiQuote.fromJson(<String, Object?>{
+        'fare_quote_id': '',
+        'net_payable': '10.00',
+        'trip_fare': '10.00',
+        'distance_km': '1.000',
+      }),
+      throwsA(isA<ApiException>()),
+    );
+    final ApiQuote quote = ApiQuote.fromJson(<String, Object?>{
+      'order_id': 'order-1',
+      'display_id': 'IU-1',
+      'fare_quote_id': 'fq-1',
+      'trip_fare': '129.60',
+      'net_payable': '129.60',
+      'distance_km': '8.500',
+      'expires_at': '2026-11-06T12:00:00.000Z',
+    });
+    expect(quote.netPayable, 129.60);
+    expect(quote.distanceKm, 8.5);
+    expect(
+      quote.isExpiredAt(DateTime.utc(2026, 11, 6, 12)),
+      isTrue,
+    );
+    expect(
+      quote.isExpiredAt(DateTime.utc(2026, 11, 6, 11, 59)),
+      isFalse,
+    );
+  });
+
+  test('an expired quote is not treated as the current booking quote', () {
+    final BookingDraft draft = BookingDraft(
+      pickup: const MockLocation(
+        id: 'p',
+        label: 'Paldi',
+        address: 'Paldi',
+        latitude: 23.01,
+        longitude: 72.56,
+      ),
+      drop: const MockLocation(
+        id: 'd',
+        label: 'Bopal',
+        address: 'Bopal',
+        latitude: 23.03,
+        longitude: 72.47,
+      ),
+      vehicle: const MockVehicle(
+        id: 'bike-1',
+        type: VehicleType.bike,
+        name: 'Bike',
+        description: 'Bike',
+        capacity: '20 KG',
+        etaMinutes: 0,
+        baseFare: 40,
+        perKm: 8,
+        imagePath: 'assets/vehicle.png',
+      ),
+    );
+    final BackendQuoteHold hold = BackendQuoteHold(
+      orderId: 'order-1',
+      vehicleCategoryId: 'bike-1',
+      bookingKey: draft.quoteBookingKey,
+      quote: ApiQuote(
+        orderId: 'order-1',
+        displayId: 'IU-1',
+        fareQuoteId: 'fq-1',
+        tripFare: 120,
+        netPayable: 120,
+        distanceKm: 8.5,
+        expiresAt: DateTime.utc(2026, 11, 6, 12),
+      ),
+    );
+    expect(
+      quoteHoldIsCurrent(hold, draft, DateTime.utc(2026, 11, 6, 12)),
+      isFalse,
+    );
+    expect(
+      quoteHoldIsCurrent(hold, draft, DateTime.utc(2026, 11, 6, 11)),
+      isTrue,
+    );
+    expect(draft.quoteBookingKey.contains('8.500'), isFalse);
+  });
 }

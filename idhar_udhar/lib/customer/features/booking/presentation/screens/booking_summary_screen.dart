@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../../../core/constants/app_copy.dart';
 import '../../../../core/routing/app_routes.dart';
@@ -29,6 +30,7 @@ class BookingSummaryScreen extends ConsumerStatefulWidget {
 
 class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   bool _busy = false;
+  String? _quoteError;
 
   @override
   void initState() {
@@ -42,10 +44,16 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
     try {
       await ensureCustomerQuote(ref);
       if (mounted) {
-        setState(() {});
+        setState(() => _quoteError = null);
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        setState(() => _quoteError = customerFareFailureMessage(error));
       }
     } catch (_) {
-      // Confirm path shows the mapped error; keep the existing layout.
+      if (mounted) {
+        setState(() => _quoteError = 'Unable to calculate fare');
+      }
     }
   }
 
@@ -96,9 +104,8 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
     final String senderName = user?.name.trim() ?? '';
     final String senderPhone = user?.phone.trim() ?? '';
     final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
-    final bool quoteCurrent =
-        hold != null && hold.bookingKey == draft.quoteBookingKey;
-    final ApiQuote? quote = quoteCurrent ? hold.quote : null;
+    final bool quoteCurrent = quoteHoldIsCurrent(hold, draft);
+    final ApiQuote? quote = quoteCurrent ? hold!.quote : null;
     final double? displayedFare = quote?.netPayable;
 
     return GlassPageScaffold(
@@ -152,20 +159,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                     color: AppColors.navy,
                     showLine: i < draft.extraDrops.length - 1,
                   ),
-                if (draft.hasRouteForCurrentStops) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  _row(
-                    'Distance',
-                    '${draft.routeDistanceKm!.toStringAsFixed(1)} km',
-                  ),
-                  if ((draft.routeDurationSeconds ?? 0) > 0) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    _row(
-                      'Approx. travel time',
-                      '${(draft.routeDurationSeconds! / 60).ceil()} min',
-                    ),
-                  ],
-                ] else if (quote != null && _hasDistanceCoordinates(draft)) ...[
+                if (quote != null) ...[
                   const SizedBox(height: AppSpacing.sm),
                   _row(
                     'Distance',
@@ -258,8 +252,8 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                   const SizedBox(width: AppSpacing.sm),
                   Text(
                     displayedFare == null
-                        ? 'Calculating'
-                        : '₹${displayedFare.toStringAsFixed(0)}',
+                        ? (_quoteError ?? 'Calculating')
+                        : formatInr(displayedFare),
                     style: AppTextStyles.headingM.copyWith(
                       color: AppColors.orange,
                     ),
@@ -280,9 +274,12 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                   _fareLine('Trip Fare', displayedFare)
                 else if (quote == null)
                   Text(
-                    'Fare is calculated by the server from this route and vehicle.',
+                    _quoteError ??
+                        'Fare is calculated by the server from this route and vehicle.',
                     style: AppTextStyles.caption.copyWith(
-                      color: AppColors.textSecondary,
+                      color: _quoteError == null
+                          ? AppColors.textSecondary
+                          : AppColors.orange,
                     ),
                   )
                 else
@@ -305,13 +302,21 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                     Text(
                       displayedFare == null
                           ? '—'
-                          : '₹${displayedFare.toStringAsFixed(0)}',
+                          : formatInr(displayedFare),
                       style: AppTextStyles.headingS.copyWith(
                         color: AppColors.orange,
                       ),
                     ),
                   ],
                 ),
+                if (displayedFare == null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: _busy ? null : () => unawaited(_prefetchQuote()),
+                      child: const Text('Retry'),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -365,7 +370,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    'Receiver amount ₹${draft.receiverResponsibility.toStringAsFixed(0)}',
+                    'Receiver amount ${formatInr(draft.receiverResponsibility)}',
                     style: AppTextStyles.caption.copyWith(
                       color: AppColors.textSecondary,
                     ),
@@ -394,7 +399,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                           .setCustomerOnlineAmount(v),
                     ),
                     Text(
-                      'Customer cash ₹${draft.paymentAllocation.customerCash.toStringAsFixed(0)}',
+                      'Customer cash ${formatInr(draft.paymentAllocation.customerCash)}',
                       style: AppTextStyles.caption.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -424,7 +429,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                           .setReceiverOnlineAmount(v),
                     ),
                     Text(
-                      'Receiver cash ₹${draft.paymentAllocation.receiverCash.toStringAsFixed(0)}',
+                      'Receiver cash ${formatInr(draft.paymentAllocation.receiverCash)}',
                       style: AppTextStyles.caption.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -445,18 +450,18 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 _row(
                   'Trip / Fare',
                   displayedFare == null
-                      ? 'Calculating'
-                      : '₹${displayedFare.toStringAsFixed(0)}',
+                      ? (_quoteError ?? 'Calculating')
+                      : formatInr(displayedFare),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
                   'Customer',
-                  '₹${draft.customerResponsibility.toStringAsFixed(0)}',
+                  formatInr(draft.customerResponsibility),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
                   'Receiver',
-                  '₹${draft.receiverResponsibility.toStringAsFixed(0)}',
+                  formatInr(draft.receiverResponsibility),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
@@ -466,7 +471,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 _row(
                   'Total',
-                  '₹${draft.payableTotal.toStringAsFixed(0)}',
+                  formatInr(draft.payableTotal),
                 ),
                 if (draft.paymentAllocation.onlineTotal > 0)
                   Padding(
@@ -554,8 +559,8 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
         const SizedBox(height: AppSpacing.xs),
         TextFormField(
           key: ValueKey(label),
-          initialValue: value.toStringAsFixed(0),
-          keyboardType: TextInputType.number,
+          initialValue: value.toStringAsFixed(2),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
           style: AppTextStyles.bodyMedium,
           decoration: InputDecoration(
             prefixText: '₹ ',
@@ -576,27 +581,18 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   String _methodsLabel(PaymentAllocation allocation) {
     final List<String> parts = <String>[];
     if (allocation.customerOnline > 0) {
-      parts.add('Customer Online ₹${allocation.customerOnline.toStringAsFixed(0)}');
+      parts.add('Customer Online ${formatInr(allocation.customerOnline)}');
     }
     if (allocation.customerCash > 0) {
-      parts.add('Customer Cash ₹${allocation.customerCash.toStringAsFixed(0)}');
+      parts.add('Customer Cash ${formatInr(allocation.customerCash)}');
     }
     if (allocation.receiverOnline > 0) {
-      parts.add('Receiver Online ₹${allocation.receiverOnline.toStringAsFixed(0)}');
+      parts.add('Receiver Online ${formatInr(allocation.receiverOnline)}');
     }
     if (allocation.receiverCash > 0) {
-      parts.add('Receiver Cash ₹${allocation.receiverCash.toStringAsFixed(0)}');
+      parts.add('Receiver Cash ${formatInr(allocation.receiverCash)}');
     }
     return parts.isEmpty ? '—' : parts.join(' · ');
-  }
-
-  bool _hasDistanceCoordinates(BookingDraft draft) {
-    final pickup = draft.pickup;
-    final drop = draft.drop;
-    return pickup?.latitude != null &&
-        pickup?.longitude != null &&
-        drop?.latitude != null &&
-        drop?.longitude != null;
   }
 
   Widget _sectionTitle(String title) {
@@ -680,7 +676,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
             ),
           ),
           Text(
-            '₹${amount.toStringAsFixed(0)}',
+            formatInr(amount),
             style: AppTextStyles.bodyMedium,
           ),
         ],

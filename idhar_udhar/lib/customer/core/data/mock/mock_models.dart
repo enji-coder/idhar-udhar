@@ -1,6 +1,7 @@
 /// Lightweight mock models for customer UI (no backend).
 
 import 'package:idhar_udhar/shared/business/business.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 enum OrderStatus {
   searching,
@@ -265,7 +266,7 @@ class MockVehicle {
   final ServiceFamily? serviceFamily;
   final String imagePath;
 
-  String get fareLabel => '₹${baseFare.toStringAsFixed(0)}';
+  String get fareLabel => formatInr(baseFare);
 }
 
 class MockRider {
@@ -483,16 +484,16 @@ class MockOrder {
     final PaymentAllocation a = paymentPlan.allocation;
     final List<String> parts = <String>[];
     if (a.customerOnline > 0) {
-      parts.add('Customer Online ₹${a.customerOnline.toStringAsFixed(0)}');
+      parts.add('Customer Online ${formatInr(a.customerOnline)}');
     }
     if (a.customerCash > 0) {
-      parts.add('Customer Cash ₹${a.customerCash.toStringAsFixed(0)}');
+      parts.add('Customer Cash ${formatInr(a.customerCash)}');
     }
     if (a.receiverOnline > 0) {
-      parts.add('Receiver Online ₹${a.receiverOnline.toStringAsFixed(0)}');
+      parts.add('Receiver Online ${formatInr(a.receiverOnline)}');
     }
     if (a.receiverCash > 0) {
-      parts.add('Receiver Cash ₹${a.receiverCash.toStringAsFixed(0)}');
+      parts.add('Receiver Cash ${formatInr(a.receiverCash)}');
     }
     if (parts.isEmpty) return 'UNPAID';
     return parts.join(' · ');

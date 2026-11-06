@@ -21,7 +21,8 @@ import useStore from '../hooks/useStore';
 import usePanelState from '../hooks/usePanelState';
 import useQueryAction from '../hooks/useQueryAction';
 import { invoiceStore, orderStore } from '../services/stores';
-import { downloadInvoicePdf, invoiceFromRecord, invoicePrintMarkup, printInvoiceHtml } from '../services/invoiceService';
+import { demoBillingText } from '../services/demoInvoice';
+import { invoiceFromRecord, invoicePrintMarkup, printInvoiceHtml } from '../services/invoiceService';
 import { nextId } from '../utils/ids';
 import { compactErrors, nonNegative, required } from '../utils/validation';
 import { formatINR } from '../utils/format';
@@ -60,8 +61,17 @@ export default function Invoices() {
   }, [rows, searchQuery, status]);
 
   function previewFor(row) {
-    const order = orders.find((item) => item.id === row.orderId);
-    return invoiceFromRecord(row, order);
+    return invoiceFromRecord(row);
+  }
+
+  function downloadDemo(row) {
+    const blob = new Blob([demoBillingText(invoiceFromRecord(row))], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${row.invoiceNumber || 'demo-billing'}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function save() {
@@ -117,7 +127,7 @@ export default function Invoices() {
         <ActionGroup>
           <ActionButton icon={Eye} tone="view" onClick={() => panel.setView(row)}>View Invoice</ActionButton>
           <ActionButton icon={Pencil} tone="edit" onClick={() => panel.openEdit(row)}>Edit Invoice</ActionButton>
-          <ActionButton icon={Download} tone="export" onClick={() => downloadInvoicePdf(previewFor(row))}>Download Invoice</ActionButton>
+          <ActionButton icon={Download} tone="export" onClick={() => downloadDemo(row)}>Download record</ActionButton>
           <ActionButton icon={Printer} tone="invoice" onClick={() => printInvoiceHtml(invoicePrintMarkup(previewFor(row)), row.invoiceNumber)}>Print Invoice</ActionButton>
           <ActionButton icon={Trash2} tone="danger" onClick={() => panel.setConfirm(row)}>Delete Invoice</ActionButton>
         </ActionGroup>
@@ -153,7 +163,7 @@ export default function Invoices() {
           <>
             <Button variant="ghost" onClick={() => panel.setView(null)}>Close</Button>
             <Button variant="secondary" icon={Printer} onClick={() => invoice && printInvoiceHtml(invoicePrintMarkup(invoice), invoice.invoiceNumber)}>Print</Button>
-            <Button icon={Download} onClick={() => invoice && downloadInvoicePdf(invoice)}>Download</Button>
+            <Button icon={Download} onClick={() => panel.view && downloadDemo(panel.view)}>Download record</Button>
           </>
         )}
       >

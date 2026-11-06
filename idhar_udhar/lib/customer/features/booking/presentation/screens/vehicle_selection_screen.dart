@@ -288,16 +288,20 @@ class VehicleSelectionScreen extends ConsumerWidget {
                               final v = options[index];
                               final selected = draft.vehicle?.id == v.id;
                               final String? serverFare =
-                                  farePreview.asData?.value[v.id];
-                              final String priceLabel = serverFare != null &&
-                                      serverFare.isNotEmpty
-                                  ? '₹$serverFare'
-                                  : farePreview.hasError &&
-                                          draft.hasRouteForCurrentStops
-                                      ? 'Fare unavailable'
-                                      : draft.hasRouteForCurrentStops
-                                          ? 'Fare after route'
-                                          : 'Fare calculated after pickup & drop';
+                                  farePreview.asData?.value[v.id] ??
+                                      farePreview.valueOrNull?[v.id];
+                              final String priceLabel;
+                              if (serverFare != null && serverFare.isNotEmpty) {
+                                priceLabel = '₹$serverFare';
+                              } else if (!draft.hasFareCoordinates &&
+                                  !draft.hasInvalidFareCoordinate) {
+                                priceLabel =
+                                    'Fare calculated after pickup & drop';
+                              } else if (farePreview.isLoading) {
+                                priceLabel = 'Calculating fare';
+                              } else {
+                                priceLabel = 'Fare unavailable';
+                              }
                               final String waitingNote = v.waitingPerMinute > 0
                                   ? 'Waiting: ₹${v.waitingPerMinute.toStringAsFixed(v.waitingPerMinute == v.waitingPerMinute.roundToDouble() ? 0 : 2)}/min after ${v.initialWaitingMinutes} min'
                                   : '';

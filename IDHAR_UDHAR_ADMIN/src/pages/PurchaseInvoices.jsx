@@ -19,6 +19,7 @@ import useStore from '../hooks/useStore';
 import usePanelState from '../hooks/usePanelState';
 import { purchaseInvoiceStore } from '../services/stores';
 import { ASSETS } from '../config/assets';
+import { DEMO_PURCHASE_NOTICE, purchaseDemoText } from '../services/demoInvoice';
 import { printInvoiceHtml, purchaseInvoiceMarkup } from '../services/invoiceService';
 import { nextId } from '../utils/ids';
 import { compactErrors, nonNegative, required } from '../utils/validation';
@@ -48,6 +49,8 @@ function PurchaseInvoiceSheet({ record }) {
           <img src={ASSETS.LOGO} alt="IDHAR UDHAR" className="h-14 w-auto object-contain" />
           <div>
             <h2 className="text-xl font-bold tracking-tight">IDHAR UDHAR</h2>
+            <p className="text-sm font-semibold text-ink">Demo purchase record</p>
+            <p className="text-sm text-ink-muted">{DEMO_PURCHASE_NOTICE}</p>
             <p className="text-sm text-ink-muted">Purchase Invoice</p>
           </div>
         </div>
@@ -117,7 +120,7 @@ export default function PurchaseInvoices() {
   }
 
   function download(row) {
-    const blob = new Blob([`Invoice ${row.invoiceNumber}\nVendor: ${row.vendor}\nItem: ${row.item}\nTotal: ${row.total}`], { type: 'text/plain' });
+    const blob = new Blob([purchaseDemoText(row)], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

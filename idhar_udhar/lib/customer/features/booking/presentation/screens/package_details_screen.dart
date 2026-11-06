@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -171,6 +172,7 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
         .toList(growable: false);
     final AsyncValue<Map<String, String>> farePreview =
         ref.watch(vehicleFarePreviewProvider);
+    final BackendQuoteHold? hold = ref.watch(backendQuoteHoldProvider);
     // Keep the last successful map while a reload is in flight.
     final Map<String, String>? fareMap =
         farePreview.asData?.value ?? farePreview.valueOrNull;
@@ -178,17 +180,26 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
         draft.vehicle == null ? null : fareMap?[draft.vehicle!.id];
     final double? previewFare =
         previewRaw == null ? null : double.tryParse(previewRaw);
-    // Prefer a held order quote; otherwise backend vehicle-fares preview.
-    // Never gate this label on ensureCustomerQuote — that create/quote call
-    // can run for seconds and left the UI stuck on "Calculating...".
-    final double? estimatedFare = draft.customerVisibleFare ?? previewFare;
+    // The held order quote is the amount confirm will charge. Until that
+    // quote matches this vehicle and these stops, show the vehicle-fares
+    // preview. Never the on-device FareEngine amount.
+    final double? estimatedFare = quoteHoldIsCurrent(hold, draft)
+        ? hold!.quote.netPayable
+        : previewFare;
     final String estimatedFareLabel;
     if (estimatedFare != null) {
-      estimatedFareLabel = '₹${estimatedFare.toStringAsFixed(0)}';
+      estimatedFareLabel = formatInr(estimatedFare);
+    } else if (!draft.hasFareCoordinates && !draft.hasInvalidFareCoordinate) {
+      estimatedFareLabel = 'Add pickup and drop to calculate the fare';
     } else if (farePreview.isLoading) {
       estimatedFareLabel = 'Calculating...';
     } else if (farePreview.hasError) {
-      estimatedFareLabel = 'Unable to calculate fare';
+      estimatedFareLabel = customerFareFailureMessage(farePreview.error!);
+    } else if (fareMap != null &&
+        draft.vehicle != null &&
+        !fareMap.containsKey(draft.vehicle!.id)) {
+      // The preview succeeded for other categories. This vehicle was not priced.
+      estimatedFareLabel = 'Fare is not available for this vehicle.';
     } else {
       estimatedFareLabel = 'Unable to calculate fare';
     }

@@ -3,6 +3,7 @@ import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
 import { Queryable } from '../database/queryable';
 import { formatInr } from '../fare/money';
+import { invoiceBilledTotal, invoiceFareFromSnapshot } from './invoice-document';
 import { OrderRow } from '../orders/orders.repository';
 import {
   assessWaitingCharge,
@@ -91,8 +92,8 @@ export class SettlementService {
     const receiverPaid = await this.repo.bookingReceiverPaid(order.order_id, db);
     const collected = await this.repo.receivableCredits(order.order_id, db);
     const customerPaid = addInr(bookingPaid, collected);
-    const tripFare = await this.tripFare(order.order_id, db);
-    const billedTotal = addInr(tripFare, amount);
+    const fare = await this.confirmedFare(order.order_id, db);
+    const billedTotal = invoiceBilledTotal(fare.netPayable, amount);
     const paidSum = addInr(customerPaid, receiverPaid);
     const paymentStatus =
       paidSum === billedTotal ? 'PAID' : paidSum === '0.00' ? 'UNPAID' : 'PARTIALLY_PAID';
@@ -100,7 +101,9 @@ export class SettlementService {
       {
         invoiceNumber: `INV-${order.display_id}`,
         orderId: order.order_id,
-        tripFare,
+        tripFare: fare.tripFare,
+        discount: fare.discount,
+        rounding: fare.rounding,
         additional: amount,
         billedTotal,
         customerPaid,
@@ -257,10 +260,19 @@ export class SettlementService {
     );
   }
 
-  private async tripFare(orderId: string, db: Queryable): Promise<string> {
-    const result = await db.query<{ trip_fare: string }>(
+  private async confirmedFare(orderId: string, db: Queryable) {
+    const result = await db.query<{
+      trip_fare: string;
+      discount: string;
+      rounding: string;
+      net_payable: string;
+    }>(
       `
-      SELECT trip_fare::text AS trip_fare
+      SELECT
+        trip_fare::text AS trip_fare,
+        discount::text AS discount,
+        rounding::text AS rounding,
+        net_payable::text AS net_payable
       FROM order_fare_snapshots
       WHERE order_id = $1
       `,
@@ -273,7 +285,7 @@ export class SettlementService {
         409,
       );
     }
-    return formatInr(result.rows[0].trip_fare);
+    return invoiceFareFromSnapshot(result.rows[0]);
   }
 }
 

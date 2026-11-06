@@ -8,12 +8,13 @@
     "dev:netlify": "npx netlify-cli dev",
     "build": "vite build",
     "lint": "oxlint",
-    "test": "node --test src/api/mappers.spec.js src/api/errors.spec.js src/config/permissions.spec.js src/data/vehicleCatalog.spec.js src/services/documentReview.spec.js src/services/commission.spec.js src/services/reportAccuracy.spec.js",
+    "test": "node --test src/api/mappers.spec.js src/api/errors.spec.js src/config/permissions.spec.js src/data/vehicleCatalog.spec.js src/services/documentReview.spec.js src/services/commission.spec.js src/services/reportAccuracy.spec.js src/services/storedInvoicePdf.spec.js src/services/demoInvoice.spec.js",
     "preview": "vite preview"
   },
   "dependencies": {
     "html2canvas": "^1.4.1",
     "lucide-react": "^1.31.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2"

@@ -27,8 +27,8 @@ import { customerStore, orderStore, riderStore, vehicleStore } from '../services
 import { ORDER_STATUSES, normalizeOrder } from '../services/orderRules';
 import { useAuth } from '../context/AuthContext';
 import { formatINR } from '../utils/format';
-import { buildInvoice, downloadInvoicePdf, invoicePrintMarkup, invoiceShareText, printInvoiceHtml } from '../services/invoiceService';
-import { assignAdminOrder, cancelAdminOrder, checkAdminInvoice, deleteAdminOrder, hideAdminOrder, transitionAdminOrder } from '../api/adminApi';
+import { downloadInvoicePdf, invoiceFromStored, invoicePrintMarkup, invoiceShareText, printInvoiceHtml } from '../services/invoiceService';
+import { assignAdminOrder, cancelAdminOrder, deleteAdminOrder, fetchAdminInvoice, hideAdminOrder, transitionAdminOrder } from '../api/adminApi';
 import { hydrateAdminDirectory } from '../api/hydrate';
 import { UI_TO_CANONICAL } from '../api/mappers';
 import { ApiError } from '../api/errors';
@@ -72,6 +72,7 @@ export default function Orders() {
   const [toast, setToast] = useState('');
   const [error, setError] = useState(false);
   const [refund, setRefund] = useState(null);
+  const [storedInvoice, setStoredInvoice] = useState(null);
   useQueryAction('add', () => setCreateOpen(true));
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export default function Orders() {
     [orders, selectedId],
   );
 
-  const invoice = selected && panel === 'invoice' ? buildInvoice(selected) : null;
+  const invoice = panel === 'invoice' ? storedInvoice : null;
 
   const data = useMemo(() => {
     const query = `${searchQuery || ''} ${localSearch}`.trim().toLowerCase();
@@ -153,15 +154,18 @@ export default function Orders() {
       setToast('Cancelled orders cannot generate an invoice.');
       return;
     }
-    if (order.backendOrderId) {
-      try {
-        await checkAdminInvoice(order.backendOrderId);
-      } catch (error) {
-        setToast(error instanceof ApiError ? error.message : 'This order cannot generate an invoice.');
-        return;
-      }
+    if (!order.backendOrderId) {
+      setToast('This order is not on the server.');
+      return;
     }
-    openPanel('invoice', order);
+    try {
+      const body = await fetchAdminInvoice(order.backendOrderId);
+      setStoredInvoice(invoiceFromStored(body));
+      openPanel('invoice', order);
+    } catch (error) {
+      setStoredInvoice(null);
+      setToast(error instanceof ApiError ? error.message : 'This order cannot generate an invoice.');
+    }
   }
 
   async function confirmDelete(hideInstead) {
@@ -346,12 +350,18 @@ export default function Orders() {
 
       <Modal
         open={Boolean(selected) && panel === 'invoice'}
-        title={`Invoice ${selected?.id || ''}`}
+        title={`Invoice ${invoice?.invoiceNumber || selected?.crn || ''}`}
         size="xl"
-        onClose={() => setPanel('view')}
+        onClose={() => {
+          setStoredInvoice(null);
+          setPanel('view');
+        }}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setPanel('view')}>Close</Button>
+            <Button variant="ghost" onClick={() => {
+              setStoredInvoice(null);
+              setPanel('view');
+            }}>Close</Button>
             <Button variant="secondary" icon={Share2} onClick={async () => {
               if (!invoice) return;
               const text = invoiceShareText(invoice);
@@ -363,7 +373,12 @@ export default function Orders() {
               }
             }}>Share</Button>
             <Button variant="secondary" icon={Printer} onClick={() => invoice && printInvoiceHtml(invoicePrintMarkup(invoice), invoice.invoiceNumber)}>Print</Button>
-            <Button icon={Download} onClick={() => invoice && downloadInvoicePdf(invoice)}>Download PDF</Button>
+            <Button icon={Download} onClick={() => {
+              if (!invoice) return;
+              downloadInvoicePdf(invoice).catch((error) => {
+                setToast(error instanceof Error ? error.message : 'Could not download the invoice.');
+              });
+            }}>Download PDF</Button>
           </>
         }
       >

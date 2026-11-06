@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:idhar_udhar/shared/api/wallet_api.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../../../core/constants/app_copy.dart';
 import '../../../../core/data/mock/mock_data.dart';
@@ -52,7 +53,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
   Widget build(BuildContext context) {
     final CustomerWalletState wallet = ref.watch(customerWalletProvider);
     final String balanceLabel = wallet.hasBalance
-        ? '₹${wallet.balance!.toStringAsFixed(0)}'
+        ? formatInr(wallet.balance!)
         : '—';
     final Map<String, List<WalletPaymentOption>> grouped = {};
     for (final option in MockData.walletPaymentOptions) {
@@ -272,7 +273,7 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
                           ),
                         ),
                         Text(
-                          '${txn.isCredit ? '+' : '-'}₹${txn.amount.toStringAsFixed(0)}',
+                          '${txn.isCredit ? '+' : '-'}${formatInr(txn.amount)}',
                           style: AppTextStyles.bodyMedium.copyWith(
                             color: txn.isCredit
                                 ? AppColors.success

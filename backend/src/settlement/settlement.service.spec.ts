@@ -14,9 +14,22 @@ const CUSTOMER = '22222222-2222-4222-8222-222222222222';
 const WAITING = '33333333-3333-4333-8333-333333333333';
 const WALLET = '44444444-4444-4444-8444-444444444444';
 
-function db(tripFare = '135.00'): Queryable {
+function db(
+  tripFare = '135.00',
+  extra: { discount?: string; rounding?: string; netPayable?: string } = {},
+): Queryable {
   return {
-    query: jest.fn(async () => ({ rows: [{ trip_fare: tripFare }], rowCount: 1 })),
+    query: jest.fn(async () => ({
+      rows: [
+        {
+          trip_fare: tripFare,
+          discount: extra.discount ?? '0.00',
+          rounding: extra.rounding ?? '0.00',
+          net_payable: extra.netPayable ?? tripFare,
+        },
+      ],
+      rowCount: 1,
+    })),
   } as unknown as Queryable;
 }
 
@@ -97,6 +110,8 @@ describe('SettlementService', () => {
     expect(receivables.map((row) => row.entryType)).toEqual(['WAITING_ASSESSMENT']);
     expect(invoices[0]).toMatchObject({
       tripFare: '135.00',
+      discount: '0.00',
+      rounding: '0.00',
       additional: '5.00',
       billedTotal: '140.00',
       customerPaid: '135.00',
@@ -122,6 +137,29 @@ describe('SettlementService', () => {
     await service.settleDelivered(order(), db());
     expect(repo.debitWalletUpTo).not.toHaveBeenCalled();
     expect(repo.insertInvoice).not.toHaveBeenCalled();
+  });
+
+  it('copies snapshot discount and rounding and does not invoice a second time', async () => {
+    const row = waiting('0.00');
+    const { service, repo, invoices } = harness('0.00', row);
+    repo.markSettled.mockImplementation(async () => {
+      row.settlement_status = 'SETTLED';
+    });
+    const fare = db('135.00', {
+      discount: '10.00',
+      rounding: '-0.40',
+      netPayable: '124.60',
+    });
+    await service.settleDelivered(order(), fare);
+    await service.settleDelivered(order(), fare);
+    expect(repo.insertInvoice).toHaveBeenCalledTimes(1);
+    expect(invoices[0]).toMatchObject({
+      tripFare: '135.00',
+      discount: '10.00',
+      rounding: '-0.40',
+      additional: '0.00',
+      billedTotal: '124.60',
+    });
   });
 
   it('does not create an invoice when the locked order is cancelled', async () => {

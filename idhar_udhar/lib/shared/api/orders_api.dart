@@ -289,6 +289,7 @@ class ApiQuote {
     this.distanceCharge = 0,
     this.discount = 0,
     this.waiting = 0,
+    this.expiresAt,
   });
 
   final String orderId;
@@ -301,21 +302,55 @@ class ApiQuote {
   final double distanceCharge;
   final double discount;
   final double waiting;
+  final DateTime? expiresAt;
 
   factory ApiQuote.fromJson(Map<String, Object?> json) {
+    final String fareQuoteId = jsonString(json['fare_quote_id']) ?? '';
+    if (fareQuoteId.isEmpty) {
+      throw const ApiException(
+        code: 'FARE_RESPONSE_INVALID',
+        message: 'The fare response was incomplete. Try again.',
+      );
+    }
     return ApiQuote(
       orderId: jsonString(json['order_id']) ?? '',
       displayId: jsonString(json['display_id']) ?? '',
-      fareQuoteId: jsonString(json['fare_quote_id']) ?? '',
-      tripFare: jsonDouble(json['trip_fare']),
-      netPayable: jsonDouble(json['net_payable']),
-      distanceKm: jsonDouble(json['distance_km']),
+      fareQuoteId: fareQuoteId,
+      tripFare: _requiredFareAmount(json['trip_fare']),
+      netPayable: _requiredFareAmount(json['net_payable']),
+      distanceKm: _requiredFareAmount(json['distance_km']),
       baseFare: jsonDouble(json['base_fare']),
       distanceCharge: jsonDouble(json['distance_charge']),
       discount: jsonDouble(json['discount']),
       waiting: jsonDouble(json['waiting']),
+      expiresAt: jsonDate(json['expires_at']),
     );
   }
+
+  /// A quote with no expiry timestamp is checked again by the server.
+  bool isExpiredAt(DateTime now) {
+    final DateTime? expiry = expiresAt;
+    if (expiry == null) {
+      return false;
+    }
+    return !expiry.isAfter(now);
+  }
+}
+
+double _requiredFareAmount(Object? value) {
+  if (value is num && value.isFinite) {
+    return value.toDouble();
+  }
+  if (value is String) {
+    final double? parsed = double.tryParse(value);
+    if (parsed != null && parsed.isFinite) {
+      return parsed;
+    }
+  }
+  throw const ApiException(
+    code: 'FARE_RESPONSE_INVALID',
+    message: 'The fare response was incomplete. Try again.',
+  );
 }
 
 class ReceivableClearance {
@@ -451,6 +486,10 @@ class OrdersApi {
     return ApiOrder.fromJson(await _client.get('/v1/orders/$orderId'));
   }
 
+  Future<Map<String, Object?>> getInvoice(String orderId) async {
+    return _client.get('/v1/orders/$orderId/invoice');
+  }
+
   /// Resolves one shipment. CRN is unique, so this returns that order only.
   Future<ApiOrder> getByCrn(String crn) async {
     return ApiOrder.fromJson(
@@ -516,18 +555,27 @@ class OrdersApi {
         '/v1/orders/vehicle-fares',
         data: request,
       );
+      final List<Object?> vehicles = jsonList(body['vehicles']);
       final Map<String, String> fares = <String, String>{};
-      for (final Object? item in jsonList(body['vehicles'])) {
+      for (final Object? item in vehicles) {
         final Map<String, Object?> vehicle = jsonObject(item);
         final String? id = jsonString(vehicle['vehicle_category_id']);
         final Map<String, Object?> fare = jsonObject(vehicle['fare']);
         final String? payable = jsonString(fare['net_payable']);
-        if (id != null &&
-            id.isNotEmpty &&
-            payable != null &&
-            payable.isNotEmpty) {
-          fares[id] = payable;
+        if (id == null || id.isEmpty || payable == null || payable.isEmpty) {
+          continue;
         }
+        if (double.tryParse(payable) == null) {
+          continue;
+        }
+        fares[id] = payable;
+      }
+      if (vehicles.isEmpty || fares.isEmpty) {
+        throw const ApiException(
+          code: 'FARE_CONFIG_UNAVAILABLE',
+          message:
+              'No fare is configured for this route. Try again or choose another vehicle.',
+        );
       }
       if (ApiConfig.enableRequestLogging) {
         debugPrint(

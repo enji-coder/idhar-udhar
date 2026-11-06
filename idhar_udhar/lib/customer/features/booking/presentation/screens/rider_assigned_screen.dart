@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
@@ -370,7 +371,7 @@ class RiderAssignedScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
-                  'Fare ₹${order?.fare.toStringAsFixed(0) ?? '—'}',
+                  'Fare ${order?.fare == null ? '—' : formatInr(order!.fare)}',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.orange,
                     fontWeight: FontWeight.w700,

@@ -59,6 +59,10 @@ export async function checkAdminInvoice(orderId) {
   return apiRequest(`/v1/admin/orders/${orderId}/invoice-check`, { method: 'POST' });
 }
 
+export async function fetchAdminInvoice(orderId) {
+  return apiRequest(`/v1/admin/orders/${orderId}/invoice`);
+}
+
 export async function previewWalletCleanup(body) {
   return apiRequest('/v1/admin/wallet/cleanup/preview', { method: 'POST', body });
 }
