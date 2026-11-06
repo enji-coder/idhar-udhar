@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/phone/native_dialer.dart';
-import 'package:intl/intl.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
 import '../../data/models/rider_order.dart';
@@ -26,7 +26,7 @@ class AcceptConfirmationScreen extends ConsumerWidget {
     final RiderOrder? order = ref.watch(activeOrderProvider);
     if (order == null) return const _NoActiveOrder();
     final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+        inrFormat;
 
     return RiderScaffold(
       bottom: RiderPrimaryButton(
@@ -98,7 +98,7 @@ class OrderDetailsScreen extends ConsumerWidget {
     final RiderOrder? order = ref.watch(activeOrderProvider);
     if (order == null) return const _NoActiveOrder();
     final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+        inrFormat;
     final String senderName = order.senderName.trim().isEmpty
         ? order.customerMaskedName
         : order.senderName;

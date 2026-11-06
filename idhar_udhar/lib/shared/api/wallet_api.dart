@@ -26,12 +26,16 @@ class RiderCod {
     required this.suspendThreshold,
     required this.suspended,
     this.operationalStatus,
+    this.walletSuspendFloor = -100,
+    this.rechargeToResume = 0,
   });
 
   final double codDue;
   final double suspendThreshold;
   final bool suspended;
   final String? operationalStatus;
+  final double walletSuspendFloor;
+  final double rechargeToResume;
 
   factory RiderCod.fromJson(Map<String, Object?> json) {
     return RiderCod(
@@ -39,6 +43,12 @@ class RiderCod {
       suspendThreshold: jsonDouble(json['suspend_threshold']),
       suspended: jsonBool(json['suspended']),
       operationalStatus: jsonString(json['cod_operational_status']),
+      walletSuspendFloor: json['wallet_suspend_floor'] == null
+          ? -100
+          : jsonDouble(json['wallet_suspend_floor']),
+      rechargeToResume: json['recharge_to_resume'] == null
+          ? 0
+          : jsonDouble(json['recharge_to_resume']),
     );
   }
 }
@@ -50,6 +60,14 @@ class RiderEarningRow {
     required this.tripFare,
     required this.riderAmount,
     this.frozenAt,
+    this.companyAmount,
+    this.settlementStatus,
+    this.settlementState,
+    this.cashCollected,
+    this.walletCredited,
+    this.codApplied,
+    this.companySharePosted,
+    this.walletCompanyDebit,
   });
 
   final String orderId;
@@ -60,6 +78,21 @@ class RiderEarningRow {
   /// `frozen_at` from the earnings snapshot. Null when the payload omits it.
   final DateTime? frozenAt;
 
+  /// Frozen company share from the same snapshot. Null on older payloads.
+  final double? companyAmount;
+
+  /// CREDITED, APPLIED_TO_COD, CREDITED_AND_COD, PENDING, or CASH.
+  final String? settlementStatus;
+
+  /// SETTLED or PENDING. Null when the server did not send it.
+  final String? settlementState;
+
+  final double? cashCollected;
+  final double? walletCredited;
+  final double? codApplied;
+  final double? companySharePosted;
+  final double? walletCompanyDebit;
+
   factory RiderEarningRow.fromJson(Map<String, Object?> json) {
     return RiderEarningRow(
       orderId: jsonString(json['order_id']) ?? '',
@@ -67,7 +100,45 @@ class RiderEarningRow {
       tripFare: jsonDouble(json['trip_fare']),
       riderAmount: jsonDouble(json['rider_amount']),
       frozenAt: jsonDate(json['frozen_at']),
+      companyAmount: json['company_commission_amount'] == null
+          ? null
+          : jsonDouble(json['company_commission_amount']),
+      settlementStatus: jsonString(json['settlement_status']),
+      settlementState: jsonString(json['settlement_state']),
+      cashCollected: json['cash_collected'] == null
+          ? null
+          : jsonDouble(json['cash_collected']),
+      walletCredited: json['wallet_credited_amount'] == null
+          ? null
+          : jsonDouble(json['wallet_credited_amount']),
+      codApplied: json['cod_applied_amount'] == null
+          ? null
+          : jsonDouble(json['cod_applied_amount']),
+      companySharePosted: json['company_share_posted'] == null
+          ? null
+          : jsonDouble(json['company_share_posted']),
+      walletCompanyDebit: json['wallet_company_debit'] == null
+          ? null
+          : jsonDouble(json['wallet_company_debit']),
     );
+  }
+}
+
+/// Rider-facing sentence for a settlement status. Null when the server omitted it.
+String? earningSettlementLabel(String? status) {
+  switch (status) {
+    case 'CREDITED':
+      return 'Credited to wallet';
+    case 'APPLIED_TO_COD':
+      return 'Applied to COD Due';
+    case 'CREDITED_AND_COD':
+      return 'Part credited, part applied to COD Due';
+    case 'CASH':
+      return 'Cash kept by you';
+    case 'PENDING':
+      return 'Pending online payment';
+    default:
+      return null;
   }
 }
 

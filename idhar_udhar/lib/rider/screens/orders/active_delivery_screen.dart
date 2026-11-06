@@ -10,6 +10,7 @@ import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/maps/maps.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
@@ -103,14 +104,7 @@ _CashDue _cashDue(RiderOrder order) {
   return _CashDue.blocked;
 }
 
-String _rupees(double amount) {
-  final bool whole = amount == amount.roundToDouble();
-  return NumberFormat.currency(
-    locale: 'en_IN',
-    symbol: '₹',
-    decimalDigits: whole ? 0 : 2,
-  ).format(amount);
-}
+String _rupees(double amount) => formatInr(amount);
 
 class ActiveDeliveryScreen extends ConsumerStatefulWidget {
   const ActiveDeliveryScreen({super.key});
@@ -302,8 +296,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
                 status == DeliveryLifecycleStatus.parcelAtCompanyOffice
             ? _happyPath.indexOf(DeliveryLifecycleStatus.goingToDrop)
             : _happyPath.indexOf(status);
-    final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    final currency = inrFormat;
     final bool done = status == DeliveryLifecycleStatus.delivered ||
         status == DeliveryLifecycleStatus.parcelAtCompanyOffice;
     final CompanyOffice office = PlatformRules.current.office;
@@ -342,7 +335,7 @@ class _ActiveDeliveryScreenState extends ConsumerState<ActiveDeliveryScreen>
               child: RiderSecondaryButton(
                 label: riderCancel.fee == 0
                     ? 'Cancel trip (₹0)'
-                    : 'Cancel trip (₹${riderCancel.fee.toStringAsFixed(0)})',
+                    : 'Cancel trip (${formatInr(riderCancel.fee)})',
                 destructive: true,
                 onPressed: () async {
                   // Rider cancel of an assigned trip is not a customer cancel.

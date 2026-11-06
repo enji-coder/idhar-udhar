@@ -73,6 +73,8 @@ class ApiStop {
     required this.longitude,
     this.contactName,
     this.contactPhone,
+    this.arrivedAt,
+    this.completedAt,
   });
 
   final int sequence;
@@ -82,6 +84,8 @@ class ApiStop {
   final double longitude;
   final String? contactName;
   final String? contactPhone;
+  final DateTime? arrivedAt;
+  final DateTime? completedAt;
 
   /// Nest `CreateOrderStopDto` allows at most 6 fractional digits
   /// (`@IsNumber({ maxDecimalPlaces: 6 })`). Raw GPS doubles often exceed that
@@ -111,6 +115,8 @@ class ApiStop {
       longitude: jsonDouble(json['longitude']),
       contactName: jsonString(json['contact_name']),
       contactPhone: jsonString(json['contact_phone']),
+      arrivedAt: jsonDate(json['arrived_at']),
+      completedAt: jsonDate(json['completed_at']),
     );
   }
 }

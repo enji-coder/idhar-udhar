@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../data/models/rider_earnings.dart';
 import '../../state/rider_session.dart';
@@ -99,8 +99,7 @@ class _DailyIncome extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final earnings =
         ref.watch(riderApiEarningsProvider).value ?? RiderEarnings.empty;
-    final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    final currency = inrFormat;
 
     return ListView(
       padding: const EdgeInsets.only(top: RiderSpacing.lg),
@@ -145,8 +144,7 @@ class _PeriodIncome extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final earnings =
         ref.watch(riderApiEarningsProvider).value ?? RiderEarnings.empty;
-    final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    final currency = inrFormat;
     final deliveries =
         weekly ? earnings.weeklyDeliveries : earnings.monthlyDeliveries;
     final amount = weekly ? earnings.weeklyEarnings : earnings.monthlyEarnings;

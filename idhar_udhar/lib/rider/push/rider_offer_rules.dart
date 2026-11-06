@@ -1,5 +1,6 @@
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:idhar_udhar/shared/format/trip_distance.dart';
 
 import '../data/models/rider_order.dart';
@@ -138,7 +139,7 @@ String? _fareLabel(String? raw) {
   if (amount == null || amount <= 0) {
     return null;
   }
-  return '₹${amount.toStringAsFixed(0)}';
+  return formatInr(amount);
 }
 
 String _minutesLabel(int seconds) {

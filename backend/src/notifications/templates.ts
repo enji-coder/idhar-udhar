@@ -24,6 +24,8 @@ export const NOTIFICATION_TYPES = [
   'COD_SETTLEMENT_COMPLETED',
   'COD_SUSPENDED',
   'COD_ELIGIBLE',
+  'WALLET_SUSPENDED',
+  'WALLET_RESTORED',
   'RIDER_PROFILE_VERIFIED',
   'RIDER_DOCUMENT_SUBMITTED',
   'RIDER_DOCUMENT_APPROVED',
@@ -266,6 +268,18 @@ export function renderNotification(
         type,
         title: 'Ready to accept deliveries',
         body: 'COD Due is below the suspension threshold. You can accept new deliveries again.',
+      };
+    case 'WALLET_SUSPENDED':
+      return {
+        type,
+        title: 'Wallet service paused',
+        body: 'Your wallet balance is at or below -₹100.00. Add money to resume new trips.',
+      };
+    case 'WALLET_RESTORED':
+      return {
+        type,
+        title: 'Wallet service restored',
+        body: 'Your wallet balance is above -₹100.00. You can accept new trips again.',
       };
     case 'RIDER_PROFILE_VERIFIED':
       return {

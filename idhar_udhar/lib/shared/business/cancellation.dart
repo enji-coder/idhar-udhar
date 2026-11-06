@@ -1,5 +1,6 @@
 import 'fare_engine.dart';
 import 'order_lifecycle.dart';
+import '../format/inr_format.dart';
 
 enum CancellationActor { customer, rider }
 
@@ -232,9 +233,7 @@ abstract final class CancellationEngine {
       companySharePercent: rule.companySharePercent,
       riderAmount: riderAmount,
       companyAmount: companyAmount,
-      message: fee == 0
-          ? 'Cancellation Fee: ₹0'
-          : 'Cancellation Fee: ₹${fee.toStringAsFixed(0)}',
+      message: 'Cancellation Fee: ${formatInr(fee)}',
     );
   }
 }

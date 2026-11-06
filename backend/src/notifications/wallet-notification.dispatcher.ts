@@ -119,6 +119,36 @@ export class WalletNotificationDispatcher {
       );
     }
     if (
+      input.previous !== 'SUSPENDED_FOR_WALLET' &&
+      input.current === 'SUSPENDED_FOR_WALLET'
+    ) {
+      await this.notifications.notifyIfRecipient(
+        {
+          eventKey: `wallet-status:${input.riderProfileId}:SUSPENDED:${input.sourceTxnId}`,
+          type: 'WALLET_SUSPENDED',
+          audience: 'RIDER',
+          profileType: 'RIDER',
+          profileId: input.riderProfileId,
+        },
+        db,
+      );
+    }
+    if (
+      input.previous === 'SUSPENDED_FOR_WALLET' &&
+      input.current === 'CLEAR'
+    ) {
+      await this.notifications.notifyIfRecipient(
+        {
+          eventKey: `wallet-status:${input.riderProfileId}:CLEAR:${input.sourceTxnId}`,
+          type: 'WALLET_RESTORED',
+          audience: 'RIDER',
+          profileType: 'RIDER',
+          profileId: input.riderProfileId,
+        },
+        db,
+      );
+    }
+    if (
       input.previous === 'SUSPENDED_FOR_COD' &&
       input.current === 'CLEAR'
     ) {

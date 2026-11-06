@@ -119,6 +119,21 @@ RiderWalletTopUpFeedback riderWalletTopUpFeedback(
   );
 }
 
+/// Later wallet reads after checkout has already been verified.
+///
+/// The previous screens awaited this loop before closing the amount sheet.
+/// Pending status waited 10 seconds (5 × 2s). A verify failure waited 4 seconds.
+/// Those waits are not payment checks. The server verify still runs first.
+Future<void> refreshWalletAfterTopUp({
+  required int times,
+  required Future<void> Function() refresh,
+}) async {
+  for (var i = 0; i < times; i++) {
+    await Future<void>.delayed(const Duration(seconds: 2));
+    await refresh();
+  }
+}
+
 /// Checkout return is not settlement. A gateway error still asks the server.
 Future<RiderWalletTopUpFeedback> finishRiderWalletTopUpCheckout({
   required WalletApi walletApi,

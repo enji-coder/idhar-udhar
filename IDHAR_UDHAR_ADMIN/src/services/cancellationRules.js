@@ -1,4 +1,5 @@
 import { round2 } from './fareEngine.js';
+import { formatINR } from '../utils/format';
 
 export const CANCELLATION_KEY = 'iu_admin_cancellation_v1';
 
@@ -105,6 +106,6 @@ export function quoteCancellation(config, actor, stageId) {
     companySharePercent: rule.companySharePercent,
     riderAmount,
     companyAmount: round2(rule.fee - riderAmount),
-    message: rule.fee === 0 ? 'Cancellation Fee: ₹0' : `Cancellation Fee: ₹${rule.fee}`,
+    message: `Cancellation Fee: ${formatINR(rule.fee)}`,
   };
 }

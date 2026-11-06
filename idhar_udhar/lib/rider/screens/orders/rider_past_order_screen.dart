@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/orders/rider_order_board.dart';
+import 'rider_trip_statement.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
@@ -22,6 +23,7 @@ class _PastTrip {
     this.riderAmount,
     this.paymentLabel,
     this.customerBill,
+    this.earning,
   });
 
   final ApiOrder order;
@@ -29,6 +31,7 @@ class _PastTrip {
   final double? riderAmount;
   final String? paymentLabel;
   final double? customerBill;
+  final RiderEarningRow? earning;
 }
 
 class RiderPastOrderScreen extends ConsumerStatefulWidget {
@@ -61,6 +64,7 @@ class _RiderPastOrderScreenState extends ConsumerState<RiderPastOrderScreen> {
     final ApiOrder order = await ref.read(riderApiProvider).getOrder(id);
     double? fare = order.tripFare;
     double? earning = order.riderAmount;
+    RiderEarningRow? earningRow;
     try {
       final List<RiderEarningRow> rows =
           await ref.read(walletApiProvider).earnings();
@@ -68,6 +72,7 @@ class _RiderPastOrderScreenState extends ConsumerState<RiderPastOrderScreen> {
         if (row.orderId.trim() == id) {
           fare ??= row.tripFare;
           earning ??= row.riderAmount;
+          earningRow = row;
           break;
         }
       }
@@ -95,6 +100,7 @@ class _RiderPastOrderScreenState extends ConsumerState<RiderPastOrderScreen> {
       riderAmount: earning,
       paymentLabel: paymentLabel,
       customerBill: customerBill,
+      earning: earningRow,
     );
   }
 
@@ -240,7 +246,31 @@ class _PastBody extends StatelessWidget {
             ],
           ),
         ],
-        if (hasPayment) ...[
+        if (trip.earning != null) ...[
+          const SizedBox(height: 8),
+          _Panel(
+            title: 'Trip statement',
+            children: [
+              RiderTripStatement(
+                crn: order.crn,
+                tripAt: order.createdAt,
+                pickupAt: pickup?.arrivedAt ?? pickup?.completedAt,
+                pickupAddress: pickupAddress,
+                deliveredAt: drop?.completedAt ?? drop?.arrivedAt,
+                dropAddress: dropAddress,
+                tripFare: trip.earning!.tripFare,
+                riderAmount: trip.earning!.riderAmount,
+                companyAmount: trip.earning!.companyAmount,
+                settlementStatus: trip.earning!.settlementStatus,
+                settlementState: trip.earning!.settlementState,
+                cashCollected: trip.earning!.cashCollected,
+                walletCredited: trip.earning!.walletCredited,
+                codApplied: trip.earning!.codApplied,
+                walletCompanyDebit: trip.earning!.walletCompanyDebit,
+              ),
+            ],
+          ),
+        ] else if (hasPayment) ...[
           const SizedBox(height: 8),
           _Panel(
             title: 'Payment',

@@ -61,7 +61,10 @@ describe('WalletCodService digital earning gate', () => {
         return { cod_ledger_id: 'cod-ledger-1' };
       }),
       hasWalletEarningForOrder: jest.fn(async () => earned),
+      hasWalletCompanyShareForOrder: jest.fn(async () => false),
+      debitWalletAllowingNegative: jest.fn(async () => '0.00'),
       hasDigitalEarningSettlement: jest.fn(async () => false),
+      decreaseCod: jest.fn(async () => '0.00'),
       splitInflow: jest.fn(async (amount: string) => ({
         settle: '0.00',
         remainder: amount,
@@ -132,20 +135,31 @@ describe('WalletCodService digital earning gate', () => {
     expect(repo.increaseCod).not.toHaveBeenCalled();
   });
 
-  it('keeps cash collection on the COD company-share path', async () => {
+  it('debits the company share from the wallet once and does not credit a cash trip', async () => {
+    let debited = false;
     const { service, earnings, codIncreases, repo } = makeService({
       plan: { planned_online: '0.00', planned_cash: '100.00' },
       cashCollected: '100.00',
       verifiedPaid: '0.00',
     });
+    repo.debitWalletAllowingNegative.mockResolvedValue('-15.00');
+    repo.walletLedgerNet.mockResolvedValue('-15.00');
+    repo.hasWalletCompanyShareForOrder.mockImplementation(async () => debited);
+    repo.insertWalletLedger.mockImplementation(async (row: { amount: string; entryType: string }) => {
+      debited = true;
+      earnings.push(row);
+      return { wallet_ledger_id: 'wallet-ledger-1' };
+    });
     await service.syncOrderFinance(deliveredOrder(), {} as never);
-    expect(earnings).toEqual([]);
+    await service.syncOrderFinance(deliveredOrder(), {} as never);
     expect(repo.creditWallet).not.toHaveBeenCalled();
-    expect(repo.verifiedOnlineBookingPaid).not.toHaveBeenCalled();
-    expect(codIncreases).toEqual([
+    expect(repo.increaseCod).not.toHaveBeenCalled();
+    expect(codIncreases).toEqual([]);
+    expect(earnings).toEqual([
       expect.objectContaining({
         amount: '15.00',
-        source: 'CASH_COMPANY_SHARE',
+        entryType: 'COMPANY_SHARE',
+        direction: 'DEBIT',
         relatedOrderId: ORDER_ID,
       }),
     ]);
@@ -163,11 +177,98 @@ describe('WalletCodService digital earning gate', () => {
     expect(lockById).toHaveBeenCalled();
     expect(codIncreases).toEqual([]);
     expect(repo.increaseCod).not.toHaveBeenCalled();
+    expect(repo.debitWalletAllowingNegative).not.toHaveBeenCalled();
     expect(repo.insertCodLedger).not.toHaveBeenCalled();
     expect(earnings).toEqual([]);
     expect(repo.creditWallet).not.toHaveBeenCalled();
     expect(repo.syncOperationalStatus).toHaveBeenCalled();
     expect(onOperationalStatusChange).toHaveBeenCalled();
+  });
+
+  it('applies an online earning to COD Due once and does not credit the wallet', async () => {
+    let settled = false;
+    const { service, earnings, repo } = makeService({ verifiedPaid: '100.00' });
+    repo.lockAccounts.mockImplementation(async () => ({
+      wallet: { wallet_account_id: 'wallet-1', available_balance: '0.00' },
+      cod: { cod_account_id: 'cod-1', cod_due: '85.00' },
+      threshold: '500.00',
+    }));
+    repo.splitInflow.mockImplementation(async () => ({
+      settle: '85.00',
+      remainder: '0.00',
+    }));
+    repo.hasDigitalEarningSettlement.mockImplementation(async () => settled);
+    repo.insertCodLedger.mockImplementation(async (row: { source: string }) => {
+      if (row.source === 'DIGITAL_EARNING_SETTLEMENT') {
+        settled = true;
+      }
+      return { cod_ledger_id: 'cod-ledger-1' };
+    });
+    repo.walletLedgerNet.mockImplementation(async () => '0.00');
+    repo.codLedgerNet.mockImplementation(async () => '0.00');
+
+    await service.syncOrderFinance(deliveredOrder(), {} as never);
+    await service.syncOrderFinance(deliveredOrder(), {} as never);
+
+    expect(earnings).toEqual([]);
+    expect(repo.creditWallet).not.toHaveBeenCalled();
+    expect(repo.decreaseCod).toHaveBeenCalledTimes(1);
+    expect(repo.insertCodLedger).toHaveBeenCalledTimes(1);
+    expect(repo.insertCodLedger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: '85.00',
+        source: 'DIGITAL_EARNING_SETTLEMENT',
+        relatedOrderId: ORDER_ID,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('debits ₹18.60 once when a ₹124.00 cash fare is collected', async () => {
+    let debited = false;
+    const { service, repo } = makeService({
+      plan: { planned_online: '0.00', planned_cash: '124.00' },
+      cashCollected: '124.00',
+    });
+    repo.companyDueFromCash.mockResolvedValue('18.60');
+    repo.debitWalletAllowingNegative.mockResolvedValue('-18.60');
+    repo.walletLedgerNet.mockResolvedValue('-18.60');
+    repo.hasWalletCompanyShareForOrder.mockImplementation(async () => debited);
+    const debits: Array<{ amount: string; entryType: string }> = [];
+    repo.insertWalletLedger.mockImplementation(async (row: { amount: string; entryType: string }) => {
+      debited = true;
+      debits.push(row);
+      return { wallet_ledger_id: 'wallet-ledger-1' };
+    });
+
+    await service.syncOrderFinance(deliveredOrder(), {} as never);
+    await service.syncOrderFinance(deliveredOrder(), {} as never);
+
+    expect(repo.creditWallet).not.toHaveBeenCalled();
+    expect(repo.increaseCod).not.toHaveBeenCalled();
+    expect(debits).toEqual([
+      expect.objectContaining({
+        amount: '18.60',
+        entryType: 'COMPANY_SHARE',
+        direction: 'DEBIT',
+      }),
+    ]);
+    expect(repo.debitWalletAllowingNegative).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not debit the wallet when a historical COD company share already exists', async () => {
+    const { service, repo } = makeService({
+      plan: { planned_online: '0.00', planned_cash: '124.00' },
+      cashCollected: '124.00',
+    });
+    repo.companyDueFromCash.mockResolvedValue('18.60');
+    repo.postedCashCompanyShare.mockResolvedValue('18.60');
+
+    await service.syncOrderFinance(deliveredOrder(), {} as never);
+
+    expect(repo.debitWalletAllowingNegative).not.toHaveBeenCalled();
+    expect(repo.increaseCod).not.toHaveBeenCalled();
+    expect(repo.creditWallet).not.toHaveBeenCalled();
   });
 
   it('does not post online rider earning when locked order is not DELIVERED', async () => {

@@ -1816,6 +1816,8 @@ export class OrdersService {
       zone_id: stop.zone_id,
       contact_name: stop.contact_name,
       contact_phone: stop.contact_phone,
+      arrived_at: stop.arrived_at ? stop.arrived_at.toISOString() : null,
+      completed_at: stop.completed_at ? stop.completed_at.toISOString() : null,
       proof_file_id: stop.proof_file_id,
     };
   }

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
+import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/api/wallet_api.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:intl/intl.dart';
 
 import '../../features/orders/rider_order_board.dart';
@@ -12,6 +15,10 @@ import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_scaffold.dart';
+
+final riderLedgerTripsProvider = FutureProvider<List<RiderEarningRow>>((ref) {
+  return ref.read(walletApiProvider).earnings();
+});
 
 class RiderLedgerScreen extends ConsumerWidget {
   const RiderLedgerScreen({
@@ -26,11 +33,8 @@ class RiderLedgerScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<List<RiderWalletLedgerEntry>> ledger =
         ref.watch(riderWalletLedgerProvider);
-    final NumberFormat currency = NumberFormat.currency(
-      locale: 'en_IN',
-      symbol: '₹',
-      decimalDigits: 2,
-    );
+    final AsyncValue<List<RiderEarningRow>> trips =
+        ref.watch(riderLedgerTripsProvider);
     final DateFormat dateFormat = DateFormat('d MMM yyyy');
     final DateFormat timeFormat = DateFormat('h:mm a');
     return Column(
@@ -71,80 +75,74 @@ class RiderLedgerScreen extends ConsumerWidget {
           body: error is ApiException
               ? error.message
               : 'Check the connection and try again.',
-          onRetry: () => ref.invalidate(riderWalletLedgerProvider),
+          onRetry: () {
+            ref.invalidate(riderWalletLedgerProvider);
+            ref.invalidate(riderLedgerTripsProvider);
+          },
         ),
         data: (List<RiderWalletLedgerEntry> entries) {
-          if (entries.isEmpty) {
+          final List<RiderEarningRow> tripRows =
+              trips.value ?? const <RiderEarningRow>[];
+          if (entries.isEmpty && tripRows.isEmpty && trips.isLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (entries.isEmpty && tripRows.isEmpty) {
             return const _LedgerMessage(
               title: 'No ledger entries yet',
-              body: 'Wallet credits and debits will appear here.',
+              body: 'Trip earnings and wallet credits will appear here.',
             );
           }
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(riderWalletLedgerProvider);
+              ref.invalidate(riderLedgerTripsProvider);
               await ref.read(riderWalletLedgerProvider.future);
+              await ref.read(riderLedgerTripsProvider.future);
             },
-            child: ListView.separated(
+            child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: entries.length,
-              separatorBuilder: (BuildContext context, int index) =>
-                  const SizedBox(height: RiderSpacing.md),
-              itemBuilder: (BuildContext context, int index) {
-                final RiderWalletLedgerEntry entry = entries[index];
-                final DateTime? created = entry.createdAt?.toLocal();
-                final String when = created == null
-                    ? ''
-                    : '${dateFormat.format(created)} · ${timeFormat.format(created)}';
-                return RiderGlassCard(
-                  child: InkWell(
-                    onTap: () => _showEntry(context, entry, currency, when),
-                    borderRadius: RiderRadius.xlAll,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 64),
-                      child: Row(
-                        children: [
-                          Icon(
-                            entry.isCredit
-                                ? Icons.south_west_rounded
-                                : Icons.north_east_rounded,
-                            color: entry.isCredit
-                                ? RiderColors.success
-                                : RiderColors.error,
-                          ),
-                          const SizedBox(width: RiderSpacing.md),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  ledgerEntryTitle(entry.entryType),
-                                  style: RiderTextStyles.bodyMedium,
-                                ),
-                                Text(
-                                  when.isEmpty
-                                      ? (entry.isCredit ? 'Credit' : 'Debit')
-                                      : '$when · ${entry.isCredit ? 'Credit' : 'Debit'}',
-                                  style: RiderTextStyles.caption,
-                                ),
-                              ],
-                            ),
-                          ),
-                          Text(
-                            currency.format(entry.amount),
-                            style: RiderTextStyles.bodyMedium.copyWith(
-                              color: entry.isCredit
-                                  ? RiderColors.success
-                                  : RiderColors.error,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
+              children: [
+                if (tripRows.isNotEmpty) ...[
+                  Text('Trips', style: RiderTextStyles.bodyMedium),
+                  const SizedBox(height: RiderSpacing.sm),
+                  for (final RiderEarningRow trip in tripRows.reversed)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: RiderSpacing.md),
+                      child: _TripRow(
+                        trip: trip,
+                        onTap: () => context.push(
+                          '${RiderRoutes.pastOrder}?id=${trip.orderId}',
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: RiderSpacing.sm),
+                  Text('Wallet', style: RiderTextStyles.bodyMedium),
+                  const SizedBox(height: RiderSpacing.sm),
+                ],
+                if (entries.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: RiderSpacing.md),
+                    child: Text('No wallet credits or debits yet.'),
+                  ),
+                for (var index = 0; index < entries.length; index++)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == entries.length - 1 ? 0 : RiderSpacing.md,
+                    ),
+                    child: _WalletRow(
+                      entry: entries[index],
+                      dateFormat: dateFormat,
+                      timeFormat: timeFormat,
+                      onTap: () => _showEntry(
+                        context,
+                        entries[index],
+                        entries[index].createdAt?.toLocal() == null
+                            ? ''
+                            : '${dateFormat.format(entries[index].createdAt!.toLocal())} · ${timeFormat.format(entries[index].createdAt!.toLocal())}',
                       ),
                     ),
                   ),
-                );
-              },
+              ],
             ),
           );
         },
@@ -158,7 +156,6 @@ class RiderLedgerScreen extends ConsumerWidget {
   void _showEntry(
     BuildContext context,
     RiderWalletLedgerEntry entry,
-    NumberFormat currency,
     String when,
   ) {
     final String? orderId = entry.relatedOrderId;
@@ -189,7 +186,7 @@ class RiderLedgerScreen extends ConsumerWidget {
                 style: RiderTextStyles.caption,
               ),
               const SizedBox(height: RiderSpacing.sm),
-              Text(currency.format(entry.amount), style: RiderTextStyles.title),
+              Text(formatInr(entry.amount), style: RiderTextStyles.title),
               if (when.isNotEmpty) ...[
                 const SizedBox(height: RiderSpacing.sm),
                 Text(when, style: RiderTextStyles.caption),
@@ -219,6 +216,119 @@ class RiderLedgerScreen extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _TripRow extends StatelessWidget {
+  const _TripRow({required this.trip, required this.onTap});
+
+  final RiderEarningRow trip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final String title =
+        trip.displayId.trim().isEmpty ? trip.orderId : trip.displayId.trim();
+    final String? outcome = earningSettlementLabel(trip.settlementStatus);
+    return RiderGlassCard(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: RiderRadius.xlAll,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 64),
+          child: Row(
+            children: [
+              const Icon(Icons.receipt_long_rounded, color: RiderColors.primary),
+              const SizedBox(width: RiderSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: RiderTextStyles.bodyMedium),
+                    Text(
+                      outcome ?? 'Earning',
+                      style: RiderTextStyles.caption,
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                formatInr(trip.riderAmount),
+                style: RiderTextStyles.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WalletRow extends StatelessWidget {
+  const _WalletRow({
+    required this.entry,
+    required this.dateFormat,
+    required this.timeFormat,
+    required this.onTap,
+  });
+
+  final RiderWalletLedgerEntry entry;
+  final DateFormat dateFormat;
+  final DateFormat timeFormat;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime? created = entry.createdAt?.toLocal();
+    final String when = created == null
+        ? ''
+        : '${dateFormat.format(created)} · ${timeFormat.format(created)}';
+    return RiderGlassCard(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: RiderRadius.xlAll,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 64),
+          child: Row(
+            children: [
+              Icon(
+                entry.isCredit
+                    ? Icons.south_west_rounded
+                    : Icons.north_east_rounded,
+                color: entry.isCredit ? RiderColors.success : RiderColors.error,
+              ),
+              const SizedBox(width: RiderSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ledgerEntryTitle(entry.entryType),
+                      style: RiderTextStyles.bodyMedium,
+                    ),
+                    Text(
+                      when.isEmpty
+                          ? (entry.isCredit ? 'Credit' : 'Debit')
+                          : '$when · ${entry.isCredit ? 'Credit' : 'Debit'}',
+                      style: RiderTextStyles.caption,
+                    ),
+                  ],
+                ),
+              ),
+              Text(
+                formatInr(entry.amount),
+                style: RiderTextStyles.bodyMedium.copyWith(
+                  color: entry.isCredit ? RiderColors.success : RiderColors.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

@@ -30,6 +30,13 @@ import {
   WalletCodRepository,
 } from './wallet-cod.repository';
 import {
+  rechargeToResume,
+  RiderMoneyStatus,
+  WALLET_SUSPEND_FLOOR,
+  walletSuspended,
+  withdrawalBlocked,
+} from './wallet-suspension';
+import {
   cashfreeBeneficiaryName,
   decryptPayoutInstrument,
   encryptPayoutInstrument,
@@ -81,6 +88,7 @@ export class WalletCodService {
         auth.profileId,
         finance.cod.cod_due,
         finance.threshold,
+        finance.wallet.available_balance,
         tx,
       );
       return this.serializeWallet(auth.profileId, finance);
@@ -107,6 +115,7 @@ export class WalletCodService {
         auth.profileId,
         finance.cod.cod_due,
         finance.threshold,
+        finance.wallet.available_balance,
         tx,
       );
       return this.serializeCod(auth.profileId, finance, status, tx);
@@ -159,6 +168,7 @@ export class WalletCodService {
         riderProfileId,
         finance.cod.cod_due,
         finance.threshold,
+        finance.wallet.available_balance,
         tx,
       );
       return this.serializeCod(riderProfileId, finance, status, tx);
@@ -327,6 +337,14 @@ export class WalletCodService {
       requestHash: hashRequest({ amount, payout_method: payoutMethod }),
       work: async (tx) => {
         const finance = await this.repo.lockAccounts(auth.profileId, tx);
+        const balance = formatInr(finance.wallet.available_balance);
+        if (withdrawalBlocked(balance)) {
+          throw new ApiError(
+            ErrorCodes.WALLET_INSUFFICIENT,
+            'Withdrawal is not available while the wallet balance is negative',
+            409,
+          );
+        }
         if (await this.repo.exceeds(amount, finance.wallet.available_balance, tx)) {
           throw new ApiError(
             ErrorCodes.WALLET_INSUFFICIENT,
@@ -1171,19 +1189,31 @@ export class WalletCodService {
     if (lockedOrder.canonical_status === 'DELIVERED') {
       if (await this.repo.isPositive(cash, db)) {
         const targetDue = await this.repo.companyDueFromCash(cash, riderAmount, db);
-        const posted = await this.repo.postedCashCompanyShare(
+        const legacyCod = await this.repo.postedCashCompanyShare(
           finance.cod.cod_account_id,
           order.order_id,
           db,
         );
-        if (await this.repo.exceeds(targetDue, posted, db)) {
-          const delta = await this.repo.subtract(targetDue, posted, db);
-          await this.postCodIncrease(finance, {
-            amount: delta,
-            source: 'CASH_COMPANY_SHARE',
-            relatedOrderId: order.order_id,
-            sourceTxnId: `cash-cod:${order.order_id}:${posted}:${delta}`,
-          }, db);
+        const alreadyDebited = await this.repo.hasWalletCompanyShareForOrder(
+          finance.wallet.wallet_account_id,
+          order.order_id,
+          db,
+        );
+        if (
+          !(await this.repo.isPositive(legacyCod, db)) &&
+          !alreadyDebited &&
+          (await this.repo.isPositive(targetDue, db))
+        ) {
+          try {
+            await this.postCashCompanyDebit(finance, {
+              amount: targetDue,
+              relatedOrderId: order.order_id,
+            }, db);
+          } catch (err) {
+            if (!isUniqueViolation(err, 'wallet_company_share_order_unique')) {
+              throw err;
+            }
+          }
         }
       } else if (await this.digitalEarningReady(plan, riderAmount, order.order_id, db)) {
         const alreadyPosted =
@@ -1239,6 +1269,7 @@ export class WalletCodService {
       order.rider_profile_id,
       latest.cod.cod_due,
       latest.threshold,
+      latest.wallet.available_balance,
       db,
     );
     await this.walletNotifications.onOperationalStatusChange(
@@ -1290,8 +1321,17 @@ export class WalletCodService {
       riderProfileId,
       finance.cod.cod_due,
       finance.threshold,
+      finance.wallet.available_balance,
       db,
     );
+    const balance = formatInr(finance.wallet.available_balance);
+    if (status === 'SUSPENDED_FOR_WALLET' || walletSuspended(balance)) {
+      throw new ApiError(
+        ErrorCodes.RIDER_NOT_ELIGIBLE,
+        `Wallet balance is ${balance}. Recharge at least ${rechargeToResume(balance)} to resume service.`,
+        409,
+      );
+    }
     if (
       status === 'SUSPENDED_FOR_COD' ||
       (await this.repo.isAtLeast(finance.cod.cod_due, finance.threshold, db))
@@ -1302,6 +1342,10 @@ export class WalletCodService {
         409,
       );
     }
+  }
+
+  async assertCanAcceptService(riderProfileId: string): Promise<void> {
+    await this.postgres.transaction((db) => this.assertNotSuspended(riderProfileId, db));
   }
 
   private async applyInflow(
@@ -1447,6 +1491,7 @@ export class WalletCodService {
       input.riderProfileId,
       codDue,
       finance.threshold,
+      walletBalance,
       db,
     );
     const ledgerNet = await this.repo.walletLedgerNet(
@@ -1503,11 +1548,43 @@ export class WalletCodService {
       cod_due: codDue,
       settled_against_cod: split.settle,
       wallet_credited: creditNeeded ? split.remainder : formatInr('0'),
-      suspended: status === 'SUSPENDED_FOR_COD',
+      suspended: status !== 'CLEAR',
       suspend_threshold: formatInr(finance.threshold),
       wallet_ledger_id: walletLedgerId,
       cod_ledger_id: codLedgerId,
     };
+  }
+
+  private async postCashCompanyDebit(
+    finance: LockedRiderFinance,
+    input: { amount: string; relatedOrderId: string },
+    db: Queryable,
+  ): Promise<void> {
+    const balance = await this.repo.debitWalletAllowingNegative(
+      finance.wallet.wallet_account_id,
+      input.amount,
+      db,
+    );
+    await this.repo.insertWalletLedger(
+      {
+        walletAccountId: finance.wallet.wallet_account_id,
+        direction: 'DEBIT',
+        amount: input.amount,
+        entryType: 'COMPANY_SHARE',
+        relatedOrderId: input.relatedOrderId,
+        actorType: 'SYSTEM',
+        actorProfileId: null,
+      },
+      db,
+    );
+    const net = await this.repo.walletLedgerNet(finance.wallet.wallet_account_id, db);
+    if (net !== balance) {
+      throw new ApiError(
+        ErrorCodes.INTERNAL_ERROR,
+        'Wallet balance does not match its ledger',
+        500,
+      );
+    }
   }
 
   private async postCodIncrease(
@@ -1606,7 +1683,7 @@ export class WalletCodService {
       if (isCheckViolation(err)) {
         throw new ApiError(
           ErrorCodes.WALLET_INSUFFICIENT,
-          'Wallet or COD Due cannot become negative',
+          'COD Due cannot become negative',
           409,
         );
       }
@@ -1625,14 +1702,11 @@ export class WalletCodService {
   private async serializeCod(
     riderProfileId: string,
     finance: LockedRiderFinance,
-    status: 'CLEAR' | 'SUSPENDED_FOR_COD',
+    status: RiderMoneyStatus,
     db: Queryable,
   ) {
-    const suspended = await this.repo.isAtLeast(
-      finance.cod.cod_due,
-      finance.threshold,
-      db,
-    );
+    const suspended = status !== 'CLEAR';
+    void db;
     return {
       rider_profile_id: riderProfileId,
       cod_account_id: finance.cod.cod_account_id,
@@ -1640,6 +1714,8 @@ export class WalletCodService {
       suspend_threshold: formatInr(finance.threshold),
       suspended,
       cod_operational_status: status,
+      wallet_suspend_floor: WALLET_SUSPEND_FLOOR,
+      recharge_to_resume: rechargeToResume(formatInr(finance.wallet.available_balance)),
     };
   }
 

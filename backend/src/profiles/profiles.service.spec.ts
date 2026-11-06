@@ -94,6 +94,35 @@ describe('ProfilesService rider availability', () => {
     expect(result.online_status).toBe('ONLINE');
   });
 
+  it('blocks going online when the wallet is financially suspended', async () => {
+    const walletCod = {
+      assertCanAcceptService: jest.fn(async () => {
+        throw new ApiError(
+          'RIDER_NOT_ELIGIBLE',
+          'Wallet balance is -108.60. Recharge at least 8.61 to resume service.',
+          409,
+        );
+      }),
+    };
+    const gated = new ProfilesService(
+      identities as unknown as IdentityRepository,
+      presenceConfig(),
+      walletCod as never,
+    );
+    identities.findRiderGate.mockResolvedValue({
+      rider_profile_id: riderId,
+      approval_status: 'APPROVED',
+      online_status: 'OFFLINE',
+      deactivated_at: null,
+    });
+
+    await expect(gated.setRiderAvailability(riderAuth(), true)).rejects.toMatchObject({
+      code: 'RIDER_NOT_ELIGIBLE',
+      message: 'Wallet balance is -108.60. Recharge at least 8.61 to resume service.',
+    });
+    expect(identities.updateRiderOnlineStatus).not.toHaveBeenCalled();
+  });
+
   it('refuses a deactivated rider', async () => {
     identities.findRiderGate.mockResolvedValue({
       rider_profile_id: riderId,

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
@@ -44,6 +45,9 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
   Widget build(BuildContext context) {
     final balance = ref.watch(riderWalletBalanceProvider);
     final codDue = ref.watch(riderCodDueProvider);
+    final String moneyStatus = ref.watch(riderOperationalStatusProvider);
+    final double rechargeToResume = ref.watch(riderRechargeToResumeProvider);
+    final double walletFloor = ref.watch(riderWalletSuspendFloorProvider);
     final last = ref.watch(riderLastSettlementProvider);
     final currency = NumberFormat.currency(
       locale: 'en_IN',
@@ -79,7 +83,11 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
                 ),
                 const SizedBox(height: RiderSpacing.sm),
                 Text(
-                  'Recharge first clears COD Due. Wallet never goes below ₹0.',
+                  moneyStatus == 'SUSPENDED_FOR_WALLET'
+                      ? 'Service is paused. Balance ${currency.format(balance)}. Add at least ${currency.format(rechargeToResume)} to go above ${currency.format(walletFloor)}.'
+                      : moneyStatus == 'CLEAR'
+                          ? 'Service is active. A cash trip debits the company share here, so this balance can be negative.'
+                          : 'Service is paused until COD Due is cleared. A recharge is applied to COD Due first.',
                   style: RiderTextStyles.caption,
                 ),
                 if (last != null && last.settledAgainstCod > 0) ...[
@@ -120,11 +128,14 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
                         .read(riderSessionProvider.notifier)
                         .refreshWallet();
                   }
-                  for (var i = 0; i < feedback.delayedRefreshes; i++) {
-                    await Future<void>.delayed(const Duration(seconds: 2));
-                    await ref
-                        .read(riderSessionProvider.notifier)
-                        .refreshWallet();
+                  final int later = feedback.delayedRefreshes;
+                  if (later > 0) {
+                    unawaited(refreshWalletAfterTopUp(
+                      times: later,
+                      refresh: () => ref
+                          .read(riderSessionProvider.notifier)
+                          .refreshWallet(),
+                    ));
                   }
                 } on ApiException catch (error) {
                   if (context.mounted) {
@@ -155,27 +166,19 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
               upiSaved: bank.upiOnServer,
               bankSaved: bank.bankOnServer,
               onWithdraw: (amount, payoutMethod) async {
-                try {
-                  await ref.read(walletApiProvider).withdraw(
-                        amount: amount,
-                        payoutMethod: payoutMethod,
-                      );
-                  await ref.read(riderSessionProvider.notifier).refreshWallet();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Withdrawal requested. Funds are held until processed.',
-                        ),
+                await ref.read(walletApiProvider).withdraw(
+                      amount: amount,
+                      payoutMethod: payoutMethod,
+                    );
+                await ref.read(riderSessionProvider.notifier).refreshWallet();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Withdrawal requested. Funds are held until processed.',
                       ),
-                    );
-                  }
-                } on ApiException catch (error) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(error.message)),
-                    );
-                  }
+                    ),
+                  );
                 }
               },
               ),
@@ -273,6 +276,7 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
   String? _error;
   String? _payoutMethod;
   bool _submitting = false;
+  bool _confirming = false;
 
   @override
   void initState() {
@@ -316,6 +320,13 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
       });
       return;
     }
+    if (widget.onWithdraw != null && !_confirming) {
+      setState(() {
+        _confirming = true;
+        _error = null;
+      });
+      return;
+    }
     setState(() => _submitting = true);
     var closeSheet = false;
     try {
@@ -325,6 +336,18 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
         await widget.onConfirm!(amount);
       }
       closeSheet = true;
+    } on ApiException catch (error) {
+      if (mounted) {
+        setState(() => _error = error.message);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _error = widget.onWithdraw != null
+              ? 'Withdrawal could not be completed.'
+              : 'That request could not be completed.';
+        });
+      }
     } finally {
       if (!closeSheet && mounted) {
         setState(() => _submitting = false);
@@ -352,57 +375,113 @@ class _WalletAmountSheetState extends State<_WalletAmountSheet> {
         children: [
           Text(widget.title, style: RiderTextStyles.title),
           const SizedBox(height: RiderSpacing.sm),
-          Text(
-            'Payments are confirmed by the server. COD Due is settled first on credit.',
-            style: RiderTextStyles.caption,
-          ),
-          const SizedBox(height: RiderSpacing.lg),
-          RiderTextField(
-            controller: _controller,
-            focusNode: _amountFocus,
-            label: 'Amount (₹)',
-            hint: '500',
-            prefixIcon: Icons.currency_rupee_rounded,
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-              signed: false,
+          if (_confirming && widget.onWithdraw != null) ...[
+            Text(
+              'This withdrawal will be processed. The amount stays held until it is paid out.',
+              style: RiderTextStyles.caption,
             ),
-            textInputAction: TextInputAction.done,
-            onTap: () => _amountFocus.requestFocus(),
-            errorText: _error,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-            ],
-          ),
-          if (widget.onWithdraw != null) ...[
             const SizedBox(height: RiderSpacing.lg),
-            Text('Payout method', style: RiderTextStyles.caption),
-            const SizedBox(height: RiderSpacing.sm),
-            Row(
-              children: [
-                ChoiceChip(
-                  label: const Text('UPI'),
-                  selected: _payoutMethod == 'UPI',
-                  onSelected: _submitting
-                      ? null
-                      : (_) => setState(() => _payoutMethod = 'UPI'),
-                ),
-                const SizedBox(width: RiderSpacing.sm),
-                ChoiceChip(
-                  label: const Text('Bank'),
-                  selected: _payoutMethod == 'BANK',
-                  onSelected: _submitting
-                      ? null
-                      : (_) => setState(() => _payoutMethod = 'BANK'),
-                ),
+            _ConfirmLine(label: 'Requested withdrawal', value: formatInr(double.parse(_controller.text.trim()))),
+            if (widget.maxAmount != null)
+              _ConfirmLine(label: 'Available balance', value: formatInr(widget.maxAmount!)),
+            _ConfirmLine(label: 'Withdrawal charge', value: formatInr(0)),
+            Text(
+              'No withdrawal charge.',
+              style: RiderTextStyles.caption,
+            ),
+            _ConfirmLine(
+              label: 'Final payable',
+              value: formatInr(double.parse(_controller.text.trim())),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: RiderSpacing.sm),
+              Text(_error!, style: RiderTextStyles.caption.copyWith(color: RiderColors.error)),
+            ],
+          ] else ...[
+            Text(
+              'Payments are confirmed by the server. COD Due is settled first on credit.',
+              style: RiderTextStyles.caption,
+            ),
+            const SizedBox(height: RiderSpacing.lg),
+            RiderTextField(
+              controller: _controller,
+              focusNode: _amountFocus,
+              label: 'Amount (₹)',
+              hint: '500',
+              prefixIcon: Icons.currency_rupee_rounded,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+                signed: false,
+              ),
+              textInputAction: TextInputAction.done,
+              onTap: () => _amountFocus.requestFocus(),
+              errorText: _error,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
               ],
             ),
+            if (widget.onWithdraw != null) ...[
+              const SizedBox(height: RiderSpacing.lg),
+              Text('Payout method', style: RiderTextStyles.caption),
+              const SizedBox(height: RiderSpacing.sm),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('UPI'),
+                    selected: _payoutMethod == 'UPI',
+                    onSelected: _submitting
+                        ? null
+                        : (_) => setState(() => _payoutMethod = 'UPI'),
+                  ),
+                  const SizedBox(width: RiderSpacing.sm),
+                  ChoiceChip(
+                    label: const Text('Bank'),
+                    selected: _payoutMethod == 'BANK',
+                    onSelected: _submitting
+                        ? null
+                        : (_) => setState(() => _payoutMethod = 'BANK'),
+                  ),
+                ],
+              ),
+            ],
           ],
           const SizedBox(height: RiderSpacing.lg),
+          if (_confirming && widget.onWithdraw != null && !_submitting)
+            TextButton(
+              onPressed: () => setState(() {
+                _confirming = false;
+                _error = null;
+              }),
+              child: const Text('Edit amount'),
+            ),
           RiderPrimaryButton(
-            label: _submitting ? 'Please wait…' : widget.confirmLabel,
+            label: _submitting
+                ? 'Please wait…'
+                : _confirming && widget.onWithdraw != null
+                    ? 'Confirm withdrawal'
+                    : widget.confirmLabel,
             onPressed: _submitting ? null : _submit,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConfirmLine extends StatelessWidget {
+  const _ConfirmLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: RiderTextStyles.caption)),
+          Text(value, style: RiderTextStyles.bodyMedium),
         ],
       ),
     );

@@ -120,7 +120,7 @@ export default function RiderDetail() {
             id: entry.wallet_ledger_id,
             date: entry.created_at,
             time: '',
-            type: entry.direction === 'CREDIT' ? 'Credit' : 'Debit',
+            type: entry.entry_type || (entry.direction === 'CREDIT' ? 'Credit' : 'Debit'),
             amount: Number(entry.amount || 0),
             status: 'Success',
             method: 'Wallet',
@@ -393,6 +393,9 @@ export default function RiderDetail() {
             <div className="flex justify-between"><dt className="text-ink-muted">Score</dt><dd>{rider.score != null ? rider.score : 'N/A'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Earnings</dt><dd>{wallet ? formatINR(wallet.available_balance) : 'N/A'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">Wallet</dt><dd>{wallet ? formatINR(wallet.available_balance) : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Financial status</dt><dd>{cod?.cod_operational_status === 'SUSPENDED_FOR_WALLET' ? 'Financially suspended' : cod?.cod_operational_status === 'SUSPENDED_FOR_COD' ? 'Suspended for COD Due' : cod?.cod_operational_status === 'CLEAR' ? 'Active' : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Wallet floor</dt><dd>{cod?.wallet_suspend_floor != null ? formatINR(cod.wallet_suspend_floor) : 'N/A'}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-muted">Recharge to resume</dt><dd>{cod?.recharge_to_resume != null ? formatINR(cod.recharge_to_resume) : 'N/A'}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-muted">COD Due</dt><dd>{cod ? formatINR(cod.cod_due) : 'N/A'}</dd></div>
             <StatusBadge status={rider.status} />
           </dl>
@@ -540,7 +543,7 @@ export default function RiderDetail() {
       <section className="grid gap-4 lg:grid-cols-2">
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Earnings</h3>
-          {pay.length ? pay.map((item) => <p key={item.id} className="rounded-2xl bg-white/70 px-3 py-3 text-sm">{item.date}: {formatINR(item.riderEarning || item.tripFare)} · {item.orders} order</p>) : <p className="text-sm text-ink-muted">No frozen earnings for this rider yet.</p>}
+          {pay.length ? pay.map((item) => <p key={item.id} className="rounded-2xl bg-white/70 px-3 py-3 text-sm">{item.id}: fare {formatINR(item.tripFare)} · partner {formatINR(item.riderEarning)} · company {formatINR(item.companyCommission)} · cash {formatINR(item.cashCollected)} · wallet debit {formatINR(item.walletCompanyDebit ? -Number(item.walletCompanyDebit) : 0)} · wallet credit {formatINR(item.walletCredited)} · {item.settlementState || '—'}</p>) : <p className="text-sm text-ink-muted">No frozen earnings for this rider yet.</p>}
         </GlassCard>
         <GlassCard>
           <h3 className="mb-3 text-lg font-semibold">Performance</h3>

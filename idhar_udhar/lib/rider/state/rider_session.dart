@@ -310,6 +310,12 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
       _ref.read(riderWalletBalanceProvider.notifier).state =
           wallet.availableBalance;
       _ref.read(riderCodDueProvider.notifier).state = cod.codDue;
+      _ref.read(riderOperationalStatusProvider.notifier).state =
+          cod.operationalStatus ?? 'CLEAR';
+      _ref.read(riderRechargeToResumeProvider.notifier).state =
+          cod.rechargeToResume;
+      _ref.read(riderWalletSuspendFloorProvider.notifier).state =
+          cod.walletSuspendFloor;
     } catch (_) {
       // Keep last displayed values if the request fails.
     }
@@ -356,6 +362,8 @@ class RiderSessionNotifier extends StateNotifier<RiderSessionState> {
                 timeLabel: row.frozenAt == null
                     ? ''
                     : stamp.format(row.frozenAt!.toLocal()),
+                orderId: row.orderId,
+                settlementLabel: earningSettlementLabel(row.settlementStatus),
               ),
             )
             .toList(growable: false),
@@ -519,6 +527,7 @@ final riderDeliveryHistoryProvider = Provider<List<RecentActivityItem>>((ref) {
         pickup: '—',
         drop: '—',
         amount: row.amount,
+        status: row.settlementLabel ?? 'Completed',
         timeLabel: row.timeLabel,
       ),
   ];

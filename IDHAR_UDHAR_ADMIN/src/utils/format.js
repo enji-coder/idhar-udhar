@@ -1,12 +1,14 @@
 export function formatINR(value) {
-  return `₹${Number(value || 0).toLocaleString('en-IN')}`;
+  return formatINRExact(value);
 }
 
 export function formatINRExact(value, digits = 2) {
-  return `₹${Number(value || 0).toLocaleString('en-IN', {
+  const amount = Number(value || 0);
+  const text = Math.abs(amount).toLocaleString('en-IN', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
-  })}`;
+  });
+  return amount < 0 ? `-₹${text}` : `₹${text}`;
 }
 
 export function formatCompactINR(value) {

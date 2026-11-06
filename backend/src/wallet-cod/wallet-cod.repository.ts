@@ -1,4 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import {
+  classifyEarningSettlement,
+  earningSettlementState,
+} from './earning-settlement';
+import {
+  operationalStatusFor,
+  RiderMoneyStatus,
+  WALLET_SUSPEND_FLOOR,
+} from './wallet-suspension';
 import { formatInr } from '../fare/money';
 import { Queryable } from '../database/queryable';
 import {
@@ -70,6 +79,11 @@ export type RiderEarningRow = {
   rider_percentage: string;
   company_commission_percentage: string;
   frozen_at: Date;
+  cash_collected: string;
+  wallet_credited: string;
+  cod_applied: string;
+  company_share_posted: string;
+  wallet_company_debit: string;
 };
 
 export type WalletActorType = 'CUSTOMER' | 'RIDER' | 'ADMIN' | 'WEBHOOK' | 'SYSTEM';
@@ -82,7 +96,8 @@ export type WalletEntryType =
   | 'ADJUSTMENT'
   | 'CANCELLATION_SHARE'
   | 'RESEND_EARNING'
-  | 'REVERSAL';
+  | 'REVERSAL'
+  | 'COMPANY_SHARE';
 
 export type CodSource =
   | 'CASH_COMPANY_SHARE'
@@ -392,6 +407,27 @@ export class WalletCodRepository {
     return formatInr(result.rows[0].available_balance);
   }
 
+  /**
+   * Company-share debit. The balance is allowed to become negative.
+   * Withdrawals keep debitWallet, which still requires a sufficient balance.
+   */
+  async debitWalletAllowingNegative(
+    walletAccountId: string,
+    amount: string,
+    db: Queryable,
+  ): Promise<string> {
+    const result = await db.query<{ available_balance: string }>(
+      `
+      UPDATE rider_wallet_accounts
+      SET available_balance = available_balance - $2::numeric(12,2)
+      WHERE wallet_account_id = $1
+      RETURNING available_balance::text AS available_balance
+      `,
+      [walletAccountId, amount],
+    );
+    return formatInr(result.rows[0].available_balance);
+  }
+
   async increaseCod(
     codAccountId: string,
     amount: string,
@@ -529,9 +565,9 @@ export class WalletCodRepository {
   async operationalStatus(
     riderProfileId: string,
     db: Queryable,
-  ): Promise<'CLEAR' | 'SUSPENDED_FOR_COD'> {
+  ): Promise<RiderMoneyStatus> {
     const result = await db.query<{
-      cod_operational_status: 'CLEAR' | 'SUSPENDED_FOR_COD';
+      cod_operational_status: RiderMoneyStatus;
     }>(
       `
       SELECT cod_operational_status
@@ -547,10 +583,15 @@ export class WalletCodRepository {
     riderProfileId: string,
     codDue: string,
     threshold: string,
+    walletBalance: string,
     db: Queryable,
-  ): Promise<'CLEAR' | 'SUSPENDED_FOR_COD'> {
-    const suspended = await this.isAtLeast(codDue, threshold, db);
-    const status = suspended ? 'SUSPENDED_FOR_COD' : 'CLEAR';
+  ): Promise<RiderMoneyStatus> {
+    const status = operationalStatusFor({
+      walletBalance: formatInr(walletBalance),
+      codDue: formatInr(codDue),
+      codThreshold: formatInr(threshold),
+      floor: WALLET_SUSPEND_FLOOR,
+    });
     await db.query(
       `
       UPDATE rider_profiles
@@ -762,6 +803,27 @@ export class WalletCodRepository {
     return result.rows[0].ok;
   }
 
+  async hasWalletCompanyShareForOrder(
+    walletAccountId: string,
+    orderId: string,
+    db: Queryable,
+  ): Promise<boolean> {
+    const result = await db.query<{ ok: boolean }>(
+      `
+      SELECT EXISTS(
+        SELECT 1
+        FROM wallet_ledger_entries
+        WHERE wallet_account_id = $1
+          AND related_order_id = $2
+          AND entry_type = 'COMPANY_SHARE'
+          AND direction = 'DEBIT'
+      ) AS ok
+      `,
+      [walletAccountId, orderId],
+    );
+    return result.rows[0].ok;
+  }
+
   async hasDigitalEarningSettlement(
     codAccountId: string,
     sourceTxnId: string,
@@ -799,9 +861,68 @@ export class WalletCodRepository {
         s.profit_amount::text AS profit_amount,
         s.rider_percentage::text AS rider_percentage,
         s.company_commission_percentage::text AS company_commission_percentage,
-        s.frozen_at
+        s.frozen_at,
+        COALESCE(cash.cash, 0)::numeric(12,2)::text AS cash_collected,
+        COALESCE(wallet_earn.credited, 0)::numeric(12,2)::text AS wallet_credited,
+        COALESCE(cod_apply.applied, 0)::numeric(12,2)::text AS cod_applied,
+        COALESCE(cod_cash.posted, 0)::numeric(12,2)::text AS company_share_posted,
+        COALESCE(wallet_company.debited, 0)::numeric(12,2)::text AS wallet_company_debit
       FROM order_finance_snapshots s
       JOIN orders o ON o.order_id = s.order_id
+      LEFT JOIN rider_wallet_accounts w
+        ON w.rider_profile_id = o.rider_profile_id
+      LEFT JOIN rider_cod_accounts c
+        ON c.rider_profile_id = o.rider_profile_id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(
+          CASE
+            WHEN method = 'CASH' AND direction = 'CHARGE' AND transaction_status = 'PAID'
+              THEN amount
+            WHEN method = 'CASH' AND direction = 'REFUND' AND transaction_status = 'REFUNDED'
+              THEN -amount
+            ELSE 0
+          END
+        ), 0) AS cash
+        FROM payment_transactions
+        WHERE order_id = s.order_id
+          AND charge_purpose = 'BOOKING'
+      ) cash ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(
+          CASE WHEN direction = 'CREDIT' THEN amount ELSE -amount END
+        ), 0) AS credited
+        FROM wallet_ledger_entries
+        WHERE wallet_account_id = w.wallet_account_id
+          AND related_order_id = s.order_id
+          AND entry_type = 'EARNING'
+      ) wallet_earn ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(
+          CASE WHEN direction = 'DECREASE' THEN amount ELSE -amount END
+        ), 0) AS applied
+        FROM cod_ledger_entries
+        WHERE cod_account_id = c.cod_account_id
+          AND related_order_id = s.order_id
+          AND source = 'DIGITAL_EARNING_SETTLEMENT'
+      ) cod_apply ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(
+          CASE WHEN direction = 'INCREASE' THEN amount ELSE -amount END
+        ), 0) AS posted
+        FROM cod_ledger_entries
+        WHERE cod_account_id = c.cod_account_id
+          AND related_order_id = s.order_id
+          AND source = 'CASH_COMPANY_SHARE'
+      ) cod_cash ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(
+          CASE WHEN direction = 'DEBIT' THEN amount ELSE -amount END
+        ), 0) AS debited
+        FROM wallet_ledger_entries
+        WHERE wallet_account_id = w.wallet_account_id
+          AND related_order_id = s.order_id
+          AND entry_type = 'COMPANY_SHARE'
+      ) wallet_company ON true
       WHERE o.rider_profile_id = $1
         AND s.snapshot_kind = 'ORIGINAL'
       ORDER BY s.frozen_at ASC, s.finance_snapshot_id ASC
@@ -1855,13 +1976,25 @@ export function serializeCodLedger(row: CodLedgerRow) {
 }
 
 export function serializeEarning(row: RiderEarningRow) {
+  const tripFare = formatInr(row.trip_fare);
+  const riderAmount = formatInr(row.rider_amount);
+  const cashCollected = formatInr(row.cash_collected);
+  const walletCredited = formatInr(row.wallet_credited);
+  const codApplied = formatInr(row.cod_applied);
+  const companySharePosted = formatInr(row.company_share_posted);
+  const companyShareWalletDebit = formatInr(row.wallet_company_debit);
+  const settlementStatus = classifyEarningSettlement({
+    cashCollected,
+    walletCredited,
+    codApplied,
+  });
   return {
     finance_snapshot_id: row.finance_snapshot_id,
     order_id: row.order_id,
     display_id: row.display_id,
     snapshot_kind: row.snapshot_kind,
-    trip_fare: formatInr(row.trip_fare),
-    rider_amount: formatInr(row.rider_amount),
+    trip_fare: tripFare,
+    rider_amount: riderAmount,
     company_commission_amount: formatInr(row.company_commission_amount),
     operational_cost_amount: formatInr(row.operational_cost_amount),
     profit_amount: formatInr(row.profit_amount),
@@ -1869,5 +2002,20 @@ export function serializeEarning(row: RiderEarningRow) {
     company_commission_percentage: formatInr(row.company_commission_percentage),
     frozen_at: row.frozen_at.toISOString(),
     tax: formatInr('0'),
+    settlement_status: settlementStatus,
+    settlement_state: earningSettlementState({
+      status: settlementStatus,
+      riderAmount,
+      cashCollected,
+      walletCredited,
+      codApplied,
+      companySharePosted,
+      companyShareWalletDebit,
+    }),
+    cash_collected: cashCollected,
+    wallet_credited_amount: walletCredited,
+    cod_applied_amount: codApplied,
+    company_share_posted: companySharePosted,
+    wallet_company_debit: companyShareWalletDebit,
   };
 }

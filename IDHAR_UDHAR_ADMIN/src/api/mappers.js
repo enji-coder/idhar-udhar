@@ -250,6 +250,11 @@ export function mapEarning(row) {
       riderPercentage: money(row.rider_percentage),
       companyCommissionPercentage: money(row.company_commission_percentage),
     },
+    settlementStatus: row.settlement_status || null,
+    settlementState: row.settlement_state || null,
+    cashCollected: money(row.cash_collected),
+    walletCredited: money(row.wallet_credited_amount),
+    walletCompanyDebit: money(row.wallet_company_debit),
     source: 'api',
   };
 }

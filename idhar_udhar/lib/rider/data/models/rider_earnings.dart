@@ -62,11 +62,15 @@ class RecentEarningItem {
     required this.label,
     required this.amount,
     required this.timeLabel,
+    this.orderId = '',
+    this.settlementLabel,
   });
 
   final String label;
   final double amount;
   final String timeLabel;
+  final String orderId;
+  final String? settlementLabel;
 }
 
 class VerificationStep {

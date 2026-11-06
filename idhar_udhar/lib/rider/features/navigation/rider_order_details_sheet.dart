@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../data/models/rider_order.dart';
 import '../../theme/rider_colors.dart';
@@ -174,10 +175,7 @@ class RiderOrderDetailsSheet extends StatelessWidget {
     if (!amount.isFinite) {
       return '—';
     }
-    if (amount == amount.roundToDouble()) {
-      return 'Rs ${amount.toStringAsFixed(0)}';
-    }
-    return 'Rs ${amount.toStringAsFixed(2)}';
+    return formatInr(amount);
   }
 
   static String _contact(String name, String phone) {

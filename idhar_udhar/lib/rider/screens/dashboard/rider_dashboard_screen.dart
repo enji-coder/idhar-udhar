@@ -9,6 +9,7 @@ import 'package:idhar_udhar/shared/api/order_mapper.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/maps/maps.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/dummy/dummy_rider_repository.dart';
@@ -277,15 +278,16 @@ class _HomeTab extends ConsumerWidget {
     final online = ref.watch(riderOnlineProvider);
     final wallet = ref.watch(riderWalletBalanceProvider);
     final codDue = ref.watch(riderCodDueProvider);
+    final String moneyStatus = ref.watch(riderOperationalStatusProvider);
+    final double rechargeToResume = ref.watch(riderRechargeToResumeProvider);
+    final double walletFloor = ref.watch(riderWalletSuspendFloorProvider);
     final lastSettlement = ref.watch(riderLastSettlementProvider);
-    final suspended = CodEngine.isSuspended(codDue);
-    final currency =
-        NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-    final walletCurrency = NumberFormat.currency(
-      locale: 'en_IN',
-      symbol: '₹',
-      decimalDigits: 2,
-    );
+    final bool walletHold = moneyStatus == 'SUSPENDED_FOR_WALLET';
+    final bool suspended = walletHold ||
+        moneyStatus == 'SUSPENDED_FOR_COD' ||
+        CodEngine.isSuspended(codDue);
+    final currency = inrFormat;
+    final walletCurrency = inrFormat;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -412,10 +414,13 @@ class _HomeTab extends ConsumerWidget {
                       }
                       if (riderIsSuspended(ref)) {
                         if (!context.mounted) return;
+                        final String hold = ref.read(riderOperationalStatusProvider);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
+                          SnackBar(
                             content: Text(
-                              'Account suspended until COD Due is cleared.',
+                              hold == 'SUSPENDED_FOR_WALLET'
+                                  ? 'Wallet is ${formatInr(ref.read(riderWalletBalanceProvider))}. Add at least ${formatInr(ref.read(riderRechargeToResumeProvider))} to resume.'
+                                  : 'Account suspended until COD Due is cleared.',
                             ),
                           ),
                         );
@@ -474,7 +479,9 @@ class _HomeTab extends ConsumerWidget {
                   elevation: _dashElevation,
                   padding: _dashCardPad,
                   child: Text(
-                    'Account suspended. COD Due is ₹${codDue.toStringAsFixed(0)} (limit ₹100). Add money to clear COD Due before accepting rides.',
+                    walletHold
+                        ? 'Service is paused. Wallet balance is ${formatInr(wallet)} (limit ${formatInr(walletFloor)}). Add at least ${formatInr(rechargeToResume)} with Add Money to resume.'
+                        : 'Account suspended. COD Due is ${formatInr(codDue)} (limit ${formatInr(100)}). Add money to clear COD Due before accepting rides.',
                     style: _d(RiderTextStyles.bodyMedium),
                   ),
                 ),
@@ -536,11 +543,14 @@ class _HomeTab extends ConsumerWidget {
                             .read(riderSessionProvider.notifier)
                             .refreshWallet();
                       }
-                      for (var i = 0; i < feedback.delayedRefreshes; i++) {
-                        await Future<void>.delayed(const Duration(seconds: 2));
-                        await ref
-                            .read(riderSessionProvider.notifier)
-                            .refreshWallet();
+                      final int later = feedback.delayedRefreshes;
+                      if (later > 0) {
+                        unawaited(refreshWalletAfterTopUp(
+                          times: later,
+                          refresh: () => ref
+                              .read(riderSessionProvider.notifier)
+                              .refreshWallet(),
+                        ));
                       }
                     } on ApiException catch (error) {
                       if (context.mounted) {
@@ -562,29 +572,21 @@ class _HomeTab extends ConsumerWidget {
                   upiSaved: bank.upiOnServer,
                   bankSaved: bank.bankOnServer,
                   onWithdraw: (amount, payoutMethod) async {
-                    try {
-                      await ref.read(walletApiProvider).withdraw(
-                            amount: amount,
-                            payoutMethod: payoutMethod,
-                          );
-                      await ref
-                          .read(riderSessionProvider.notifier)
-                          .refreshWallet();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Withdrawal requested. Funds are held until processed.',
-                            ),
+                    await ref.read(walletApiProvider).withdraw(
+                          amount: amount,
+                          payoutMethod: payoutMethod,
+                        );
+                    await ref
+                        .read(riderSessionProvider.notifier)
+                        .refreshWallet();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Withdrawal requested. Funds are held until processed.',
                           ),
-                        );
-                      }
-                    } on ApiException catch (error) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(error.message)),
-                        );
-                      }
+                        ),
+                      );
                     }
                   },
                   ),
@@ -1159,7 +1161,9 @@ class _ActivityRow extends StatelessWidget {
               const SizedBox(height: 4),
               RiderStatusChip(
                 label: item.status,
-                tone: RiderChipTone.success,
+                tone: item.status.startsWith('Pending')
+                    ? RiderChipTone.warning
+                    : RiderChipTone.success,
                 icon: Icons.check_circle_outline_rounded,
               ),
             ],

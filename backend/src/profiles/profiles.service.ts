@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiError } from '../common/errors/api-error';
 import { ErrorCodes } from '../common/errors/error-codes';
@@ -9,12 +9,14 @@ import { AppConfig } from '../config/configuration';
 import { riderMayGoOnline } from '../files/rider-verification';
 import { effectiveRiderOnlineStatus } from './rider-presence';
 import { riderProfileGaps } from './rider-profile-completion';
+import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 
 @Injectable()
 export class ProfilesService {
   constructor(
     private readonly identities: IdentityRepository,
     private readonly configService: ConfigService,
+    @Optional() private readonly walletCod?: WalletCodService,
   ) {}
 
   private presenceStaleMs(): number {
@@ -252,6 +254,9 @@ export class ProfilesService {
         'Rider is not approved to go online',
         409,
       );
+    }
+    if (online && this.walletCod) {
+      await this.walletCod.assertCanAcceptService(own.rider_profile_id);
     }
     const updated = await this.identities.updateRiderOnlineStatus(
       own.rider_profile_id,

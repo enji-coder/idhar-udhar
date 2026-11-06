@@ -19,7 +19,7 @@ import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/api/token_store.dart';
 import 'package:idhar_udhar/shared/api/wallet_api.dart';
-import 'package:intl/intl.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -405,12 +405,7 @@ void main() {
 }
 
 String _collectCopy(num amount) {
-  final String rupees = NumberFormat.currency(
-    locale: 'en_IN',
-    symbol: '₹',
-    decimalDigits: 0,
-  ).format(amount);
-  return 'Collect $rupees from the customer. '
+  return 'Collect ${formatInr(amount)} from the customer. '
       'This amount is the cash still due on the order. '
       'Confirm only after you have collected it.';
 }
