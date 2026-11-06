@@ -8,6 +8,7 @@ import LiveOperations from './pages/LiveOperations';
 import Orders from './pages/Orders';
 import Tracking from './pages/Tracking';
 import Riders from './pages/Riders';
+import RiderOnlineTime from './pages/RiderOnlineTime';
 import RiderDetail from './pages/RiderDetail';
 import Customers from './pages/Customers';
 import CustomerDetail from './pages/CustomerDetail';
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/orders" element={<Orders />} />
             <Route path="/tracking" element={<Tracking />} />
             <Route path="/riders" element={<Riders />} />
+            <Route path="/rider-online-time" element={<RiderOnlineTime />} />
             <Route path="/riders/:id" element={<RiderDetail />} />
             <Route path="/customers" element={<Customers />} />
             <Route path="/customers/:id" element={<CustomerDetail />} />

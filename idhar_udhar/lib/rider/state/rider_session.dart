@@ -517,6 +517,12 @@ final riderApiEarningsProvider = FutureProvider<RiderEarnings>((ref) async {
   return ref.read(riderSessionProvider.notifier).loadEarnings();
 });
 
+/// `null` asks the server for today's Asia/Kolkata total.
+final riderOnlineTimeProvider =
+    FutureProvider.family<RiderOnlineDay, String?>((ref, date) {
+  return ref.watch(profilesApiProvider).riderOnlineTime(date: date);
+});
+
 final riderDeliveryHistoryProvider = Provider<List<RecentActivityItem>>((ref) {
   final RiderEarnings? earnings = ref.watch(riderApiEarningsProvider).value;
   if (earnings == null) return const <RecentActivityItem>[];

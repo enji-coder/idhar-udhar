@@ -24,6 +24,7 @@ import {
   Receipt,
   UserRound,
   FileSpreadsheet,
+  Timer,
 } from 'lucide-react';
 
 export const navSections = [
@@ -37,6 +38,7 @@ export const navSections = [
       { label: 'Live Operations', path: '/live', icon: Radio },
       { label: 'Orders', path: '/orders', icon: Package },
       { label: 'Riders', path: '/riders', icon: Bike },
+      { label: 'Online Time', path: '/rider-online-time', icon: Timer },
       { label: 'Customers', path: '/customers', icon: Users },
       { label: 'Vehicles', path: '/vehicles', icon: Truck },
       { label: 'Vehicle Categories', path: '/vehicle-categories', icon: Tags },
@@ -86,6 +88,7 @@ export const pageMeta = {
   '/orders': { title: 'Orders', subtitle: 'Search, filter and manage every delivery.', crumbs: ['Operations', 'Orders'] },
   '/tracking': { title: 'Tracking', subtitle: 'Riders, pickups and live routes.', crumbs: ['Operations', 'Tracking'] },
   '/riders': { title: 'Riders', subtitle: 'Fleet, status and performance.', crumbs: ['Operations', 'Riders'] },
+  '/rider-online-time': { title: 'Rider Online Time', subtitle: 'Shift-wise and daily online duration.', crumbs: ['Operations', 'Online Time'] },
   '/customers': { title: 'Customers', subtitle: 'Accounts, history and activity.', crumbs: ['Operations', 'Customers'] },
   '/verification': { title: 'Verification', subtitle: 'Review rider documents and KYC.', crumbs: ['Operations', 'Verification'] },
   '/payments': { title: 'Payments', subtitle: 'Collections, refunds and settlements.', crumbs: ['Finance', 'Payments'] },

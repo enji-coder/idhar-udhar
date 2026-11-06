@@ -29,7 +29,7 @@ class DeliveryCompleteScreen extends ConsumerWidget {
                     children: [
                       const SizedBox(height: 8),
                       const _ThankYouHero(),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 22),
                       Text(
                         'Thank You!',
                         textAlign: TextAlign.center,
@@ -189,33 +189,46 @@ class _BadgeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
-      children: [
-        Expanded(
-          child: _Badge(
-            icon: Icons.star_rounded,
-            color: Color(0xFFF5B400),
-            title: 'Great Ride!',
-            body: 'This delivery is complete',
-          ),
-        ),
-        Expanded(
-          child: _Badge(
-            icon: Icons.person_rounded,
-            color: RiderColors.primary,
-            title: 'Keep Going',
-            body: 'More deliveries, more rewards!',
-          ),
-        ),
-        Expanded(
-          child: _Badge(
-            icon: Icons.emoji_events_rounded,
-            color: Color(0xFFE8A317),
-            title: "You're Awesome",
-            body: 'The community appreciates you!',
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double itemWidth = constraints.maxWidth >= 520
+            ? (constraints.maxWidth - 16) / 3
+            : constraints.maxWidth;
+        return Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 14,
+          children: [
+            SizedBox(
+              width: itemWidth,
+              child: const _Badge(
+                icon: Icons.star_rounded,
+                color: Color(0xFFF5B400),
+                title: 'Great Ride!',
+                body: 'This delivery is complete',
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: const _Badge(
+                icon: Icons.person_rounded,
+                color: RiderColors.primary,
+                title: 'Keep Going',
+                body: 'More deliveries, more rewards!',
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: const _Badge(
+                icon: Icons.emoji_events_rounded,
+                color: Color(0xFFE8A317),
+                title: "You're Awesome",
+                body: 'The community appreciates you!',
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

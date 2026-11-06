@@ -134,6 +134,12 @@ export type AppConfig = {
      * Default 180s tolerates brief OEM Doze gaps with a ~30s client cadence.
      */
     presenceStaleMs: number;
+    /**
+     * Shift history in rider_online_sessions. Absent or any value other than
+     * true keeps recording and reports off. Staging and production do not set
+     * this, so both stay disabled until the feature is released.
+     */
+    onlineTimeEnabled: boolean;
   };
   redis: {
     enabled: boolean;
@@ -594,6 +600,7 @@ export function loadAppConfig(): AppConfig {
     location: {
       store: locationStore,
       presenceStaleMs: integer('RIDER_PRESENCE_STALE_MS', 180_000),
+      onlineTimeEnabled: booleanFlag('RIDER_ONLINE_TIME_ENABLED', false),
     },
     redis: {
       enabled: redisEnabled,

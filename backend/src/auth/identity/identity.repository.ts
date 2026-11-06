@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Queryable } from '../../database/queryable';
 import { PostgresService } from '../../database/postgres.service';
+import { AppConfig } from '../../config/configuration';
+import { isRiderPresenceFresh, onlineSessionAction } from '../../profiles/rider-online-time';
 
 export const PROVISIONAL_CUSTOMER_DISPLAY_NAME = 'Customer';
 
@@ -51,7 +54,18 @@ export type AdminProfileRow = {
 
 @Injectable()
 export class IdentityRepository {
-  constructor(private readonly postgres: PostgresService) {}
+  constructor(
+    private readonly postgres: PostgresService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  /** False unless RIDER_ONLINE_TIME_ENABLED=true. Session SQL stays behind this. */
+  private onlineTimeEnabled(): boolean {
+    return (
+      this.configService.getOrThrow<AppConfig['location']>('location')
+        .onlineTimeEnabled === true
+    );
+  }
 
   async findByPhone(
     phoneNormalized: string,
@@ -604,6 +618,7 @@ export class IdentityRepository {
         `,
         [riderProfileId],
       );
+      await this.closeOpenOnlineSessions(riderProfileId, 'DEACTIVATED', tx);
       return row;
     });
   }
@@ -633,7 +648,25 @@ export class IdentityRepository {
   async updateRiderOnlineStatus(
     riderProfileId: string,
     onlineStatus: 'ONLINE' | 'OFFLINE',
+    staleMs = 180_000,
     db: Queryable = this.postgres,
+  ): Promise<{ approval_status: string; online_status: string } | null> {
+    if (!this.onlineTimeEnabled()) {
+      return this.writeOnlineStatus(db, riderProfileId, onlineStatus);
+    }
+    const run = (tx: Queryable) =>
+      this.applyOnlineStatus(tx, riderProfileId, onlineStatus, staleMs);
+    if (db === this.postgres) {
+      return this.postgres.transaction(run);
+    }
+    return run(db);
+  }
+
+  /** Availability only. Does not read or write rider_online_sessions. */
+  private async writeOnlineStatus(
+    db: Queryable,
+    riderProfileId: string,
+    onlineStatus: 'ONLINE' | 'OFFLINE',
   ): Promise<{ approval_status: string; online_status: string } | null> {
     const result = await db.query<{
       approval_status: string;
@@ -652,16 +685,164 @@ export class IdentityRepository {
     return result.rows[0] ?? null;
   }
 
+  private async applyOnlineStatus(
+    tx: Queryable,
+    riderProfileId: string,
+    onlineStatus: 'ONLINE' | 'OFFLINE',
+    staleMs: number,
+  ): Promise<{ approval_status: string; online_status: string } | null> {
+    const locked = await tx.query<{
+      approval_status: string;
+      online_status: string;
+      last_seen_at: Date | null;
+    }>(
+      `
+      SELECT approval_status, online_status, last_seen_at
+      FROM rider_profiles
+      WHERE rider_profile_id = $1
+      FOR UPDATE
+      `,
+      [riderProfileId],
+    );
+    const current = locked.rows[0];
+    if (!current) {
+      return null;
+    }
+    const open = await tx.query(
+      `
+      SELECT session_id
+      FROM rider_online_sessions
+      WHERE rider_profile_id = $1
+        AND ended_at IS NULL
+      FOR UPDATE
+      `,
+      [riderProfileId],
+    );
+    const goingOnline = onlineStatus === 'ONLINE';
+    const action = onlineSessionAction({
+      currentlyOnline: current.online_status === 'ONLINE',
+      goingOnline,
+      hasOpenSession: open.rows.length > 0,
+      presenceFresh: isRiderPresenceFresh(
+        current.last_seen_at,
+        Date.now(),
+        staleMs,
+      ),
+    });
+    const updated = await tx.query<{
+      approval_status: string;
+      online_status: string;
+    }>(
+      `
+      UPDATE rider_profiles
+      SET
+        online_status = $2,
+        last_seen_at = CASE WHEN $2 = 'ONLINE' THEN now() ELSE last_seen_at END
+      WHERE rider_profile_id = $1
+      RETURNING approval_status, online_status
+      `,
+      [riderProfileId, onlineStatus],
+    );
+    const row = updated.rows[0] ?? null;
+    if (!row) {
+      return null;
+    }
+    if (action === 'close' || action === 'close_then_open') {
+      if (goingOnline) {
+        await tx.query(
+          `
+          UPDATE rider_online_sessions
+          SET
+            ended_at = GREATEST(started_at, COALESCE($2::timestamptz, started_at)),
+            close_reason = 'PRESENCE_STALE'
+          WHERE rider_profile_id = $1
+            AND ended_at IS NULL
+          `,
+          [riderProfileId, current.last_seen_at],
+        );
+      } else {
+        await tx.query(
+          `
+          UPDATE rider_online_sessions
+          SET
+            ended_at = GREATEST(started_at, now()),
+            close_reason = 'OFFLINE'
+          WHERE rider_profile_id = $1
+            AND ended_at IS NULL
+          `,
+          [riderProfileId],
+        );
+      }
+    }
+    if (action === 'open' || action === 'close_then_open') {
+      await tx.query(
+        `
+        INSERT INTO rider_online_sessions (rider_profile_id, started_at)
+        VALUES ($1, now())
+        ON CONFLICT (rider_profile_id) WHERE ended_at IS NULL DO NOTHING
+        `,
+        [riderProfileId],
+      );
+    }
+    return row;
+  }
+
+  async closeOpenOnlineSessions(
+    riderProfileId: string,
+    reason: 'OFFLINE' | 'PRESENCE_STALE' | 'DEACTIVATED',
+    db: Queryable = this.postgres,
+  ): Promise<void> {
+    if (!this.onlineTimeEnabled()) {
+      return;
+    }
+    await db.query(
+      `
+      UPDATE rider_online_sessions
+      SET
+        ended_at = GREATEST(started_at, now()),
+        close_reason = $2
+      WHERE rider_profile_id = $1
+        AND ended_at IS NULL
+      `,
+      [riderProfileId, reason],
+    );
+  }
+
   async touchRiderLastSeen(
     riderProfileId: string,
     db: Queryable = this.postgres,
   ): Promise<void> {
+    if (!this.onlineTimeEnabled()) {
+      await db.query(
+        `
+        UPDATE rider_profiles
+        SET last_seen_at = now()
+        WHERE rider_profile_id = $1
+          AND online_status = 'ONLINE'
+        `,
+        [riderProfileId],
+      );
+      return;
+    }
     await db.query(
       `
-      UPDATE rider_profiles
-      SET last_seen_at = now()
-      WHERE rider_profile_id = $1
-        AND online_status = 'ONLINE'
+      WITH seen AS (
+        UPDATE rider_profiles
+        SET last_seen_at = now()
+        WHERE rider_profile_id = $1
+          AND online_status = 'ONLINE'
+        RETURNING rider_profile_id
+      )
+      INSERT INTO rider_online_sessions (rider_profile_id, started_at)
+      SELECT rider_profile_id, now()
+      FROM seen
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM rider_online_sessions
+        WHERE rider_profile_id = $1
+          AND ended_at IS NULL
+      )
+      ON CONFLICT (rider_profile_id) WHERE ended_at IS NULL DO NOTHING
       `,
       [riderProfileId],
     );
@@ -676,20 +857,103 @@ export class IdentityRepository {
     staleMs: number,
     db: Queryable = this.postgres,
   ): Promise<number> {
+    if (!this.onlineTimeEnabled()) {
+      const result = await db.query<{ rider_profile_id: string }>(
+        `
+        UPDATE rider_profiles
+        SET online_status = 'OFFLINE'
+        WHERE online_status = 'ONLINE'
+          AND (
+            last_seen_at IS NULL
+            OR last_seen_at < now() - ($1::bigint * interval '1 millisecond')
+          )
+        RETURNING rider_profile_id
+        `,
+        [staleMs],
+      );
+      return result.rows.length;
+    }
     const result = await db.query<{ rider_profile_id: string }>(
       `
-      UPDATE rider_profiles
-      SET online_status = 'OFFLINE'
-      WHERE online_status = 'ONLINE'
-        AND (
-          last_seen_at IS NULL
-          OR last_seen_at < now() - ($1::bigint * interval '1 millisecond')
-        )
-      RETURNING rider_profile_id
+      WITH expired AS (
+        UPDATE rider_profiles
+        SET online_status = 'OFFLINE'
+        WHERE online_status = 'ONLINE'
+          AND (
+            last_seen_at IS NULL
+            OR last_seen_at < now() - ($1::bigint * interval '1 millisecond')
+          )
+        RETURNING rider_profile_id, last_seen_at
+      ),
+      closed AS (
+        UPDATE rider_online_sessions AS s
+        SET
+          ended_at = GREATEST(s.started_at, COALESCE(e.last_seen_at, s.started_at)),
+          close_reason = 'PRESENCE_STALE'
+        FROM expired AS e
+        WHERE s.rider_profile_id = e.rider_profile_id
+          AND s.ended_at IS NULL
+        RETURNING s.session_id
+      )
+      SELECT rider_profile_id FROM expired
       `,
       [staleMs],
     );
     return result.rows.length;
+  }
+
+  async listOnlineSessionsOverlapping(
+    fromIso: string,
+    toIso: string,
+    riderProfileId: string | null,
+    search: string,
+  ): Promise<
+    Array<{
+      session_id: string;
+      rider_profile_id: string;
+      started_at: Date;
+      ended_at: Date | null;
+      name: string | null;
+      phone_normalized: string;
+    }>
+  > {
+    if (!this.onlineTimeEnabled()) {
+      return [];
+    }
+    const term = search.trim();
+    const result = await this.postgres.query<{
+      session_id: string;
+      rider_profile_id: string;
+      started_at: Date;
+      ended_at: Date | null;
+      name: string | null;
+      phone_normalized: string;
+    }>(
+      `
+      SELECT
+        s.session_id,
+        s.rider_profile_id,
+        s.started_at,
+        s.ended_at,
+        d.name,
+        i.phone_normalized
+      FROM rider_online_sessions s
+      JOIN rider_profiles r ON r.rider_profile_id = s.rider_profile_id
+      JOIN identities i ON i.identity_id = r.identity_id
+      LEFT JOIN rider_drivers d ON d.rider_profile_id = r.rider_profile_id
+      WHERE s.started_at < $2::timestamptz
+        AND COALESCE(s.ended_at, now()) > $1::timestamptz
+        AND ($3::uuid IS NULL OR s.rider_profile_id = $3::uuid)
+        AND (
+          $4::text = ''
+          OR COALESCE(d.name, '') ILIKE '%' || $4 || '%'
+          OR i.phone_normalized ILIKE '%' || $4 || '%'
+        )
+      ORDER BY d.name NULLS LAST, s.started_at
+      `,
+      [fromIso, toIso, riderProfileId, term],
+    );
+    return result.rows;
   }
 
   async updateRiderLanguage(

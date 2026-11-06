@@ -18,6 +18,7 @@ void main() {
     expect(feedback.message, isNot(contains('submitted')));
     expect(feedback.refreshImmediately, isTrue);
     expect(feedback.delayedRefreshes, 0);
+    expect(feedback.success, isTrue);
   });
 
   test('a failed or dropped payment never says the wallet was credited', () {
@@ -35,6 +36,7 @@ void main() {
       expect(feedback.message, isNot(contains('confirmed')));
       expect(feedback.message, isNot(contains('submitted')));
       expect(feedback.delayedRefreshes, 0);
+      expect(feedback.success, isFalse);
     }
   });
 

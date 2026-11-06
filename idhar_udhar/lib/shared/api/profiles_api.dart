@@ -233,6 +233,16 @@ class ProfilesApi {
     );
   }
 
+  Future<RiderOnlineDay> riderOnlineTime({String? date}) async {
+    final Map<String, Object?> body = await _client.get(
+      '/v1/rider/online-time',
+      query: date == null || date.isEmpty
+          ? null
+          : <String, dynamic>{'date': date},
+    );
+    return RiderOnlineDay.fromJson(body);
+  }
+
   Future<RiderApiProfile> setRiderAvailability({required bool online}) async {
     final Map<String, Object?> body = await _client.post(
       '/v1/rider/availability',
@@ -276,4 +286,86 @@ class ProfilesApi {
       ),
     );
   }
+}
+
+class RiderOnlineShift {
+  const RiderOnlineShift({
+    required this.sessionId,
+    required this.startedAt,
+    required this.endedAt,
+    required this.seconds,
+    required this.active,
+  });
+
+  final String sessionId;
+  final DateTime? startedAt;
+  final DateTime? endedAt;
+  final int seconds;
+  final bool active;
+
+  factory RiderOnlineShift.fromJson(Map<String, Object?> json) {
+    return RiderOnlineShift(
+      sessionId: jsonString(json['session_id']) ?? '',
+      startedAt: DateTime.tryParse(jsonString(json['started_at']) ?? ''),
+      endedAt: DateTime.tryParse(jsonString(json['ended_at']) ?? ''),
+      seconds: jsonInt(json['seconds']),
+      active: jsonBool(json['active']),
+    );
+  }
+}
+
+class RiderOnlineDay {
+  const RiderOnlineDay({
+    required this.date,
+    required this.timeZone,
+    required this.totalSeconds,
+    required this.activeElapsedSeconds,
+    required this.activeStartedAt,
+    required this.shifts,
+  });
+
+  final String date;
+  final String timeZone;
+  final int totalSeconds;
+  final int? activeElapsedSeconds;
+  final DateTime? activeStartedAt;
+  final List<RiderOnlineShift> shifts;
+
+  bool get hasActiveShift => activeElapsedSeconds != null;
+
+  factory RiderOnlineDay.fromJson(Map<String, Object?> json) {
+    final Map<String, Object?> active = json['active'] is Map
+        ? jsonObject(json['active'])
+        : const <String, Object?>{};
+    return RiderOnlineDay(
+      date: jsonString(json['date']) ?? '',
+      timeZone: jsonString(json['time_zone']) ?? 'Asia/Kolkata',
+      totalSeconds: jsonInt(json['total_seconds']),
+      activeElapsedSeconds:
+          json['active'] == null ? null : jsonInt(active['elapsed_seconds']),
+      activeStartedAt: DateTime.tryParse(
+        jsonString(active['started_at']) ?? '',
+      ),
+      shifts: jsonList(json['shifts'])
+          .map(jsonObject)
+          .map(RiderOnlineShift.fromJson)
+          .toList(growable: false),
+    );
+  }
+}
+
+String formatOnlineSeconds(int seconds) {
+  final int safe = seconds < 0 ? 0 : seconds;
+  final int hours = safe ~/ 3600;
+  final int minutes = (safe % 3600) ~/ 60;
+  if (hours > 0) {
+    return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
+  }
+  if (minutes > 0) {
+    return '${minutes}m';
+  }
+  if (safe == 0) {
+    return '0m';
+  }
+  return '${safe}s';
 }

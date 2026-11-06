@@ -159,6 +159,14 @@ export async function fetchAdminPayments() {
   return (body.transactions || []).map(mapPayment);
 }
 
+export async function fetchRiderOnlineTime({ date, q } = {}) {
+  const params = new URLSearchParams();
+  if (date) params.set('date', date);
+  if (q) params.set('q', q);
+  const suffix = params.toString();
+  return apiRequest(`/v1/admin/rider-online-time${suffix ? `?${suffix}` : ''}`);
+}
+
 export async function fetchAdminEarnings() {
   const body = await apiRequest('/v1/admin/earnings');
   return (body.earnings || []).map(mapEarning);

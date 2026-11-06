@@ -8,6 +8,12 @@ import { IdentityRepository, PROVISIONAL_CUSTOMER_DISPLAY_NAME } from '../auth/i
 import { AppConfig } from '../config/configuration';
 import { riderMayGoOnline } from '../files/rider-verification';
 import { effectiveRiderOnlineStatus } from './rider-presence';
+import {
+  localDayWindow,
+  onlineDayReport,
+  StoredOnlineSession,
+  todayLocalDate,
+} from './rider-online-time';
 import { riderProfileGaps } from './rider-profile-completion';
 import { WalletCodService } from '../wallet-cod/wallet-cod.service';
 
@@ -22,6 +28,13 @@ export class ProfilesService {
   private presenceStaleMs(): number {
     return this.configService.getOrThrow<AppConfig['location']>('location')
       .presenceStaleMs;
+  }
+
+  private onlineTimeEnabled(): boolean {
+    return (
+      this.configService.getOrThrow<AppConfig['location']>('location')
+        .onlineTimeEnabled === true
+    );
   }
 
   async customer(auth: AuthContext) {
@@ -261,6 +274,7 @@ export class ProfilesService {
     const updated = await this.identities.updateRiderOnlineStatus(
       own.rider_profile_id,
       online ? 'ONLINE' : 'OFFLINE',
+      this.presenceStaleMs(),
     );
     if (!updated) {
       throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider profile was not found', 404);
@@ -300,6 +314,127 @@ export class ProfilesService {
     if (!profile || profile.admin_profile_id !== auth.profileId || !profile.active) {
       throw new ApiError(ErrorCodes.FORBIDDEN, 'Admin profile required', 403);
     }
+  }
+
+  async riderOnlineTime(auth: AuthContext, date?: string) {
+    if (auth.role !== 'RIDER') {
+      throw new ApiError(ErrorCodes.FORBIDDEN, 'Rider profile required', 403);
+    }
+    if (!this.onlineTimeEnabled()) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider online time is not available', 404);
+    }
+    const own = await this.ownRiderProfile(auth);
+    const day = this.onlineDay(date);
+    await this.identities.expireStaleOnlineRiders(this.presenceStaleMs());
+    return this.onlineTimeForRider(own.rider_profile_id, day);
+  }
+
+  async adminRiderOnlineTime(auth: AuthContext, date?: string, search?: string) {
+    await this.assertAdmin(auth);
+    if (!this.onlineTimeEnabled()) {
+      throw new ApiError(ErrorCodes.NOT_FOUND, 'Rider online time is not available', 404);
+    }
+    const day = this.onlineDay(date);
+    await this.identities.expireStaleOnlineRiders(this.presenceStaleMs());
+    const rows = await this.identities.listOnlineSessionsOverlapping(
+      day.from.toISOString(),
+      day.to.toISOString(),
+      null,
+      (search ?? '').trim(),
+    );
+    const grouped = new Map<string, StoredOnlineSession[]>();
+    const labels = new Map<string, { name: string | null; phone: string }>();
+    for (const row of rows) {
+      const list = grouped.get(row.rider_profile_id) ?? [];
+      list.push({
+        sessionId: row.session_id,
+        riderProfileId: row.rider_profile_id,
+        startedAt: new Date(row.started_at),
+        endedAt: row.ended_at ? new Date(row.ended_at) : null,
+      });
+      grouped.set(row.rider_profile_id, list);
+      labels.set(row.rider_profile_id, {
+        name: row.name,
+        phone: row.phone_normalized,
+      });
+    }
+    const asOf = new Date();
+    const riders = [...grouped.entries()].map(([riderProfileId, sessions]) => {
+      const report = onlineDayReport(sessions, day.from, day.to, asOf);
+      const label = labels.get(riderProfileId);
+      return {
+        rider_profile_id: riderProfileId,
+        name: label?.name ?? null,
+        phone: label?.phone ?? '',
+        total_seconds: report.totalSeconds,
+        active: report.active
+          ? {
+              session_id: report.active.sessionId,
+              started_at: report.active.startedAt,
+              elapsed_seconds: report.active.elapsedSeconds,
+            }
+          : null,
+        shifts: report.shifts.map((shift) => ({
+          session_id: shift.sessionId,
+          started_at: shift.startedAt,
+          ended_at: shift.endedAt,
+          seconds: shift.seconds,
+          active: shift.active,
+        })),
+      };
+    });
+    return {
+      date: day.date,
+      time_zone: day.timeZone,
+      riders,
+    };
+  }
+
+  private onlineDay(date?: string) {
+    const requested = (date ?? '').trim();
+    return localDayWindow(requested.length > 0 ? requested : todayLocalDate());
+  }
+
+  private async onlineTimeForRider(
+    riderProfileId: string,
+    day: ReturnType<typeof localDayWindow>,
+  ) {
+    const rows = await this.identities.listOnlineSessionsOverlapping(
+      day.from.toISOString(),
+      day.to.toISOString(),
+      riderProfileId,
+      '',
+    );
+    const report = onlineDayReport(
+      rows.map((row) => ({
+        sessionId: row.session_id,
+        riderProfileId: row.rider_profile_id,
+        startedAt: new Date(row.started_at),
+        endedAt: row.ended_at ? new Date(row.ended_at) : null,
+      })),
+      day.from,
+      day.to,
+      new Date(),
+    );
+    return {
+      date: day.date,
+      time_zone: day.timeZone,
+      total_seconds: report.totalSeconds,
+      active: report.active
+        ? {
+            session_id: report.active.sessionId,
+            started_at: report.active.startedAt,
+            elapsed_seconds: report.active.elapsedSeconds,
+          }
+        : null,
+      shifts: report.shifts.map((shift) => ({
+        session_id: shift.sessionId,
+        started_at: shift.startedAt,
+        ended_at: shift.endedAt,
+        seconds: shift.seconds,
+        active: shift.active,
+      })),
+    };
   }
 
   async listRiders(auth: AuthContext) {

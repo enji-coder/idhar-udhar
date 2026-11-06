@@ -62,6 +62,36 @@ test('the nav item sits in Finance and disappears without finance access', () =>
   );
 });
 
+test('deferred rider online time stays hidden without changing the riders page', () => {
+  const roles = [
+    ROLES.SUPER_ADMIN,
+    ROLES.OPERATIONS,
+    ROLES.MANAGER,
+    ROLES.FINANCE,
+    ROLES.SUPPORT,
+  ];
+  for (const role of roles) {
+    assert.equal(canAccessPath({ role }, '/rider-online-time'), false);
+  }
+  assert.equal(
+    canAccessPath({ role: ROLES.SUB_ADMIN, modules: ['riders'] }, '/rider-online-time'),
+    false,
+  );
+  assert.equal(canAccessPath({ role: ROLES.OPERATIONS }, '/riders'), true);
+  assert.equal(
+    canAccessPath({ role: ROLES.SUB_ADMIN, modules: ['riders'] }, '/riders'),
+    true,
+  );
+  assert.equal(
+    canAccessPath({ role: ROLES.SUB_ADMIN, modules: ['orders'] }, '/riders'),
+    false,
+  );
+  const operations = filterNav(navSections, { role: ROLES.OPERATIONS });
+  const paths = operations.flatMap((item) => item.items).map((item) => item.path);
+  assert.equal(paths.includes('/rider-online-time'), false);
+  assert.equal(paths.includes('/riders'), true);
+});
+
 test('existing page access is unchanged', () => {
   assert.equal(canAccessPath({ role: ROLES.FINANCE }, '/earnings'), true);
   assert.equal(canAccessPath({ role: ROLES.OPERATIONS }, '/orders'), true);

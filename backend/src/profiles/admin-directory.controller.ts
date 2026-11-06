@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, HttpCode, HttpStatus, Param } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, HttpStatus, Param, Query } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UuidParamPipe } from '../common/uuid-param.pipe';
@@ -8,6 +8,16 @@ import { ProfilesService } from './profiles.service';
 @Controller('admin')
 export class AdminDirectoryController {
   constructor(private readonly profiles: ProfilesService) {}
+
+  @Roles('ADMIN')
+  @Get('rider-online-time')
+  riderOnlineTime(
+    @CurrentAuth() auth: AuthContext,
+    @Query('date') date?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.profiles.adminRiderOnlineTime(auth, date, q);
+  }
 
   @Roles('ADMIN')
   @Get('riders')

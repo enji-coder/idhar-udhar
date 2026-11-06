@@ -313,6 +313,7 @@ export class RiderDocumentsService {
           409,
         );
       }
+      await this.identities.closeOpenOnlineSessions(riderProfileId, 'OFFLINE', tx);
       await this.audit.record(
         {
           auth,
@@ -558,6 +559,13 @@ export class RiderDocumentsService {
           onboardingKycStatus: derived.onboarding_kyc_status,
           onlineStatus,
         },
+        db,
+      );
+    }
+    if (onlineStatus === 'OFFLINE') {
+      await this.identities.closeOpenOnlineSessions(
+        riderProfileId,
+        'OFFLINE',
         db,
       );
     }

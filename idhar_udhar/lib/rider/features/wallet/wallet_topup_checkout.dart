@@ -70,11 +70,13 @@ class RiderWalletTopUpFeedback {
     required this.message,
     required this.refreshImmediately,
     required this.delayedRefreshes,
+    this.success = false,
   });
 
   final String message;
   final bool refreshImmediately;
   final int delayedRefreshes;
+  final bool success;
 }
 
 const Set<String> _failedTopUpStatuses = <String>{
@@ -95,6 +97,7 @@ RiderWalletTopUpFeedback riderWalletTopUpFeedback(
       message: 'Payment confirmed. Your wallet balance has been updated.',
       refreshImmediately: true,
       delayedRefreshes: 0,
+      success: true,
     );
   }
   if (_failedTopUpStatuses.contains(raw)) {

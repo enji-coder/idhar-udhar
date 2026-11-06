@@ -7,7 +7,6 @@ import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/wallet_api.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/orders/rider_order_board.dart';
 import 'rider_trip_statement.dart';
@@ -214,11 +213,9 @@ class _PastBody extends StatelessWidget {
           pickupName: _text(pickup?.contactName, order.customerName),
           pickupAddress: pickupAddress,
           pickupPhone: _text(pickup?.contactPhone, order.customerPhone),
-          pickupPoint: pickup,
           dropName: _text(drop?.contactName, null),
           dropAddress: dropAddress,
           dropPhone: _text(drop?.contactPhone, null),
-          dropPoint: drop,
         ),
         if (hasTripFacts) ...[
           const SizedBox(height: 8),
@@ -226,7 +223,7 @@ class _PastBody extends StatelessWidget {
             title: 'Trip',
             children: [
               if ((order.crn ?? '').trim().isNotEmpty)
-                _Line(label: 'CRN', value: order.crn!.trim()),
+                _CrnLine(value: order.crn!.trim()),
               if (vehicle.isNotEmpty) _Line(label: 'Vehicle', value: vehicle),
               if (order.distanceKm != null)
                 _Line(
@@ -327,6 +324,7 @@ class _HeaderCard extends StatelessWidget {
             ? const Color(0xFFE7F8EE)
             : const Color(0xFFE7F4F7);
     return _Panel(
+      emphasized: finished && !cancelled,
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -369,17 +367,32 @@ class _HeaderCard extends StatelessWidget {
             ),
             if (status.isNotEmpty)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: finished && !cancelled ? 4 : 3,
+                ),
                 decoration: BoxDecoration(
                   color: wash,
                   borderRadius: BorderRadius.circular(20),
+                  border: finished && !cancelled
+                      ? Border.all(color: tone.withValues(alpha: 0.28))
+                      : null,
                 ),
-                child: Text(
-                  status,
-                  style: RiderTextStyles.caption.copyWith(
-                    color: tone,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (finished && !cancelled) ...[
+                      Icon(Icons.check_circle_rounded, size: 14, color: tone),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      status,
+                      style: RiderTextStyles.caption.copyWith(
+                        color: tone,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -421,21 +434,17 @@ class _RouteCard extends StatelessWidget {
     required this.pickupName,
     required this.pickupAddress,
     required this.pickupPhone,
-    required this.pickupPoint,
     required this.dropName,
     required this.dropAddress,
     required this.dropPhone,
-    required this.dropPoint,
   });
 
   final String pickupName;
   final String pickupAddress;
   final String pickupPhone;
-  final ApiStop? pickupPoint;
   final String dropName;
   final String dropAddress;
   final String dropPhone;
-  final ApiStop? dropPoint;
 
   @override
   Widget build(BuildContext context) {
@@ -448,7 +457,6 @@ class _RouteCard extends StatelessWidget {
           name: pickupName,
           address: pickupAddress,
           phone: pickupPhone,
-          point: pickupPoint,
           drawTail: true,
         ),
         _StopBlock(
@@ -457,7 +465,6 @@ class _RouteCard extends StatelessWidget {
           name: dropName,
           address: dropAddress,
           phone: dropPhone,
-          point: dropPoint,
           drawTail: false,
         ),
       ],
@@ -472,7 +479,6 @@ class _StopBlock extends StatelessWidget {
     required this.name,
     required this.address,
     required this.phone,
-    required this.point,
     required this.drawTail,
   });
 
@@ -481,13 +487,10 @@ class _StopBlock extends StatelessWidget {
   final String name;
   final String address;
   final String phone;
-  final ApiStop? point;
   final bool drawTail;
 
   @override
   Widget build(BuildContext context) {
-    final bool canMap =
-        point != null && (point!.latitude != 0 || point!.longitude != 0);
     return IntrinsicHeight(
       child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -541,21 +544,6 @@ class _StopBlock extends StatelessWidget {
                   ),
                 if (phone.isNotEmpty)
                   Text(phone, style: RiderTextStyles.caption),
-                if (canMap)
-                  TextButton.icon(
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(0, 28),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    onPressed: () => _openMap(
-                      point!.latitude,
-                      point!.longitude,
-                    ),
-                    icon: const Icon(Icons.near_me_outlined, size: 14),
-                    label: const Text('View on Map'),
-                  ),
               ],
             ),
           ),
@@ -564,20 +552,14 @@ class _StopBlock extends StatelessWidget {
       ),
     );
   }
-
-  Future<void> _openMap(double latitude, double longitude) async {
-    final Uri uri = Uri.parse(
-      'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
-    );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
 }
 
 class _Panel extends StatelessWidget {
-  const _Panel({required this.children, this.title});
+  const _Panel({required this.children, this.title, this.emphasized = false});
 
   final String? title;
   final List<Widget> children;
+  final bool emphasized;
 
   @override
   Widget build(BuildContext context) {
@@ -586,7 +568,20 @@ class _Panel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE3EEEC)),
+        border: Border.all(
+          color: emphasized
+              ? RiderColors.primary.withValues(alpha: 0.35)
+              : const Color(0xFFE3EEEC),
+        ),
+        boxShadow: emphasized
+            ? const [
+                BoxShadow(
+                  color: Color(0x14148BA6),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -601,6 +596,34 @@ class _Panel extends StatelessWidget {
             const SizedBox(height: 8),
           ],
           ...children,
+        ],
+      ),
+    );
+  }
+}
+
+class _CrnLine extends StatelessWidget {
+  const _CrnLine({required this.value});
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('CRN', style: RiderTextStyles.caption),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value.replaceAll('', '\u200B'),
+              textAlign: TextAlign.end,
+              softWrap: true,
+              style: RiderTextStyles.bodyMedium.copyWith(fontSize: 13),
+            ),
+          ),
         ],
       ),
     );

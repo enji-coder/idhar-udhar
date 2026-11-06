@@ -419,6 +419,11 @@ class _QuietWallet extends WalletApi {
   Future<List<Map<String, Object?>>> walletLedger() async {
     return const <Map<String, Object?>>[];
   }
+
+  @override
+  Future<Map<String, Object?>> destinations() async {
+    throw const ApiException(code: 'NOT_FOUND', message: 'missing');
+  }
 }
 
 class _QuietProfiles extends ProfilesApi {
@@ -427,6 +432,18 @@ class _QuietProfiles extends ProfilesApi {
   @override
   Future<RiderApiProfile> rider() async {
     throw const ApiException(code: 'NOT_FOUND', message: 'missing');
+  }
+
+  @override
+  Future<RiderOnlineDay> riderOnlineTime({String? date}) async {
+    return const RiderOnlineDay(
+      date: '2026-11-06',
+      timeZone: 'Asia/Kolkata',
+      totalSeconds: 0,
+      activeElapsedSeconds: null,
+      activeStartedAt: null,
+      shifts: <RiderOnlineShift>[],
+    );
   }
 }
 

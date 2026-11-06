@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/order_mapper.dart';
+import 'package:idhar_udhar/shared/api/profiles_api.dart';
 import 'package:idhar_udhar/shared/api/rider_api.dart';
 import 'package:idhar_udhar/shared/business/business.dart';
 import 'package:idhar_udhar/shared/maps/maps.dart';
@@ -21,6 +22,7 @@ import '../../data/models/rider_announcement.dart';
 import '../../data/models/rider_earnings.dart';
 import '../../data/models/rider_order.dart';
 import '../../features/orders/rider_order_board_providers.dart';
+import '../../rider_features.dart';
 import '../../features/wallet/wallet_topup_checkout.dart';
 import '../../push/rider_accept_flow.dart';
 import '../../push/rider_offer_rules.dart';
@@ -68,6 +70,7 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
   int _tab = 0;
   final Set<int> _visitedTabs = <int>{0};
   Timer? _offerPoll;
+  Timer? _onlineTimeRefresh;
   RiderLocationPublisher? _locationPublisher;
 
   @override
@@ -105,6 +108,11 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
         unawaited(ref.read(riderSessionProvider.notifier).refreshOffers());
       });
       _syncLocationPublishing();
+      if (RiderFeatures.onlineTimeEnabled) {
+        _onlineTimeRefresh = Timer.periodic(const Duration(seconds: 30), (_) {
+          ref.invalidate(riderOnlineTimeProvider(null));
+        });
+      }
     });
   }
 
@@ -130,6 +138,7 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _offerPoll?.cancel();
+    _onlineTimeRefresh?.cancel();
     _locationPublisher?.stop();
     super.dispose();
   }
@@ -172,56 +181,103 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
           ),
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (int i) {
-          setState(() {
-            _tab = i;
-            _visitedTabs.add(i);
-          });
-          if (i == 0) {
-            refreshRiderRunningDeliveries(ref);
-          }
-        },
-        backgroundColor: RiderColors.surfaceGlass,
-        indicatorColor: RiderColors.primary.withValues(alpha: 0.15),
-        labelBehavior: MediaQuery.sizeOf(context).width < 400
-            ? NavigationDestinationLabelBehavior.onlyShowSelected
-            : NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded, color: RiderColors.primary),
-            label: 'Home',
+      bottomNavigationBar: NavigationBarTheme(
+        data: NavigationBarThemeData(
+          height: 72,
+          backgroundColor: RiderColors.surface,
+          indicatorColor: RiderColors.primary.withValues(alpha: 0.14),
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          labelTextStyle: WidgetStateProperty.resolveWith((states) {
+            final bool selected = states.contains(WidgetState.selected);
+            return TextStyle(
+              fontSize: 11,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+              color: selected ? RiderColors.primary : RiderColors.textSecondary,
+            );
+          }),
+          iconTheme: WidgetStateProperty.resolveWith((states) {
+            final bool selected = states.contains(WidgetState.selected);
+            return IconThemeData(
+              size: 22,
+              color: selected ? RiderColors.primary : RiderColors.textSecondary,
+            );
+          }),
+        ),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: RiderColors.surface,
+            border: Border(top: BorderSide(color: RiderColors.border)),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon:
-                Icon(Icons.receipt_long_rounded, color: RiderColors.primary),
-            label: 'Orders',
+          child: NavigationBar(
+            selectedIndex: _tab,
+            height: 72,
+            elevation: 0,
+            backgroundColor: RiderColors.surface,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            indicatorColor: RiderColors.primary.withValues(alpha: 0.14),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            onDestinationSelected: (int i) {
+              setState(() {
+                _tab = i;
+                _visitedTabs.add(i);
+              });
+              if (i == 0) {
+                refreshRiderRunningDeliveries(ref);
+              }
+            },
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home_rounded),
+                label: 'Home',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.receipt_long_outlined),
+                selectedIcon: Icon(Icons.receipt_long_rounded),
+                label: 'Orders',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.menu_book_outlined),
+                selectedIcon: Icon(Icons.menu_book_rounded),
+                label: 'Ledger',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.account_balance_wallet_outlined),
+                selectedIcon: Icon(Icons.account_balance_wallet_rounded),
+                label: 'Earnings',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.person_outline_rounded),
+                selectedIcon: Icon(Icons.person_rounded),
+                label: 'Profile',
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.menu_book_outlined),
-            selectedIcon:
-                Icon(Icons.menu_book_rounded, color: RiderColors.primary),
-            label: 'Ledger',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.account_balance_wallet_outlined),
-            selectedIcon: Icon(
-              Icons.account_balance_wallet_rounded,
-              color: RiderColors.primary,
-            ),
-            label: 'Earnings',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon:
-                Icon(Icons.person_rounded, color: RiderColors.primary),
-            label: 'Profile',
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+class _OnlineTimeStat extends ConsumerWidget {
+  const _OnlineTimeStat();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final String label = ref.watch(riderOnlineTimeProvider(null)).when(
+          data: (day) => formatOnlineSeconds(day.totalSeconds),
+          loading: () => '…',
+          error: (_, __) => '—',
+        );
+    return RiderStatCard(
+      label: 'Online Time',
+      value: label,
+      icon: Icons.schedule_rounded,
+      elevation: _dashElevation,
+      compact: true,
     );
   }
 }
@@ -234,12 +290,6 @@ class _HomeTab extends ConsumerWidget {
     if (hour < 12) return 'Good Morning';
     if (hour < 17) return 'Good Afternoon';
     return 'Good Evening';
-  }
-
-  String _formatDuration(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60);
-    return '${h}h ${m.toString().padLeft(2, '0')}m';
   }
 
   @override
@@ -533,9 +583,7 @@ class _HomeTab extends ConsumerWidget {
                         session: session,
                       );
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(feedback.message)),
-                        );
+                        showRiderTopUpSnackBar(context, feedback);
                       }
                       if (feedback.refreshImmediately) {
                         ref.invalidate(riderWalletLedgerProvider);
@@ -605,16 +653,10 @@ class _HomeTab extends ConsumerWidget {
                       compact: true,
                     ),
                   ),
-                  const SizedBox(width: RiderSpacing.md),
-                  Expanded(
-                    child: RiderStatCard(
-                      label: 'Online Time',
-                      value: _formatDuration(earnings.onlineDuration),
-                      icon: Icons.schedule_rounded,
-                      elevation: _dashElevation,
-                      compact: true,
-                    ),
-                  ),
+                  if (RiderFeatures.onlineTimeEnabled) ...const [
+                    SizedBox(width: RiderSpacing.md),
+                    Expanded(child: _OnlineTimeStat()),
+                  ],
                 ],
               ),
               const SizedBox(height: RiderSpacing.md),

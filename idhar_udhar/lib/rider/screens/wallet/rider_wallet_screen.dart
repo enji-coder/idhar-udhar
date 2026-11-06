@@ -118,9 +118,7 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
                     session: session,
                   );
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(feedback.message)),
-                    );
+                    showRiderTopUpSnackBar(context, feedback);
                   }
                   if (feedback.refreshImmediately) {
                     ref.invalidate(riderWalletLedgerProvider);
@@ -189,6 +187,45 @@ class _RiderWalletScreenState extends ConsumerState<RiderWalletScreen> {
       ),
     );
   }
+}
+
+void showRiderTopUpSnackBar(
+  BuildContext context,
+  RiderWalletTopUpFeedback feedback,
+) {
+  if (!feedback.success) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(feedback.message)),
+    );
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: RiderColors.success,
+      elevation: 2,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      content: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              feedback.message,
+              style: RiderTextStyles.bodyMedium.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 Future<void> showRiderWalletAmountSheet({

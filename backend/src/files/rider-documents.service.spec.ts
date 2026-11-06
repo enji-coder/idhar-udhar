@@ -94,6 +94,10 @@ describe('RiderDocumentsService', () => {
       work({}),
     ),
   };
+  const identities = {
+    findRiderProfile: jest.fn(async () => null),
+    closeOpenOnlineSessions: jest.fn(async () => undefined),
+  };
 
   const service = new RiderDocumentsService(
     postgres as unknown as PostgresService,
@@ -101,7 +105,7 @@ describe('RiderDocumentsService', () => {
     storage,
     notifications as unknown as NotificationService,
     audit as unknown as AuditService,
-    { findRiderProfile: jest.fn(async () => null) } as never,
+    identities as never,
   );
 
   beforeEach(() => {
@@ -359,6 +363,11 @@ describe('RiderDocumentsService', () => {
       }),
       {},
     );
+    expect(identities.closeOpenOnlineSessions).toHaveBeenCalledWith(
+      riderId,
+      'OFFLINE',
+      {},
+    );
     expect(notifications.notifyIfRecipient).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'RIDER_DOCUMENT_REJECTED',
@@ -607,6 +616,7 @@ describe('RiderDocumentsService', () => {
     const result = await service.decideForAdmin(adminAuth(), documentId, 'APPROVED');
 
     expect(result.approval_status).toBe('APPROVED');
+    expect(identities.closeOpenOnlineSessions).not.toHaveBeenCalled();
   });
 
   it('reopens an approved rider without a second status and forces offline', async () => {
@@ -644,6 +654,11 @@ describe('RiderDocumentsService', () => {
       {},
     );
     expect(notifications.notifyIfRecipient).not.toHaveBeenCalled();
+    expect(identities.closeOpenOnlineSessions).toHaveBeenCalledWith(
+      riderId,
+      'OFFLINE',
+      {},
+    );
   });
 
   it('does not reopen a suspended rider', async () => {
@@ -657,6 +672,7 @@ describe('RiderDocumentsService', () => {
       code: 'RIDER_NOT_ELIGIBLE',
     });
     expect(files.reopenRiderVerification).not.toHaveBeenCalled();
+    expect(identities.closeOpenOnlineSessions).not.toHaveBeenCalled();
   });
 
   it('uploads, replaces, and signs the rider profile picture without touching approval', async () => {

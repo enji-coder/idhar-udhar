@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import { CurrentAuth } from '../common/decorators/current-auth.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -75,6 +76,15 @@ export class RiderProfileController {
       preferredLanguage: body.preferred_language,
       drivingLicence: body.driving_licence,
     };
+  }
+
+  @Roles('RIDER')
+  @Get('online-time')
+  onlineTime(
+    @CurrentAuth() auth: AuthContext,
+    @Query('date') date?: string,
+  ) {
+    return this.profiles.riderOnlineTime(auth, date);
   }
 
   @Roles('RIDER')

@@ -1,8 +1,10 @@
+import { RIDER_ONLINE_TIME_ENABLED } from './features.js';
+
 export const MODULES = [
   { key: 'dashboard', label: 'Dashboard', paths: ['/dashboard'] },
   { key: 'orders', label: 'Orders', paths: ['/orders', '/live', '/tracking'] },
   { key: 'customers', label: 'Customers', paths: ['/customers'] },
-  { key: 'riders', label: 'Riders', paths: ['/riders', '/verification'] },
+  { key: 'riders', label: 'Riders', paths: ['/riders', '/rider-online-time', '/verification'] },
   { key: 'vehicles', label: 'Vehicles', paths: ['/vehicles', '/vehicle-categories', '/states', '/cities', '/zones'] },
   { key: 'deliveries', label: 'Deliveries', paths: ['/live', '/tracking'] },
   { key: 'payments', label: 'Payments', paths: ['/payments'] },
@@ -36,6 +38,7 @@ const pathRoles = {
   '/orders': [ROLES.SUPER_ADMIN, ROLES.OPERATIONS, ROLES.MANAGER, ROLES.SUPPORT, ROLES.SUB_ADMIN],
   '/tracking': [ROLES.SUPER_ADMIN, ROLES.OPERATIONS, ROLES.MANAGER, ROLES.SUB_ADMIN],
   '/riders': [ROLES.SUPER_ADMIN, ROLES.OPERATIONS, ROLES.MANAGER, ROLES.SUB_ADMIN],
+  '/rider-online-time': [ROLES.SUPER_ADMIN, ROLES.OPERATIONS, ROLES.MANAGER, ROLES.SUB_ADMIN],
   '/customers': [ROLES.SUPER_ADMIN, ROLES.SUPPORT, ROLES.MANAGER, ROLES.SUB_ADMIN],
   '/verification': [ROLES.SUPER_ADMIN, ROLES.OPERATIONS, ROLES.SUB_ADMIN],
   '/payments': [ROLES.SUPER_ADMIN, ROLES.FINANCE, ROLES.MANAGER, ROLES.SUB_ADMIN],
@@ -174,6 +177,12 @@ export function canAccessPath(userOrRole, pathname) {
   const user = asUser(userOrRole);
   const role = user?.role;
   if (!role) return false;
+  if (
+    !RIDER_ONLINE_TIME_ENABLED &&
+    (pathname === '/rider-online-time' || pathname.startsWith('/rider-online-time/'))
+  ) {
+    return false;
+  }
   if (role === ROLES.SUPER_ADMIN) return true;
   if (pathname === '/profile' || pathname === '/notifications') return user.status !== 'Inactive';
   if (user.status === 'Inactive') return false;
