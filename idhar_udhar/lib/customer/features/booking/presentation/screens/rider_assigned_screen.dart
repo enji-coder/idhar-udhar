@@ -371,7 +371,7 @@ class RiderAssignedScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
-                  'Fare ${order?.fare == null ? '—' : formatInr(order!.fare)}',
+                  'Fare ${order?.fare == null ? '—' : formatCustomerPayable(order!.fare)}',
                   style: AppTextStyles.bodyMedium.copyWith(
                     color: AppColors.orange,
                     fontWeight: FontWeight.w700,

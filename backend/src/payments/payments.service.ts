@@ -530,6 +530,19 @@ export class PaymentsService {
                 409,
               );
             }
+            if (body.method === 'ONLINE') {
+              const planned =
+                body.payer_type === 'CUSTOMER'
+                  ? plan.customer_planned_online
+                  : plan.receiver_planned_online;
+              if (formatInr(amount) !== formatInr(planned)) {
+                throw new ApiError(
+                  ErrorCodes.PAYMENT_PLAN_INVALID,
+                  'Online charge must equal the planned online amount',
+                  409,
+                );
+              }
+            }
           }
         }
         if (direction === 'REFUND') {

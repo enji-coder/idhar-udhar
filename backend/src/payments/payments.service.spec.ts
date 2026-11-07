@@ -33,6 +33,8 @@ const adminAuth: AuthContext = {
 function makeService(opts?: {
   remainingOwed?: string;
   availableForPending?: string;
+  customerPlannedOnline?: string;
+  receiverPlannedOnline?: string;
   beginOnlineCharge?: jest.Mock;
   orderOutstanding?: string;
   pendingClearances?: Array<{
@@ -75,7 +77,10 @@ function makeService(opts?: {
       receiver_responsibility: '0.00',
       who_pays: 'CUSTOMER',
     })),
-    findPlan: jest.fn(async () => ({})),
+    findPlan: jest.fn(async () => ({
+      customer_planned_online: opts?.customerPlannedOnline ?? '100.00',
+      receiver_planned_online: opts?.receiverPlannedOnline ?? '0.00',
+    })),
     remainingOwed: jest.fn(async () => remaining),
     availableForPendingOnline: jest.fn(async () => available),
     amountExceeds: jest.fn(async (left: string, right: string) => {
@@ -234,6 +239,69 @@ describe('PaymentsService createTransaction', () => {
     });
     expect(beginOnlineCharge).not.toHaveBeenCalled();
     expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects an online charge that is not the planned whole-rupee amount', async () => {
+    const { service, beginOnlineCharge, inserted } = makeService({
+      remainingOwed: '125.00',
+      availableForPending: '125.00',
+      customerPlannedOnline: '125.00',
+    });
+    await expect(
+      service.createTransaction(
+        customerAuth,
+        ORDER_ID,
+        {
+          payer_type: 'CUSTOMER',
+          method: 'ONLINE',
+          amount: '124.89',
+        },
+        'idem-unrounded',
+      ),
+    ).rejects.toMatchObject({
+      code: ErrorCodes.PAYMENT_PLAN_INVALID,
+      status: 409,
+    });
+    expect(beginOnlineCharge).not.toHaveBeenCalled();
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('sends the planned whole-rupee amount to Cashfree', async () => {
+    const session = {
+      providerTxnId: 'cf-rounded',
+      providerEventId: null,
+      paymentSessionId: 'session-rounded',
+      gatewayOrderId: 'iu-rounded',
+      environment: 'sandbox' as const,
+    };
+    const beginOnlineCharge = jest.fn(async () => session);
+    const { service, inserted } = makeService({
+      remainingOwed: '125.00',
+      availableForPending: '125.00',
+      customerPlannedOnline: '125.00',
+      beginOnlineCharge,
+    });
+    const payload = await service.createTransaction(
+      customerAuth,
+      ORDER_ID,
+      {
+        payer_type: 'CUSTOMER',
+        method: 'ONLINE',
+        amount: '125.00',
+      },
+      'idem-rounded',
+    );
+    expect(beginOnlineCharge).toHaveBeenCalledWith({
+      orderId: ORDER_ID,
+      amount: '125.00',
+      payerType: 'CUSTOMER',
+    });
+    expect(inserted[0]).toMatchObject({ amount: '125.00', transaction_status: 'PENDING' });
+    expect(payload).toMatchObject({
+      amount: '125.00',
+      payment_session_id: 'session-rounded',
+      cashfree_order_id: 'iu-rounded',
+    });
   });
 
   it('rejects a CASH amount above remaining owed so a client cannot choose an arbitrary collection', async () => {

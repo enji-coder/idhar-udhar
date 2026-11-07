@@ -41,6 +41,28 @@ export const HISTORICAL_APPLIED_WITHOUT_BYTES = Object.freeze({
     '87731dfe7527925d9c98a92baef24abd9788a849e19d931e8515c896f3a082ba',
 });
 
+/**
+ * Present in the repository but not launched. apply-missing must not select
+ * these files. They are not marked applied.
+ */
+export const DEFERRED_MIGRATIONS = Object.freeze({
+  '0038_rider_online_sessions.sql':
+    'Rider Online Time is not launched',
+});
+
+export function withoutDeferredMigrations(plan) {
+  const deferred = [];
+  const apply = [];
+  for (const item of plan.apply) {
+    if (DEFERRED_MIGRATIONS[item.filename]) {
+      deferred.push(item);
+    } else {
+      apply.push(item);
+    }
+  }
+  return { skip: plan.skip, apply, deferred };
+}
+
 export function migrationVersion(filename) {
   const match = FILENAME_PATTERN.exec(filename);
   return match ? match[1] : null;
@@ -377,12 +399,17 @@ export async function runMigrations({ dryRun }) {
         process.stdout.write(`SKIP already applied without local file: ${version}.sql\n`);
       }
     }
-    const plan = planMigrations(
-      filenames,
-      applied.map((row) => row.version),
+    const plan = withoutDeferredMigrations(
+      planMigrations(
+        filenames,
+        applied.map((row) => row.version),
+      ),
     );
     for (const item of plan.skip) {
       process.stdout.write(`SKIP already applied: ${item.filename}\n`);
+    }
+    for (const item of plan.deferred) {
+      process.stdout.write(`DEFER ${item.filename}\n`);
     }
     for (const item of plan.apply) {
       if (dryRun) {
@@ -394,7 +421,7 @@ export async function runMigrations({ dryRun }) {
       process.stdout.write(`  OK ${item.version}\n`);
     }
     if (dryRun) {
-      process.stdout.write(`Dry run: ${plan.apply.length} missing, ${plan.skip.length} already applied.\n`);
+      process.stdout.write(`Dry run: ${plan.apply.length} missing, ${plan.deferred.length} deferred, ${plan.skip.length} already applied.\n`);
     } else {
       process.stdout.write('All migrations applied.\n');
     }

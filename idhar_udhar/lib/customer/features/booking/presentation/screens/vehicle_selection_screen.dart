@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category.dart';
 import 'package:idhar_udhar/shared/vehicle_category/vehicle_category_catalog.dart';
 import '../../../../core/constants/app_copy.dart';
@@ -292,7 +293,7 @@ class VehicleSelectionScreen extends ConsumerWidget {
                                       farePreview.valueOrNull?[v.id];
                               final String priceLabel;
                               if (serverFare != null && serverFare.isNotEmpty) {
-                                priceLabel = '₹$serverFare';
+                                priceLabel = formatCustomerPayableText(serverFare);
                               } else if (!draft.hasFareCoordinates &&
                                   !draft.hasInvalidFareCoordinate) {
                                 priceLabel =

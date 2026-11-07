@@ -616,7 +616,7 @@ void main() {
     expect(find.text('Asha'), findsOneWidget);
     expect(find.text('9876543210'), findsOneWidget);
     expect(find.text('Trip Fare'), findsOneWidget);
-    expect(find.text(formatInr(160)), findsWidgets);
+    expect(find.text(formatCustomerPayable(160)), findsWidgets);
     expect(find.text('₹150'), findsNothing);
     expect(find.text('Estimated Fare'), findsNothing);
     expect(find.textContaining('Fare - calculated'), findsNothing);

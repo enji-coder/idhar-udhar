@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Location — used for nearby riders / pickup points (when-in-use). -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -48,5 +49,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Cashfree's own theme is translucent, so Flutter keeps drawing the
+             booking screen under every checkout page. An opaque window pauses
+             that activity. The WebView itself is unchanged. -->
+        <activity
+            android:name="com.cashfree.pg.core.api.ui.CashfreeWebCheckoutActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTop"
+            android:theme="@style/CashfreeCheckoutOpaque"
+            android:windowSoftInputMode="adjustResize"
+            tools:replace="android:theme" />
     </application>
 </manifest>

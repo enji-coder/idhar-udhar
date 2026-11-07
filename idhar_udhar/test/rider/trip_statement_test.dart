@@ -9,7 +9,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: RiderTripStatement(
+          body: SingleChildScrollView(
+            child: RiderTripStatement(
             crn: 'IU-CRN-AHM-0000000001',
             tripAt: DateTime.utc(2026, 11, 6, 4, 30),
             pickupAddress: 'Pickup lane',
@@ -23,6 +24,7 @@ void main() {
             walletCredited: 0,
             codApplied: 0,
             walletCompanyDebit: 18.60,
+            ),
           ),
         ),
       ),
@@ -34,10 +36,11 @@ void main() {
     expect(find.text('₹18.60'), findsWidgets);
     expect(find.text('+₹124.00'), findsOneWidget);
     expect(find.text('-₹18.60'), findsOneWidget);
-    expect(find.text('WALLET'), findsOneWidget);
-    expect(find.text('SETTLED'), findsOneWidget);
+    expect(find.text('Wallet'), findsOneWidget);
+    expect(find.text('Settled'), findsOneWidget);
     expect(find.text('Cash kept by you'), findsOneWidget);
-    expect(find.text('WALLET CREDIT'), findsNothing);
+    expect(find.text('Wallet Credit'), findsNothing);
+    expect(find.text('Cash Collected'), findsOneWidget);
   });
 
   testWidgets('online trip statement shows a pending wallet credit', (
@@ -46,7 +49,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: RiderTripStatement(
+          body: SingleChildScrollView(
+            child: RiderTripStatement(
             crn: 'IU-CRN-AHM-0000000002',
             tripAt: DateTime.utc(2026, 11, 6, 5, 0),
             pickupAddress: 'Pickup lane',
@@ -59,14 +63,16 @@ void main() {
             cashCollected: 0,
             walletCredited: 0,
             codApplied: 0,
+            ),
           ),
         ),
       ),
     );
 
     expect(find.text('Pending online payment'), findsWidgets);
-    expect(find.text('PENDING'), findsOneWidget);
-    expect(find.text('CASH COLLECTED'), findsNothing);
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.text('Cash Collected'), findsNothing);
+    expect(find.text('Applied To COD Due'), findsOneWidget);
     expect(find.text('₹105.40'), findsWidgets);
   });
 }

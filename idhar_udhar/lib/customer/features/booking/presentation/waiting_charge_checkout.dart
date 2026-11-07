@@ -7,6 +7,7 @@ import 'package:flutter_cashfree_pg_sdk/api/cfsession/cfsession.dart';
 import 'package:flutter_cashfree_pg_sdk/utils/cfenums.dart';
 import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
+import 'package:idhar_udhar/shared/payments/cashfree_checkout_trace.dart';
 
 /// Opens the existing Cashfree checkout for a server-created receivable session.
 ///
@@ -70,15 +71,26 @@ Future<void> openCashfreeWebCheckout({
   final CFWebCheckoutPayment payment =
       CFWebCheckoutPaymentBuilder().setSession(cfSession).build();
   final Completer<void> done = Completer<void>();
+  final Stopwatch checkout = Stopwatch()..start();
   final CFPaymentGatewayService gateway = CFPaymentGatewayService();
   gateway.setCallback(
     (String _) {
       if (!done.isCompleted) {
+        traceCashfreeCheckout(
+          'native_checkout_returned',
+          elapsedMs: checkout.elapsedMilliseconds,
+          result: 'callback',
+        );
         done.complete();
       }
     },
     (CFErrorResponse error, String _) {
       if (!done.isCompleted) {
+        traceCashfreeCheckout(
+          'native_checkout_returned',
+          elapsedMs: checkout.elapsedMilliseconds,
+          result: 'rejected',
+        );
         done.completeError(
           ApiException(
             code: 'PAYMENT_GATEWAY_REJECTED',
@@ -88,6 +100,7 @@ Future<void> openCashfreeWebCheckout({
       }
     },
   );
+  traceCashfreeCheckout('native_checkout_invoke');
   gateway.doPayment(payment);
   return done.future;
 }

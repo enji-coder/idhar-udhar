@@ -559,7 +559,7 @@ class _RecentDeliveryRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               Text(
-                '${order.id} · ${formatInr(order.fare)}',
+                '${order.id} · ${formatCustomerPayable(order.fare)}',
                 style: AppTextStyles.caption.copyWith(
                   color: AppColors.textSecondary,
                 ),

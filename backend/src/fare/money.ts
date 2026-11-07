@@ -50,3 +50,63 @@ export function assertPositiveInr(raw: string): string {
   }
   return formatted;
 }
+
+function inrToPaise(formatted: string): number {
+  const negative = formatted.startsWith('-');
+  const [whole, frac] = (negative ? formatted.slice(1) : formatted).split('.');
+  const paise = Number(whole) * 100 + Number(frac);
+  if (!Number.isSafeInteger(paise)) {
+    throw new Error('INR amount is out of range');
+  }
+  return negative ? -paise : paise;
+}
+
+function paiseToInr(paise: number): string {
+  if (!Number.isSafeInteger(paise)) {
+    throw new Error('INR amount is out of range');
+  }
+  const negative = paise < 0;
+  const abs = Math.abs(paise);
+  const whole = Math.floor(abs / 100);
+  const frac = String(abs % 100).padStart(2, '0');
+  return negative ? `-${whole}.${frac}` : `${whole}.${frac}`;
+}
+
+/**
+ * Customer bill for a trip fare. Half-up to the nearest rupee.
+ * Matches PostgreSQL ROUND(trip_fare, 0). The difference is the rounding
+ * column. It is not added to the rider or company share.
+ */
+export function customerPayableInr(tripFare: string): {
+  netPayable: string;
+  rounding: string;
+} {
+  const formatted = formatInr(tripFare);
+  if (formatted.startsWith('-')) {
+    throw new Error('trip fare cannot be negative');
+  }
+  const paise = inrToPaise(formatted);
+  const remainder = paise % 100;
+  const payablePaise = (Math.floor(paise / 100) + (remainder >= 50 ? 1 : 0)) * 100;
+  return {
+    netPayable: paiseToInr(payablePaise),
+    rounding: paiseToInr(payablePaise - paise),
+  };
+}
+
+/**
+ * Matches PostgreSQL ROUND(amount * percentage / 100, 2) for an integer
+ * percentage. The fare SQL applies this to trip_fare, not net_payable.
+ */
+export function percentageShareInr(amount: string, percentage: number): string {
+  if (!Number.isInteger(percentage) || percentage < 0 || percentage > 100) {
+    throw new Error('percentage must be an integer from 0 to 100');
+  }
+  const paise = inrToPaise(formatInr(amount));
+  const negative = paise < 0;
+  const product = Math.abs(paise) * percentage;
+  const quotient = Math.floor(product / 100);
+  const remainder = product % 100;
+  const rounded = remainder >= 50 ? quotient + 1 : quotient;
+  return paiseToInr(negative ? -rounded : rounded);
+}

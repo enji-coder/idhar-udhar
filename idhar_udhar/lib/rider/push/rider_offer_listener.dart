@@ -432,11 +432,23 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
 
     }
 
+    final bool offersLoaded;
+
     try {
 
-      await ref.read(riderSessionProvider.notifier).refreshOffers();
+      offersLoaded =
+
+          await ref.read(riderSessionProvider.notifier).refreshOffers();
 
     } catch (_) {
+
+      riderOfferLog('present_blocked', offerId: offerId, reason: 'refresh_offers_failed');
+
+      return;
+
+    }
+
+    if (!offersLoaded) {
 
       riderOfferLog('present_blocked', offerId: offerId, reason: 'refresh_offers_failed');
 
@@ -459,6 +471,36 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
         : riderOfferById(offers, offerId);
 
     if (offer == null) {
+
+      final RiderOffer? live = _pendingOffer(offers);
+
+      if (live != null) {
+
+        _targetedOfferId = null;
+
+        riderOfferLog(
+
+          'present_live_offer',
+
+          offerId: live.offerId,
+
+          reason: 'targeted_id_absent',
+
+        );
+
+        if (!fromNotification && _appInForeground()) {
+
+          await _presentForegroundDialog(live);
+
+          return;
+
+        }
+
+        await _pushIncomingScreen(live.offerId, force: true);
+
+        return;
+
+      }
 
       if ((offerId ?? '').trim().isNotEmpty && attempt < _maxOfferFetchAttempts) {
 
@@ -583,6 +625,8 @@ class _RiderOfferListenerState extends ConsumerState<RiderOfferListener>
     }
 
     _presented.add(offerId);
+
+    riderOfferLaunchOfferId = offerId;
 
     riderOfferLog('incoming_screen_opening', offerId: offerId);
 

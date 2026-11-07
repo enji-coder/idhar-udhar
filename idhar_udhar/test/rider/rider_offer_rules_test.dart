@@ -30,6 +30,70 @@ void main() {
     ];
     expect(riderOfferById(offers, 'offer-b')?.offerId, 'offer-b');
     expect(riderOfferById(offers, 'missing'), isNull);
+    final DateTime now = DateTime.utc(2026, 11, 7, 10);
+    expect(
+      chooseIncomingOffer(
+        offers: offers,
+        targetId: 'offer-b',
+        listLoaded: true,
+        now: now,
+      ).offer?.offerId,
+      'offer-b',
+    );
+  });
+
+  test('a missing target does not hide a still-pending offer', () {
+    final DateTime now = DateTime.utc(2026, 11, 7, 10);
+    final IncomingOfferChoice live = chooseIncomingOffer(
+      offers: <RiderOffer>[_offer('offer-live')],
+      targetId: 'stale-offer',
+      listLoaded: true,
+      now: now,
+    );
+    expect(live.offer?.offerId, 'offer-live');
+    expect(live.unavailable, isFalse);
+    expect(live.loadFailed, isFalse);
+  });
+
+  test('a listed offer that is no longer pending stays unavailable', () {
+    final DateTime now = DateTime.utc(2026, 11, 7, 10);
+    final IncomingOfferChoice gone = chooseIncomingOffer(
+      offers: <RiderOffer>[_offer('offer-a', status: 'ACCEPTED')],
+      targetId: 'offer-a',
+      listLoaded: true,
+      now: now,
+    );
+    expect(gone.offer, isNull);
+    expect(gone.unavailable, isTrue);
+  });
+
+  test('an expired pending offer is not opened as a live request', () {
+    final DateTime now = DateTime.utc(2026, 11, 7, 10);
+    final IncomingOfferChoice expired = chooseIncomingOffer(
+      offers: <RiderOffer>[
+        _offer(
+          'offer-old',
+          expiresAt: now.subtract(const Duration(seconds: 1)),
+        ),
+      ],
+      targetId: 'missing',
+      listLoaded: true,
+      now: now,
+    );
+    expect(expired.offer, isNull);
+    expect(expired.unavailable, isTrue);
+  });
+
+  test('a failed offer list is not treated as confirmed expiry', () {
+    final IncomingOfferChoice failed = chooseIncomingOffer(
+      offers: <RiderOffer>[_offer('stale-cache')],
+      targetId: 'new-offer',
+      listLoaded: false,
+      now: DateTime.utc(2026, 11, 7, 10),
+    );
+    expect(failed.loadFailed, isTrue);
+    expect(failed.unavailable, isFalse);
+    expect(failed.offer, isNull);
   });
 
   test('notification timeout uses remaining time until expires_at', () {
@@ -192,7 +256,7 @@ void main() {
         'estimated_duration_seconds': '156',
         'trip_fare': '500',
       }),
-      'Pickup: CG Road\nDrop: Navrangpura\nDistance: 1.3 km\nTime: 3 min\nTrip fare: ₹500',
+      'Pickup: CG Road\nDrop: Navrangpura\nDistance: 1.3 km\nTime: 3 min\nTrip fare: ₹500.00',
     );
     expect(
       riderOfferNotificationBody(<String, String>{
@@ -272,16 +336,19 @@ RiderOffer _offer(
   double? tripFare,
   double? distanceKm,
   int? estimatedDurationSeconds,
+  String status = 'PENDING',
+  DateTime? expiresAt,
 }) {
   return RiderOffer(
     offerId: offerId,
     orderId: '55555555-5555-4555-8555-555555555555',
-    status: 'PENDING',
+    status: status,
     createdAt: DateTime.utc(2026, 10, 9),
     displayId: 'IU-1',
     tripFare: tripFare,
     distanceKm: distanceKm,
     estimatedDurationSeconds: estimatedDurationSeconds,
+    expiresAt: expiresAt,
     pickupAddress: 'Pickup lane',
     dropAddress: 'Drop lane',
   );

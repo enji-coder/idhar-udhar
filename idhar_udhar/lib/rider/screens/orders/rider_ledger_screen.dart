@@ -13,8 +13,8 @@ import '../../routing/rider_routes.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
-import '../../widgets/rider_glass_card.dart';
 import '../../widgets/rider_scaffold.dart';
+import 'rider_trip_statement.dart';
 
 final riderLedgerTripsProvider = FutureProvider<List<RiderEarningRow>>((ref) {
   return ref.read(walletApiProvider).earnings();
@@ -40,27 +40,24 @@ class RiderLedgerScreen extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (!showAppBar)
-          Material(
-            color: RiderColors.textPrimary,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                RiderSpacing.screenH,
-                RiderSpacing.md,
-                RiderSpacing.screenH,
-                RiderSpacing.md,
-              ),
-              child: Text(
-                'Ledger Board',
-                style: RiderTextStyles.heading.copyWith(color: Colors.white),
-              ),
-            ),
-          ),
+        if (!showAppBar) const _LedgerTitle(),
         Expanded(
           child: RiderScaffold(
+            padding: EdgeInsets.zero,
             appBar: showAppBar
                 ? AppBar(
-                    title: const Text('Ledger Board'),
+                    backgroundColor: RiderColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    centerTitle: true,
+                    title: Text(
+                      'Ledger Board',
+                      style: RiderTextStyles.title.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     leading: IconButton(
                       icon: const Icon(Icons.arrow_back_rounded),
                       tooltip: 'Back',
@@ -69,84 +66,125 @@ class RiderLedgerScreen extends ConsumerWidget {
                   )
                 : null,
             body: ledger.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (Object error, StackTrace stackTrace) => _LedgerMessage(
-          title: 'Ledger could not be loaded',
-          body: error is ApiException
-              ? error.message
-              : 'Check the connection and try again.',
-          onRetry: () {
-            ref.invalidate(riderWalletLedgerProvider);
-            ref.invalidate(riderLedgerTripsProvider);
-          },
-        ),
-        data: (List<RiderWalletLedgerEntry> entries) {
-          final List<RiderEarningRow> tripRows =
-              trips.value ?? const <RiderEarningRow>[];
-          if (entries.isEmpty && tripRows.isEmpty && trips.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (entries.isEmpty && tripRows.isEmpty) {
-            return const _LedgerMessage(
-              title: 'No ledger entries yet',
-              body: 'Trip earnings and wallet credits will appear here.',
-            );
-          }
-          return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(riderWalletLedgerProvider);
-              ref.invalidate(riderLedgerTripsProvider);
-              await ref.read(riderWalletLedgerProvider.future);
-              await ref.read(riderLedgerTripsProvider.future);
-            },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                if (tripRows.isNotEmpty) ...[
-                  Text('Trips', style: RiderTextStyles.bodyMedium),
-                  const SizedBox(height: RiderSpacing.sm),
-                  for (final RiderEarningRow trip in tripRows.reversed)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: RiderSpacing.md),
-                      child: _TripRow(
-                        trip: trip,
-                        onTap: () => context.push(
-                          '${RiderRoutes.pastOrder}?id=${trip.orderId}',
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (Object error, StackTrace stackTrace) => _LedgerMessage(
+                title: 'Ledger could not be loaded',
+                body: error is ApiException
+                    ? error.message
+                    : 'Check the connection and try again.',
+                onRetry: () {
+                  ref.invalidate(riderWalletLedgerProvider);
+                  ref.invalidate(riderLedgerTripsProvider);
+                },
+              ),
+              data: (List<RiderWalletLedgerEntry> entries) {
+                final List<RiderEarningRow> tripRows =
+                    trips.value ?? const <RiderEarningRow>[];
+                if (entries.isEmpty && tripRows.isEmpty && trips.isLoading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (entries.isEmpty && tripRows.isEmpty) {
+                  return const _LedgerMessage(
+                    title: 'No ledger entries yet',
+                    body: 'Trip earnings and wallet credits will appear here.',
+                  );
+                }
+                final double received = entries
+                    .where((RiderWalletLedgerEntry entry) => entry.isCredit)
+                    .fold<double>(0, (double sum, RiderWalletLedgerEntry entry) {
+                  return sum + entry.amount;
+                });
+                final double paidOut = entries
+                    .where((RiderWalletLedgerEntry entry) => !entry.isCredit)
+                    .fold<double>(0, (double sum, RiderWalletLedgerEntry entry) {
+                  return sum + entry.amount;
+                });
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    ref.invalidate(riderWalletLedgerProvider);
+                    ref.invalidate(riderLedgerTripsProvider);
+                    await ref.read(riderWalletLedgerProvider.future);
+                    await ref.read(riderLedgerTripsProvider.future);
+                  },
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    children: [
+                      if (entries.isNotEmpty)
+                        RiderStatementCard(
+                          icon: Icons.account_balance_rounded,
+                          title: 'Ledger',
+                          child: Column(
+                            children: [
+                              RiderStatementRow(
+                                icon: Icons.south_west_rounded,
+                                label: 'Received',
+                                value: formatInr(received),
+                                valueColor: RiderColors.success,
+                                emphasize: true,
+                              ),
+                              RiderStatementRow(
+                                icon: Icons.north_east_rounded,
+                                label: 'Paid out',
+                                value: formatInr(paidOut),
+                                valueColor: RiderColors.error,
+                                emphasize: true,
+                              ),
+                            ],
+                          ),
                         ),
+                      if (tripRows.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        RiderStatementCard(
+                          icon: Icons.receipt_long_rounded,
+                          title: 'Trips',
+                          child: Column(
+                            children: [
+                              for (final RiderEarningRow trip
+                                  in tripRows.reversed)
+                                _TripRow(
+                                  trip: trip,
+                                  onTap: () => context.push(
+                                    '${RiderRoutes.pastOrder}?id=${trip.orderId}',
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      RiderStatementCard(
+                        icon: Icons.account_balance_wallet_outlined,
+                        title: 'Wallet',
+                        child: entries.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text('No wallet credits or debits yet.'),
+                              )
+                            : Column(
+                                children: [
+                                  for (final RiderWalletLedgerEntry entry
+                                      in entries)
+                                    _WalletRow(
+                                      entry: entry,
+                                      dateFormat: dateFormat,
+                                      timeFormat: timeFormat,
+                                      onTap: () => _showEntry(
+                                        context,
+                                        entry,
+                                        entry.createdAt?.toLocal() == null
+                                            ? ''
+                                            : '${dateFormat.format(entry.createdAt!.toLocal())} · ${timeFormat.format(entry.createdAt!.toLocal())}',
+                                      ),
+                                    ),
+                                ],
+                              ),
                       ),
-                    ),
-                  const SizedBox(height: RiderSpacing.sm),
-                  Text('Wallet', style: RiderTextStyles.bodyMedium),
-                  const SizedBox(height: RiderSpacing.sm),
-                ],
-                if (entries.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: RiderSpacing.md),
-                    child: Text('No wallet credits or debits yet.'),
+                    ],
                   ),
-                for (var index = 0; index < entries.length; index++)
-                  Padding(
-                    padding: EdgeInsets.only(
-                      bottom: index == entries.length - 1 ? 0 : RiderSpacing.md,
-                    ),
-                    child: _WalletRow(
-                      entry: entries[index],
-                      dateFormat: dateFormat,
-                      timeFormat: timeFormat,
-                      onTap: () => _showEntry(
-                        context,
-                        entries[index],
-                        entries[index].createdAt?.toLocal() == null
-                            ? ''
-                            : '${dateFormat.format(entries[index].createdAt!.toLocal())} · ${timeFormat.format(entries[index].createdAt!.toLocal())}',
-                      ),
-                    ),
-                  ),
-              ],
+                );
+              },
             ),
-          );
-        },
-      ),
           ),
         ),
       ],
@@ -220,6 +258,24 @@ class RiderLedgerScreen extends ConsumerWidget {
   }
 }
 
+class _LedgerTitle extends StatelessWidget {
+  const _LedgerTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: RiderColors.primary,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Text(
+          'Ledger Board',
+          style: RiderTextStyles.heading.copyWith(color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
 class _TripRow extends StatelessWidget {
   const _TripRow({required this.trip, required this.onTap});
 
@@ -231,36 +287,47 @@ class _TripRow extends StatelessWidget {
     final String title =
         trip.displayId.trim().isEmpty ? trip.orderId : trip.displayId.trim();
     final String? outcome = earningSettlementLabel(trip.settlementStatus);
-    return RiderGlassCard(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: RiderRadius.xlAll,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 64),
-          child: Row(
-            children: [
-              const Icon(Icons.receipt_long_rounded, color: RiderColors.primary),
-              const SizedBox(width: RiderSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: RiderTextStyles.bodyMedium),
-                    Text(
-                      outcome ?? 'Earning',
-                      style: RiderTextStyles.caption,
-                    ),
-                  ],
-                ),
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: RiderColors.primary.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
               ),
-              Text(
-                formatInr(trip.riderAmount),
-                style: RiderTextStyles.bodyMedium.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+              child: const Icon(
+                Icons.receipt_long_rounded,
+                size: 15,
+                color: RiderColors.primary,
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: RiderTextStyles.bodyMedium),
+                  Text(
+                    outcome ?? 'Earning',
+                    style: RiderTextStyles.caption,
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              formatInr(trip.riderAmount),
+              style: RiderTextStyles.bodyMedium.copyWith(
+                color: RiderColors.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: RiderColors.hint),
+          ],
         ),
       ),
     );
@@ -286,47 +353,53 @@ class _WalletRow extends StatelessWidget {
     final String when = created == null
         ? ''
         : '${dateFormat.format(created)} · ${timeFormat.format(created)}';
-    return RiderGlassCard(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: RiderRadius.xlAll,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 64),
-          child: Row(
-            children: [
-              Icon(
-                entry.isCredit
-                    ? Icons.south_west_rounded
-                    : Icons.north_east_rounded,
-                color: entry.isCredit ? RiderColors.success : RiderColors.error,
+    final bool credit = entry.isCredit;
+    final Color tone = credit ? RiderColors.success : RiderColors.error;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
               ),
-              const SizedBox(width: RiderSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      ledgerEntryTitle(entry.entryType),
-                      style: RiderTextStyles.bodyMedium,
-                    ),
-                    Text(
-                      when.isEmpty
-                          ? (entry.isCredit ? 'Credit' : 'Debit')
-                          : '$when · ${entry.isCredit ? 'Credit' : 'Debit'}',
-                      style: RiderTextStyles.caption,
-                    ),
-                  ],
-                ),
+              child: Icon(
+                credit ? Icons.south_west_rounded : Icons.north_east_rounded,
+                size: 15,
+                color: tone,
               ),
-              Text(
-                formatInr(entry.amount),
-                style: RiderTextStyles.bodyMedium.copyWith(
-                  color: entry.isCredit ? RiderColors.success : RiderColors.error,
-                  fontWeight: FontWeight.w700,
-                ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    ledgerEntryTitle(entry.entryType),
+                    style: RiderTextStyles.bodyMedium,
+                  ),
+                  Text(
+                    when.isEmpty
+                        ? (credit ? 'Credit' : 'Debit')
+                        : '$when · ${credit ? 'Credit' : 'Debit'}',
+                    style: RiderTextStyles.caption,
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            Text(
+              formatInr(entry.amount),
+              style: RiderTextStyles.bodyMedium.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -6,14 +6,14 @@ import 'package:idhar_udhar/shared/api/api_exception.dart';
 import 'package:idhar_udhar/shared/api/api_providers.dart';
 import 'package:idhar_udhar/shared/api/orders_api.dart';
 import 'package:idhar_udhar/shared/api/wallet_api.dart';
-import 'package:intl/intl.dart';
+import 'package:idhar_udhar/shared/format/inr_format.dart';
 
 import '../../features/orders/rider_order_board.dart';
-import 'rider_trip_statement.dart';
 import '../../theme/rider_colors.dart';
 import '../../theme/rider_spacing.dart';
 import '../../theme/rider_text_styles.dart';
 import '../../widgets/rider_scaffold.dart';
+import 'rider_trip_statement.dart';
 
 class _PastTrip {
   const _PastTrip({
@@ -108,13 +108,17 @@ class _RiderPastOrderScreenState extends ConsumerState<RiderPastOrderScreen> {
     return RiderScaffold(
       padding: EdgeInsets.zero,
       appBar: AppBar(
-        backgroundColor: RiderColors.background,
-        foregroundColor: RiderColors.textPrimary,
+        backgroundColor: RiderColors.primary,
+        foregroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 0,
+        centerTitle: true,
         title: Text(
           'Order Details',
-          style: RiderTextStyles.title.copyWith(fontWeight: FontWeight.w700),
+          style: RiderTextStyles.title.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -168,14 +172,10 @@ class _PastBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ApiOrder order = trip.order;
-    final NumberFormat currency = NumberFormat.currency(
-      locale: 'en_IN',
-      symbol: '₹',
-      decimalDigits: 2,
-    );
-    final DateFormat stamp = DateFormat('d MMM yyyy · h:mm a');
     final String status = historyStatusLabel(order.canonicalStatus);
     final bool cancelled = order.canonicalStatus == 'CANCELLED';
+    final bool finished = order.canonicalStatus == 'DELIVERED' ||
+        order.canonicalStatus == 'RESEND_COMPLETED';
     final String display = order.displayId.trim().isEmpty
         ? order.orderId
         : order.displayId.trim();
@@ -183,136 +183,8 @@ class _PastBody extends StatelessWidget {
     final ApiStop? drop = _stop(order, 'DROP');
     final String pickupAddress = _text(order.pickupAddress, pickup?.addressText);
     final String dropAddress = _text(order.dropAddress, drop?.addressText);
-    final bool finished = order.canonicalStatus == 'DELIVERED' ||
-        order.canonicalStatus == 'RESEND_COMPLETED';
+    final RiderEarningRow? earning = trip.earning;
     final String vehicle = (order.vehicleCategoryName ?? '').trim();
-    final bool hasTripFacts = order.distanceKm != null ||
-        order.packageWeightKg != null ||
-        vehicle.isNotEmpty ||
-        order.waitingAmount != null ||
-        ((order.crn ?? '').trim().isNotEmpty);
-    final bool hasPayment = trip.paymentLabel != null ||
-        trip.riderAmount != null ||
-        trip.customerBill != null;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      children: [
-        _HeaderCard(
-          display: display,
-          status: status,
-          cancelled: cancelled,
-          finished: finished,
-          when: stamp.format(order.createdAt.toLocal()),
-          updated: order.updatedAt == null
-              ? null
-              : stamp.format(order.updatedAt!.toLocal()),
-          fare: trip.tripFare == null ? null : currency.format(trip.tripFare),
-        ),
-        const SizedBox(height: 8),
-        _RouteCard(
-          pickupName: _text(pickup?.contactName, order.customerName),
-          pickupAddress: pickupAddress,
-          pickupPhone: _text(pickup?.contactPhone, order.customerPhone),
-          dropName: _text(drop?.contactName, null),
-          dropAddress: dropAddress,
-          dropPhone: _text(drop?.contactPhone, null),
-        ),
-        if (hasTripFacts) ...[
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Trip',
-            children: [
-              if ((order.crn ?? '').trim().isNotEmpty)
-                _CrnLine(value: order.crn!.trim()),
-              if (vehicle.isNotEmpty) _Line(label: 'Vehicle', value: vehicle),
-              if (order.distanceKm != null)
-                _Line(
-                  label: 'Distance',
-                  value: '${order.distanceKm!.toStringAsFixed(1)} km',
-                ),
-              if (order.packageWeightKg != null)
-                _Line(
-                  label: 'Package weight',
-                  value: '${order.packageWeightKg} kg',
-                ),
-              if (order.waitingAmount != null)
-                _Line(
-                  label: 'Waiting charge',
-                  value: currency.format(order.waitingAmount),
-                ),
-            ],
-          ),
-        ],
-        if (trip.earning != null) ...[
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Trip statement',
-            children: [
-              RiderTripStatement(
-                crn: order.crn,
-                tripAt: order.createdAt,
-                pickupAt: pickup?.arrivedAt ?? pickup?.completedAt,
-                pickupAddress: pickupAddress,
-                deliveredAt: drop?.completedAt ?? drop?.arrivedAt,
-                dropAddress: dropAddress,
-                tripFare: trip.earning!.tripFare,
-                riderAmount: trip.earning!.riderAmount,
-                companyAmount: trip.earning!.companyAmount,
-                settlementStatus: trip.earning!.settlementStatus,
-                settlementState: trip.earning!.settlementState,
-                cashCollected: trip.earning!.cashCollected,
-                walletCredited: trip.earning!.walletCredited,
-                codApplied: trip.earning!.codApplied,
-                walletCompanyDebit: trip.earning!.walletCompanyDebit,
-              ),
-            ],
-          ),
-        ] else if (hasPayment) ...[
-          const SizedBox(height: 8),
-          _Panel(
-            title: 'Payment',
-            children: [
-              if (trip.paymentLabel != null)
-                _Line(label: 'Payment Type', value: trip.paymentLabel!),
-              if (trip.riderAmount != null)
-                _Line(
-                  label: 'Rider earning',
-                  value: currency.format(trip.riderAmount),
-                ),
-              if (trip.customerBill != null)
-                _Line(
-                  label: 'Customer bill',
-                  value: currency.format(trip.customerBill),
-                ),
-            ],
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({
-    required this.display,
-    required this.status,
-    required this.cancelled,
-    required this.finished,
-    required this.when,
-    required this.updated,
-    required this.fare,
-  });
-
-  final String display;
-  final String status;
-  final bool cancelled;
-  final bool finished;
-  final String when;
-  final String? updated;
-  final String? fare;
-
-  @override
-  Widget build(BuildContext context) {
     final Color tone = cancelled
         ? RiderColors.error
         : finished
@@ -323,337 +195,152 @@ class _HeaderCard extends StatelessWidget {
         : finished
             ? const Color(0xFFE7F8EE)
             : const Color(0xFFE7F4F7);
-    return _Panel(
-      emphasized: finished && !cancelled,
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        if (status.isNotEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: wash,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: tone.withValues(alpha: 0.28)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Order ID', style: RiderTextStyles.caption),
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          display,
-                          style: RiderTextStyles.title.copyWith(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy order id',
-                        visualDensity: VisualDensity.compact,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
-                        ),
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: display));
-                        },
-                        icon: const Icon(Icons.copy_rounded, size: 16),
-                      ),
-                    ],
+                  Icon(
+                    cancelled
+                        ? Icons.cancel_rounded
+                        : finished
+                            ? Icons.check_circle_rounded
+                            : Icons.info_rounded,
+                    size: 16,
+                    color: tone,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    status,
+                    style: RiderTextStyles.caption.copyWith(
+                      color: tone,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),
             ),
-            if (status.isNotEmpty)
-              Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: finished && !cancelled ? 4 : 3,
-                ),
-                decoration: BoxDecoration(
-                  color: wash,
-                  borderRadius: BorderRadius.circular(20),
-                  border: finished && !cancelled
-                      ? Border.all(color: tone.withValues(alpha: 0.28))
-                      : null,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (finished && !cancelled) ...[
-                      Icon(Icons.check_circle_rounded, size: 14, color: tone),
-                      const SizedBox(width: 4),
-                    ],
-                    Text(
-                      status,
-                      style: RiderTextStyles.caption.copyWith(
-                        color: tone,
+          ),
+        RiderTripStatement(
+          crn: order.crn,
+          tripAt: order.createdAt,
+          pickupAt: pickup?.arrivedAt ?? pickup?.completedAt,
+          pickupAddress: pickupAddress,
+          deliveredAt: cancelled
+              ? null
+              : drop?.completedAt ?? drop?.arrivedAt,
+          dropAddress: dropAddress,
+          cancelled: cancelled,
+          completed: finished,
+          cancelledAt: cancelled ? order.updatedAt : null,
+          tripFare: earning?.tripFare ?? trip.tripFare,
+          riderAmount: earning?.riderAmount ?? trip.riderAmount,
+          companyAmount: earning?.companyAmount,
+          hasSnapshot: earning != null,
+          paymentLabel: trip.paymentLabel,
+          customerBill: trip.customerBill,
+          settlementStatus: earning?.settlementStatus,
+          settlementState: earning?.settlementState,
+          cashCollected: earning?.cashCollected,
+          walletCredited: earning?.walletCredited,
+          codApplied: earning?.codApplied,
+          walletCompanyDebit: earning?.walletCompanyDebit,
+          extras: [
+            RiderStatementRow(
+              icon: Icons.confirmation_number_outlined,
+              label: 'Order ID',
+              trailing: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: Text(
+                      display,
+                      textAlign: TextAlign.end,
+                      style: RiderTextStyles.bodyMedium.copyWith(
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(when, style: RiderTextStyles.caption),
-                  if (updated != null)
-                    Text(
-                      'Last update $updated',
-                      style: RiderTextStyles.caption,
+                  ),
+                  IconButton(
+                    tooltip: 'Copy order id',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
                     ),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: display));
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 16),
+                  ),
                 ],
               ),
             ),
-            if (fare != null)
-              Text(
-                fare!,
-                style: RiderTextStyles.heading.copyWith(
-                  fontSize: 20,
-                  color: RiderColors.primary,
-                ),
+            if (vehicle.isNotEmpty)
+              RiderStatementRow(
+                icon: Icons.two_wheeler_rounded,
+                label: 'Vehicle',
+                value: vehicle,
+              ),
+            if (order.distanceKm != null)
+              RiderStatementRow(
+                icon: Icons.route_rounded,
+                label: 'Distance',
+                value: '${order.distanceKm!.toStringAsFixed(1)} km',
+              ),
+            if (order.packageWeightKg != null)
+              RiderStatementRow(
+                icon: Icons.inventory_2_outlined,
+                label: 'Package weight',
+                value: '${order.packageWeightKg} kg',
+              ),
+            if (order.waitingAmount != null)
+              RiderStatementRow(
+                icon: Icons.hourglass_bottom_rounded,
+                label: 'Waiting charge',
+                value: formatInr(order.waitingAmount!),
+              ),
+            if (_text(pickup?.contactName, order.customerName).isNotEmpty)
+              RiderStatementRow(
+                icon: Icons.person_outline_rounded,
+                label: 'Pickup contact',
+                value: _text(pickup?.contactName, order.customerName),
+              ),
+            if (_text(pickup?.contactPhone, order.customerPhone).isNotEmpty)
+              RiderStatementRow(
+                icon: Icons.phone_outlined,
+                label: 'Pickup phone',
+                value: _text(pickup?.contactPhone, order.customerPhone),
+              ),
+            if (_text(drop?.contactName, null).isNotEmpty)
+              RiderStatementRow(
+                icon: Icons.person_outline_rounded,
+                label: 'Delivery contact',
+                value: _text(drop?.contactName, null),
+              ),
+            if (_text(drop?.contactPhone, null).isNotEmpty)
+              RiderStatementRow(
+                icon: Icons.phone_outlined,
+                label: 'Delivery phone',
+                value: _text(drop?.contactPhone, null),
               ),
           ],
         ),
       ],
-    );
-  }
-}
-
-class _RouteCard extends StatelessWidget {
-  const _RouteCard({
-    required this.pickupName,
-    required this.pickupAddress,
-    required this.pickupPhone,
-    required this.dropName,
-    required this.dropAddress,
-    required this.dropPhone,
-  });
-
-  final String pickupName;
-  final String pickupAddress;
-  final String pickupPhone;
-  final String dropName;
-  final String dropAddress;
-  final String dropPhone;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'Route',
-      children: [
-        _StopBlock(
-          label: 'Pickup',
-          color: RiderColors.primary,
-          name: pickupName,
-          address: pickupAddress,
-          phone: pickupPhone,
-          drawTail: true,
-        ),
-        _StopBlock(
-          label: 'Drop',
-          color: const Color(0xFFE08A12),
-          name: dropName,
-          address: dropAddress,
-          phone: dropPhone,
-          drawTail: false,
-        ),
-      ],
-    );
-  }
-}
-
-class _StopBlock extends StatelessWidget {
-  const _StopBlock({
-    required this.label,
-    required this.color,
-    required this.name,
-    required this.address,
-    required this.phone,
-    required this.drawTail,
-  });
-
-  final String label;
-  final Color color;
-  final String name;
-  final String address;
-  final String phone;
-  final bool drawTail;
-
-  @override
-  Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 16,
-          child: Column(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(top: 4),
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              if (drawTail)
-                Expanded(
-                  child: Container(
-                    width: 1.5,
-                    margin: const EdgeInsets.only(top: 2, bottom: 2),
-                    color: const Color(0xFFD5E4E2),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(bottom: drawTail ? 8 : 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: RiderTextStyles.caption.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (name.isNotEmpty)
-                  Text(
-                    name,
-                    style: RiderTextStyles.bodyMedium.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                if (address.isNotEmpty)
-                  Text(
-                    address,
-                    style: RiderTextStyles.body.copyWith(fontSize: 13, height: 1.35),
-                  ),
-                if (phone.isNotEmpty)
-                  Text(phone, style: RiderTextStyles.caption),
-              ],
-            ),
-          ),
-        ),
-      ],
-      ),
-    );
-  }
-}
-
-class _Panel extends StatelessWidget {
-  const _Panel({required this.children, this.title, this.emphasized = false});
-
-  final String? title;
-  final List<Widget> children;
-  final bool emphasized;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: emphasized
-              ? RiderColors.primary.withValues(alpha: 0.35)
-              : const Color(0xFFE3EEEC),
-        ),
-        boxShadow: emphasized
-            ? const [
-                BoxShadow(
-                  color: Color(0x14148BA6),
-                  blurRadius: 12,
-                  offset: Offset(0, 4),
-                ),
-              ]
-            : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (title != null) ...[
-            Text(
-              title!,
-              style: RiderTextStyles.bodyMedium.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _CrnLine extends StatelessWidget {
-  const _CrnLine({required this.value});
-
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('CRN', style: RiderTextStyles.caption),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              value.replaceAll('', '\u200B'),
-              textAlign: TextAlign.end,
-              softWrap: true,
-              style: RiderTextStyles.bodyMedium.copyWith(fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Line extends StatelessWidget {
-  const _Line({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: Text(label, style: RiderTextStyles.caption)),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              value,
-              style: RiderTextStyles.bodyMedium.copyWith(fontSize: 13),
-              textAlign: TextAlign.end,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

@@ -244,7 +244,7 @@ class OrderDetailsScreen extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          CustomerOrderFormat.currency(current.fare),
+                          CustomerOrderFormat.payable(current.fare),
                           style: AppTextStyles.headingM.copyWith(
                             color: AppColors.navyDeep,
                           ),
@@ -463,7 +463,7 @@ class OrderDetailsScreen extends ConsumerWidget {
                 const Divider(height: AppSpacing.lg),
                 OrderFareRow(
                   label: 'Amount payable',
-                  value: CustomerOrderFormat.currency(current.fare),
+                  value: CustomerOrderFormat.payable(current.fare),
                   emphasize: true,
                 ),
                 if (serverId != null &&
@@ -503,7 +503,7 @@ class OrderDetailsScreen extends ConsumerWidget {
                 ),
                 _DetailRow(
                   'Customer due',
-                  CustomerOrderFormat.currency(
+                  CustomerOrderFormat.payable(
                     current.paymentPlan.responsibility.customerAmount,
                   ),
                 ),

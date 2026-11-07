@@ -71,6 +71,70 @@ RiderOffer? riderOfferById(List<RiderOffer> offers, String? offerId) {
   return null;
 }
 
+/// What the incoming screen should show after one offer-list response.
+class IncomingOfferChoice {
+  const IncomingOfferChoice({
+    this.offer,
+    this.unavailable = false,
+    this.loadFailed = false,
+  });
+
+  final RiderOffer? offer;
+  final bool unavailable;
+  final bool loadFailed;
+}
+
+bool _offerStillPending(RiderOffer offer, DateTime now) {
+  if (offer.status != 'PENDING') {
+    return false;
+  }
+  final DateTime? expiresAt = offer.expiresAt;
+  return expiresAt == null || expiresAt.isAfter(now);
+}
+
+RiderOffer? _firstActionableOffer(List<RiderOffer> offers, DateTime now) {
+  for (final RiderOffer candidate in offers) {
+    if (_offerStillPending(candidate, now)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/// Chooses the offer the rider can open.
+///
+/// A targeted id that is present and no longer pending stays unavailable.
+/// A targeted id that is absent does not hide a different still-pending offer.
+/// A failed list request is not treated as expiry.
+IncomingOfferChoice chooseIncomingOffer({
+  required List<RiderOffer> offers,
+  required String? targetId,
+  required bool listLoaded,
+  required DateTime now,
+}) {
+  if (!listLoaded) {
+    return const IncomingOfferChoice(loadFailed: true);
+  }
+  final String id = (targetId ?? '').trim();
+  if (id.isNotEmpty) {
+    final RiderOffer? targeted = riderOfferById(offers, id);
+    if (targeted != null) {
+      if (targeted.status != 'PENDING') {
+        return const IncomingOfferChoice(unavailable: true);
+      }
+      return IncomingOfferChoice(offer: targeted);
+    }
+  }
+  final RiderOffer? live = _firstActionableOffer(offers, now);
+  if (live != null) {
+    return IncomingOfferChoice(offer: live);
+  }
+  if (id.isNotEmpty) {
+    return const IncomingOfferChoice(unavailable: true);
+  }
+  return const IncomingOfferChoice();
+}
+
 /// Remaining time for Android `timeoutAfter`, measured at post time.
 class OfferNotificationWindow {
   const OfferNotificationWindow({required this.expired, this.timeoutAfterMs});

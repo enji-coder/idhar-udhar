@@ -198,8 +198,8 @@ export class FareRepository {
         waiting_charge_per_minute,
         trip_fare,
         0,
-        ROUND(trip_fare, 2) - trip_fare,
-        ROUND(trip_fare, 2),
+        ROUND(trip_fare, 0) - trip_fare,
+        ROUND(trip_fare, 0),
         0,
         rider_percentage,
         company_commission_percentage,
@@ -496,8 +496,8 @@ export class FareRepository {
         waiting_charge_per_minute::text AS waiting_charge_per_minute,
         trip_fare::money_inr::text AS trip_fare,
         '0.00'::text AS discount,
-        (ROUND(trip_fare, 2) - trip_fare)::money_inr::text AS rounding,
-        ROUND(trip_fare, 2)::money_inr::text AS net_payable,
+        (ROUND(trip_fare, 0) - trip_fare)::money_inr::text AS rounding,
+        ROUND(trip_fare, 0)::money_inr::text AS net_payable,
         '0.00'::text AS tax
       FROM calc
       ORDER BY vehicle_type ASC, name ASC

@@ -679,6 +679,9 @@ void main() {
               ),
             ],
           ),
+          riderLedgerTripsProvider.overrideWith(
+            (Ref ref) async => const <RiderEarningRow>[],
+          ),
         ],
       ),
     );
@@ -968,6 +971,43 @@ void main() {
     expect(find.textContaining('Pickup lane'), findsOneWidget);
     expect(find.textContaining('Drop lane'), findsOneWidget);
     expect(find.text('Delivered'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('cancelled order details do not show a delivery time', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final _BoardRiderApi api = _BoardRiderApi()
+      ..status = 'CANCELLED'
+      ..updatedAt = DateTime.utc(2026, 11, 5, 10, 20)
+      ..pickup =
+          'TOPS Technologies, 2, Chimanlal Girdharil Rd, near Parimal Cross Road, Shanti Sadan Society, Ellisbridge, Ahmedabad, Gujarat 380006, India';
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: <Override>[
+          riderApiProvider.overrideWithValue(api),
+          walletApiProvider.overrideWithValue(_QuietBoardWallet()),
+        ],
+        child: const MaterialApp(
+          home: RiderPastOrderScreen(
+            orderId: '11111111-1111-4111-8111-111111111111',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cancelled'), findsOneWidget);
+    expect(find.text('Delivered'), findsNothing);
+    expect(find.text('Delivered Time'), findsNothing);
+    expect(find.text('Cancelled Time'), findsOneWidget);
+    expect(find.textContaining('Ellisbridge'), findsOneWidget);
+    expect(find.textContaining('Reason'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 }
 
@@ -1005,13 +1045,20 @@ RiderEarningRow _earning(String id, String display) {
   );
 }
 
-ApiOrder _api(String id, String status, String display) {
+ApiOrder _api(
+  String id,
+  String status,
+  String display, {
+  DateTime? updatedAt,
+  String pickupAddress = 'Pickup lane',
+}) {
   return ApiOrder(
     orderId: id,
     displayId: display,
     canonicalStatus: status,
     createdAt: DateTime.utc(2026, 10, 2),
-    pickupAddress: 'Pickup lane',
+    updatedAt: updatedAt,
+    pickupAddress: pickupAddress,
     dropAddress: 'Drop lane',
     tripFare: 100,
     riderAmount: 80,
@@ -1055,11 +1102,20 @@ class _BoardRiderApi extends RiderApi {
   _BoardRiderApi() : super(ApiClient(tokenStore: TokenStore()));
 
   final List<String> reads = <String>[];
+  String status = 'DELIVERED';
+  DateTime? updatedAt;
+  String pickup = 'Pickup lane';
 
   @override
   Future<ApiOrder> getOrder(String orderId) async {
     reads.add(orderId);
-    return _api(orderId, 'DELIVERED', 'IU-1');
+    return _api(
+      orderId,
+      status,
+      'IU-1',
+      updatedAt: updatedAt,
+      pickupAddress: pickup,
+    );
   }
 
   @override

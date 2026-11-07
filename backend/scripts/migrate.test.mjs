@@ -13,6 +13,7 @@ import {
   planMigrations,
   PRODUCTION_FILE_CHECKSUMS,
   sha256Hex,
+  withoutDeferredMigrations,
 } from './migrate.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -241,6 +242,23 @@ test('a guessed 0028 file is refused before it can be applied', () => {
         ]),
       ),
     /Unrecovered production migration/,
+  );
+});
+
+test('0038 stays deferred and is not selected for apply', () => {
+  const plan = withoutDeferredMigrations(
+    planMigrations(
+      [
+        '0037_wallet_negative_company_share.sql',
+        '0038_rider_online_sessions.sql',
+      ],
+      ['0037_wallet_negative_company_share'],
+    ),
+  );
+  assert.deepEqual(plan.apply, []);
+  assert.deepEqual(
+    plan.deferred.map((item) => item.filename),
+    ['0038_rider_online_sessions.sql'],
   );
 });
 

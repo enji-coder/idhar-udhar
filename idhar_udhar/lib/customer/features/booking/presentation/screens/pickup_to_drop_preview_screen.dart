@@ -94,7 +94,7 @@ class PickupToDropPreviewScreen extends ConsumerWidget {
               ),
             ),
             Text(
-              formatInr(fare),
+              formatCustomerPayable(fare),
               style: AppTextStyles.headingS.copyWith(color: AppColors.orange),
             ),
           ],

@@ -188,7 +188,7 @@ class _PackageDetailsScreenState extends ConsumerState<PackageDetailsScreen> {
         : previewFare;
     final String estimatedFareLabel;
     if (estimatedFare != null) {
-      estimatedFareLabel = formatInr(estimatedFare);
+      estimatedFareLabel = formatCustomerPayable(estimatedFare);
     } else if (!draft.hasFareCoordinates && !draft.hasInvalidFareCoordinate) {
       estimatedFareLabel = 'Add pickup and drop to calculate the fare';
     } else if (farePreview.isLoading) {

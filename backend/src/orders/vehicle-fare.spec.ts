@@ -154,5 +154,26 @@ describe('customer vehicle fares', () => {
     expect(query).toContain('WHERE c.active = TRUE');
     expect(query).not.toContain('vehicle_type IS NOT NULL');
     expect(query).not.toContain('vehicle IS NOT NULL');
+    expect(query).toContain('(ROUND(trip_fare, 0) - trip_fare)::money_inr::text AS rounding');
+    expect(query).toContain('ROUND(trip_fare, 0)::money_inr::text AS net_payable');
+    expect(query).not.toContain('ROUND(trip_fare, 2) - trip_fare');
+  });
+
+  it('stores the same whole-rupee customer payable and keeps the 85/15 base on trip fare', () => {
+    const source = readFileSync(
+      join(__dirname, '../fare/fare.repository.ts'),
+      'utf8',
+    );
+    expect(source).toContain('ROUND(trip_fare, 0) - trip_fare');
+    expect(source).toContain('ROUND(trip_fare, 0),');
+    expect(source).not.toContain('ROUND(trip_fare, 2) - trip_fare');
+    const riderLines = source
+      .split('\n')
+      .filter((line) => line.includes('AS rider_amount'));
+    expect(riderLines.length).toBeGreaterThan(0);
+    for (const line of riderLines) {
+      expect(line).toContain('ROUND(trip_fare * rider_percentage / 100, 2)');
+      expect(line).not.toContain('net_payable');
+    }
   });
 });

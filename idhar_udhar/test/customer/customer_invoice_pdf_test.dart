@@ -96,4 +96,39 @@ void main() {
     expect(text.toLowerCase().contains('commission'), isFalse);
     expect(text.contains('Rider share'), isFalse);
   });
+
+  test('a whole-rupee customer payable is printed without paise', () async {
+    final File logoFile = File('assets/customer/logos/idhar_udhar_logo.png');
+    final List<int> logo = await logoFile.readAsBytes();
+    final CustomerInvoice invoice = CustomerInvoice.fromJson(<String, Object?>{
+      'invoice_number': 'INV-IU-AMD-0000000002',
+      'crn': 'IU-CRN-AMD-0000000002',
+      'status': 'ISSUED',
+      'issued_at': '2026-08-14T10:15:00.000Z',
+      'trip_completed_at': '2026-08-14T11:00:00.000Z',
+      'pickup': <String, Object?>{'address': 'Pickup lane'},
+      'drop': <String, Object?>{'address': 'Drop lane'},
+      'vehicle': <String, Object?>{'category': 'Bike'},
+      'trip_fare': '124.89',
+      'discount': '0.00',
+      'additional_charges': '0.00',
+      'subtotal': '124.89',
+      'rounding': '0.11',
+      'net_payable': '125.00',
+      'payment': <String, Object?>{
+        'status': 'PAID',
+        'customer_paid': '125.00',
+        'receiver_paid': '0.00',
+      },
+    });
+    final Uint8List bytes = await buildCustomerInvoicePdf(
+      invoice: invoice,
+      logoBytes: Uint8List.fromList(logo),
+    );
+    final String text = String.fromCharCodes(bytes);
+    expect(text, contains('[(124.89)]'));
+    expect(text, contains('[(125)]'));
+    expect(text.contains('125.00'), isFalse);
+    expect(text.contains('₹'), isFalse);
+  });
 }

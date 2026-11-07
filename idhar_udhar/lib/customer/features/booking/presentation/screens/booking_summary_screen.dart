@@ -253,7 +253,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                   Text(
                     displayedFare == null
                         ? (_quoteError ?? 'Calculating')
-                        : formatInr(displayedFare),
+                        : formatCustomerPayable(displayedFare),
                     style: AppTextStyles.headingM.copyWith(
                       color: AppColors.orange,
                     ),
@@ -302,7 +302,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                     Text(
                       displayedFare == null
                           ? '—'
-                          : formatInr(displayedFare),
+                          : formatCustomerPayable(displayedFare),
                       style: AppTextStyles.headingS.copyWith(
                         color: AppColors.orange,
                       ),
@@ -399,7 +399,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                           .setCustomerOnlineAmount(v),
                     ),
                     Text(
-                      'Customer cash ${formatInr(draft.paymentAllocation.customerCash)}',
+                      'Customer cash ${formatCustomerPayable(draft.paymentAllocation.customerCash)}',
                       style: AppTextStyles.caption.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -451,12 +451,12 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                   'Trip / Fare',
                   displayedFare == null
                       ? (_quoteError ?? 'Calculating')
-                      : formatInr(displayedFare),
+                      : formatCustomerPayable(displayedFare),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
                   'Customer',
-                  formatInr(draft.customerResponsibility),
+                  formatCustomerPayable(draft.customerResponsibility),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
@@ -471,7 +471,7 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 _row(
                   'Total',
-                  formatInr(draft.payableTotal),
+                  formatCustomerPayable(draft.payableTotal),
                 ),
                 if (draft.paymentAllocation.onlineTotal > 0)
                   Padding(
@@ -581,10 +581,10 @@ class _BookingSummaryScreenState extends ConsumerState<BookingSummaryScreen> {
   String _methodsLabel(PaymentAllocation allocation) {
     final List<String> parts = <String>[];
     if (allocation.customerOnline > 0) {
-      parts.add('Customer Online ${formatInr(allocation.customerOnline)}');
+      parts.add('Customer Online ${formatCustomerPayable(allocation.customerOnline)}');
     }
     if (allocation.customerCash > 0) {
-      parts.add('Customer Cash ${formatInr(allocation.customerCash)}');
+      parts.add('Customer Cash ${formatCustomerPayable(allocation.customerCash)}');
     }
     if (allocation.receiverOnline > 0) {
       parts.add('Receiver Online ${formatInr(allocation.receiverOnline)}');

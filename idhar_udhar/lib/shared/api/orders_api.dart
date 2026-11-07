@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../payments/cashfree_checkout_trace.dart';
 import 'api_client.dart';
 import 'api_config.dart';
 import 'api_exception.dart';
@@ -653,17 +654,32 @@ class OrdersApi {
     required String amount,
     required String idempotencyKey,
   }) async {
-    final Map<String, Object?> body = await _client.post(
-      '/v1/orders/$orderId/payment/transactions',
-      data: <String, Object?>{
-        'payer_type': payerType,
-        'method': 'ONLINE',
-        'amount': amount,
-        'direction': 'CHARGE',
-      },
-      headers: <String, String>{'Idempotency-Key': idempotencyKey},
-    );
-    return OnlineTripTransaction.fromJson(body);
+    final Stopwatch session = Stopwatch()..start();
+    try {
+      final Map<String, Object?> body = await _client.post(
+        '/v1/orders/$orderId/payment/transactions',
+        data: <String, Object?>{
+          'payer_type': payerType,
+          'method': 'ONLINE',
+          'amount': amount,
+          'direction': 'CHARGE',
+        },
+        headers: <String, String>{'Idempotency-Key': idempotencyKey},
+      );
+      traceCashfreeCheckout(
+        'payment_session_created',
+        elapsedMs: session.elapsedMilliseconds,
+        result: 'ok',
+      );
+      return OnlineTripTransaction.fromJson(body);
+    } catch (_) {
+      traceCashfreeCheckout(
+        'payment_session_created',
+        elapsedMs: session.elapsedMilliseconds,
+        result: 'error',
+      );
+      rethrow;
+    }
   }
 
   /// Reads the stored trip transaction. Does not mark it paid.

@@ -305,8 +305,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('₹160.00'), findsOneWidget);
-    expect(find.text('₹140.00'), findsOneWidget);
+    expect(find.text('₹160'), findsOneWidget);
+    expect(find.text('₹140'), findsOneWidget);
     expect(find.text('Base ₹40'), findsNothing);
     expect(find.text('Base ₹30'), findsNothing);
     expect(find.text('20 KG'), findsOneWidget);
@@ -323,7 +323,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Estimated Fare'), findsOneWidget);
-    expect(find.text(formatInr(160)), findsOneWidget);
+    expect(find.text(formatCustomerPayable(160)), findsOneWidget);
     expect(find.text('Calculating...'), findsNothing);
     expect(find.text('Unable to calculate fare'), findsNothing);
     expect(find.text('Fare calculated at summary'), findsNothing);
@@ -704,13 +704,13 @@ void main() {
       find.text('Could not calculate the route. Try again shortly.'),
       findsOneWidget,
     );
-    expect(find.text(formatInr(108)), findsNothing);
+    expect(find.text(formatCustomerPayable(108)), findsNothing);
 
     await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
 
     expect(attempts, 2);
-    expect(find.text(formatInr(108)), findsOneWidget);
+    expect(find.text(formatCustomerPayable(108)), findsOneWidget);
     expect(find.text('Unable to calculate fare'), findsNothing);
     expect(find.text('₹0.00'), findsNothing);
   });

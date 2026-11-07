@@ -20,3 +20,5 @@ flutter run --debug --flavor rider -t lib/rider/rider_main.dart --dart-define=AP
 for staging APK generation
 -------------------------------
 flutter build apk --release --flavor customer -t lib/customer/customer_main.dart --dart-define=API_BASE_URL=https://staging-api.idharudhar.co.in
+
+flutter build apk --release --dart-define=APP_ENV=staging --dart-define=API_BASE_URL=https://staging-api.idharudhar.co.in --dart-define=APP_ROLE=rider

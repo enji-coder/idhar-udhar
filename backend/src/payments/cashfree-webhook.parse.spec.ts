@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { customerPayableInr } from '../fare/money';
 import { gatewayAmountToInr } from './cashfree-amount';
 import { verifyCashfreeWebhookSignature } from './cashfree-signature';
 import {
@@ -469,5 +470,53 @@ describe('Cashfree signature and webhook parsing', () => {
     expect(gatewayAmountToInr(10)).toBe('10.00');
     expect(gatewayAmountToInr('10.5')).toBe('10.50');
     expect(gatewayAmountToInr('10.555')).toBeNull();
+  });
+
+  it('settles only the rounded customer amount and ignores a duplicate success', () => {
+    const payable = customerPayableInr('124.89');
+    expect(payable.netPayable).toBe('125.00');
+    const parsed = parseCashfreeWebhook({
+      type: 'PAYMENT_SUCCESS_WEBHOOK',
+      data: {
+        order: { order_id: 'iuorder', order_amount: 125, order_currency: 'INR' },
+        payment: { payment_status: 'SUCCESS', payment_amount: 125, payment_currency: 'INR' },
+      },
+    });
+    expect(parsed).toMatchObject({
+      kind: 'payment',
+      outcome: 'success',
+      orderAmount: '125.00',
+      paymentAmount: '125.00',
+    });
+    const amountMatches =
+      parsed.kind === 'payment' && parsed.orderAmount === payable.netPayable;
+    expect(
+      decideChargeTransition({
+        currentStatus: 'PENDING',
+        outcome: 'success',
+        amountMatches,
+      }),
+    ).toBe('apply-paid');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'PAID',
+        outcome: 'success',
+        amountMatches,
+      }),
+    ).toBe('ignore');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'PENDING',
+        outcome: 'success',
+        amountMatches: gatewayAmountToInr(124.89) === payable.netPayable,
+      }),
+    ).toBe('reject');
+    expect(
+      decideChargeTransition({
+        currentStatus: 'PENDING',
+        outcome: 'failed',
+        amountMatches,
+      }),
+    ).toBe('apply-failed');
   });
 });

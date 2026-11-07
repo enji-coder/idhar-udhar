@@ -6,6 +6,7 @@ import 'package:idhar_udhar/rider/data/dummy/dummy_rider_repository.dart';
 import 'package:idhar_udhar/rider/data/models/rider_earnings.dart';
 import 'package:idhar_udhar/rider/data/models/rider_order.dart';
 import 'package:idhar_udhar/rider/push/rider_accept_flow.dart';
+import 'package:idhar_udhar/rider/push/rider_offer_alerts.dart';
 import 'package:idhar_udhar/rider/routing/rider_routes.dart';
 import 'package:idhar_udhar/rider/screens/dashboard/rider_dashboard_screen.dart';
 import 'package:idhar_udhar/rider/screens/orders/active_delivery_screen.dart';
@@ -109,6 +110,50 @@ void main() {
     expect(api.accepts, 1);
     expect(find.text('Start Delivery'), findsOneWidget);
     expect(find.text('Order Accepted!'), findsNothing);
+  });
+
+  testWidgets('stale launch id still opens the live pending offer', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    riderOfferLaunchOfferId = 'stale-offer-id';
+    addTearDown(() => riderOfferLaunchOfferId = null);
+    final _ScriptedRiderApi api = _ScriptedRiderApi();
+    final ProviderContainer container = _container(api);
+    addTearDown(container.dispose);
+    final GoRouter router = _router(initial: RiderRoutes.incomingOrder);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(_app(container, router));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('This order request is no longer available.'), findsNothing);
+    expect(find.text('Accept'), findsOneWidget);
+  });
+
+  testWidgets('offer list failure is not shown as an unavailable request', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    riderOfferLaunchOfferId = _offerId;
+    addTearDown(() => riderOfferLaunchOfferId = null);
+    final _ScriptedRiderApi api = _ScriptedRiderApi()..failList = true;
+    final ProviderContainer container = _container(api);
+    addTearDown(container.dispose);
+    final GoRouter router = _router(initial: RiderRoutes.incomingOrder);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(_app(container, router));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Could not load offers.'), findsOneWidget);
+    expect(find.text('This order request is no longer available.'), findsNothing);
   });
 
   testWidgets('full-screen accept failure stays on the offer', (tester) async {
@@ -464,9 +509,16 @@ class _ScriptedRiderApi extends RiderApi {
   String status = 'ASSIGNED';
   bool failAccept = false;
   bool failFirstHop = false;
+  bool failList = false;
 
   @override
   Future<List<RiderOffer>> listOffers() async {
+    if (failList) {
+      throw const ApiException(
+        code: 'NETWORK',
+        message: 'Network unavailable',
+      );
+    }
     return <RiderOffer>[_offer()];
   }
 

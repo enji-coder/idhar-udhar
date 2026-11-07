@@ -68,6 +68,9 @@ abstract final class CustomerOrderFormat {
 
   static String currency(double amount) => formatInr(amount);
 
+  /// Customer bill. Whole rupees omit `.00`. Component lines stay on [currency].
+  static String payable(double amount) => formatCustomerPayable(amount);
+
   static String? contactLine(String? name, String? phone) {
     final String n = (name ?? '').trim();
     final String p = (phone ?? '').trim();
@@ -555,7 +558,7 @@ class OrderHistoryCard extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        CustomerOrderFormat.currency(order.fare),
+                        CustomerOrderFormat.payable(order.fare),
                         style: AppTextStyles.headingS.copyWith(
                           color: AppColors.navyDeep,
                         ),

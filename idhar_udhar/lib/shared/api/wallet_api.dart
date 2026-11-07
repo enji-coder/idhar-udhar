@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import '../payments/cashfree_checkout_trace.dart';
 import 'api_client.dart';
 import 'json_codec.dart';
 
@@ -235,13 +236,29 @@ class WalletApi {
 
   /// Creates a Cashfree PENDING top-up. Does not credit the wallet.
   Future<WalletTopUpSession> beginTopUp(double amount) async {
-    return WalletTopUpSession.fromJson(
-      await _client.post(
-        '/v1/rider/wallet/recharge',
-        data: <String, String>{'amount': amount.toStringAsFixed(2)},
-        headers: <String, String>{'Idempotency-Key': _uuid.v4()},
-      ),
-    );
+    final Stopwatch session = Stopwatch()..start();
+    try {
+      final WalletTopUpSession created = WalletTopUpSession.fromJson(
+        await _client.post(
+          '/v1/rider/wallet/recharge',
+          data: <String, String>{'amount': amount.toStringAsFixed(2)},
+          headers: <String, String>{'Idempotency-Key': _uuid.v4()},
+        ),
+      );
+      traceCashfreeCheckout(
+        'payment_session_created',
+        elapsedMs: session.elapsedMilliseconds,
+        result: 'ok',
+      );
+      return created;
+    } catch (_) {
+      traceCashfreeCheckout(
+        'payment_session_created',
+        elapsedMs: session.elapsedMilliseconds,
+        result: 'error',
+      );
+      rethrow;
+    }
   }
 
   /// Server-side Cashfree retrieve + settle for a rider top-up. Does not trust SDK.

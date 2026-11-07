@@ -107,7 +107,7 @@ class DeliveryCompletedScreen extends ConsumerWidget {
             child: Column(
               children: [
                 _line('Order', order?.id ?? '—'),
-                _line('Fare', order?.fare == null ? '—' : formatInr(order!.fare)),
+                _line('Fare', order?.fare == null ? '—' : formatCustomerPayable(order!.fare)),
                 _line('Vehicle', order?.vehicle.name ?? '—'),
                 _line('Rider', order?.rider?.name ?? '—'),
               ],

@@ -484,10 +484,10 @@ class MockOrder {
     final PaymentAllocation a = paymentPlan.allocation;
     final List<String> parts = <String>[];
     if (a.customerOnline > 0) {
-      parts.add('Customer Online ${formatInr(a.customerOnline)}');
+      parts.add('Customer Online ${formatCustomerPayable(a.customerOnline)}');
     }
     if (a.customerCash > 0) {
-      parts.add('Customer Cash ${formatInr(a.customerCash)}');
+      parts.add('Customer Cash ${formatCustomerPayable(a.customerCash)}');
     }
     if (a.receiverOnline > 0) {
       parts.add('Receiver Online ${formatInr(a.receiverOnline)}');

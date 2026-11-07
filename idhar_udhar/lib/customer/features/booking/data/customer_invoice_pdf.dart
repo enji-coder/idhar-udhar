@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'package:idhar_udhar/shared/format/inr_format.dart';
+
 import 'customer_invoice.dart';
 
 /// Builds the customer PDF from the stored invoice and the original logo bytes.
@@ -46,10 +48,10 @@ Future<Uint8List> buildCustomerInvoicePdf({
             pw.SizedBox(height: 16),
             pw.Text('Payment', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
             pw.Text('Status ${invoice.paymentStatus ?? 'Unavailable'}'),
-            pw.Text('Customer paid ${_inr(invoice.customerPaid)}'),
+            pw.Text('Customer paid ${_bill(invoice.customerPaid)}'),
             pw.Text('Receiver paid ${_inr(invoice.receiverPaid)}'),
-            pw.Text('Customer cash ${_inr(invoice.customerPlannedCash)}'),
-            pw.Text('Customer online ${_inr(invoice.customerPlannedOnline)}'),
+            pw.Text('Customer cash ${_bill(invoice.customerPlannedCash)}'),
+            pw.Text('Customer online ${_bill(invoice.customerPlannedOnline)}'),
             pw.Text('Receiver cash ${_inr(invoice.receiverPlannedCash)}'),
             pw.Text('Receiver online ${_inr(invoice.receiverPlannedOnline)}'),
           ],
@@ -61,7 +63,11 @@ Future<Uint8List> buildCustomerInvoicePdf({
 }
 
 pw.Widget _moneyRow(({String label, String amount}) line) {
-  final String shown = line.label == 'Discount' ? _inr(_negative(line.amount)) : _inr(line.amount);
+  final String shown = line.label == 'Net payable'
+      ? _bill(line.amount)
+      : line.label == 'Discount'
+          ? _inr(_negative(line.amount))
+          : _inr(line.amount);
   final bool total = line.label == 'Net payable';
   return pw.Padding(
     padding: const pw.EdgeInsets.only(bottom: 4),
@@ -104,6 +110,20 @@ String _negative(String amount) {
     return amount;
   }
   return '-$amount';
+}
+
+String _bill(String? amount) {
+  if (amount == null || amount.isEmpty) {
+    return 'Unavailable';
+  }
+  final String shown = formatCustomerPayableText(amount);
+  if (shown.startsWith('-₹')) {
+    return '-INR ${shown.substring(2)}';
+  }
+  if (shown.startsWith('₹')) {
+    return 'INR ${shown.substring(1)}';
+  }
+  return shown;
 }
 
 String _inr(String? amount) {

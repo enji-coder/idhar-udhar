@@ -62,14 +62,22 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
       if (!mounted) {
         return;
       }
-      if (!loaded && offers.isEmpty) {
+      final IncomingOfferChoice choice = chooseIncomingOffer(
+        offers: offers,
+        targetId: targetId,
+        listLoaded: loaded,
+        now: DateTime.now(),
+      );
+      if (choice.loadFailed) {
         setState(() {
           _loading = false;
+          _order = null;
+          _sourceOffer = null;
           _error = 'Could not load offers.';
         });
         return;
       }
-      final RiderOffer? offer = _selectOffer(offers, targetId);
+      final RiderOffer? offer = choice.offer;
       if (offer == null) {
         _dropPending(targetId);
         riderOfferLaunchOfferId = null;
@@ -78,11 +86,15 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
           _loading = false;
           _order = null;
           _sourceOffer = null;
-          _error = (targetId ?? '').trim().isEmpty
-              ? 'No incoming orders right now.'
-              : 'This order request is no longer available.';
+          _error = choice.unavailable
+              ? 'This order request is no longer available.'
+              : 'No incoming orders right now.';
         });
         return;
+      }
+      if ((targetId ?? '').trim().isNotEmpty &&
+          offer.offerId != targetId!.trim()) {
+        _dropPending(targetId);
       }
       riderOfferLaunchOfferId = null;
       riderOfferLaunchAction = null;
@@ -157,19 +169,6 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
         !_loading) {
       await _load();
     }
-  }
-
-  RiderOffer? _selectOffer(List<RiderOffer> offers, String? targetId) {
-    final String id = (targetId ?? '').trim();
-    if (id.isNotEmpty) {
-      return riderOfferById(offers, id);
-    }
-    for (final RiderOffer candidate in offers) {
-      if (candidate.status == 'PENDING') {
-        return candidate;
-      }
-    }
-    return offers.isEmpty ? null : offers.first;
   }
 
   void _dropPending(String? offerId) {
@@ -376,6 +375,28 @@ class _IncomingOrderScreenState extends ConsumerState<IncomingOrderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<RiderSessionState>(riderSessionProvider, (
+      RiderSessionState? previous,
+      RiderSessionState next,
+    ) {
+      if (_loading || _inLoad || _submitting || _applyingAction) {
+        return;
+      }
+      if (_error == null && _order != null) {
+        return;
+      }
+      final IncomingOfferChoice live = chooseIncomingOffer(
+        offers: next.offers,
+        targetId: null,
+        listLoaded: true,
+        now: DateTime.now(),
+      );
+      final String? liveId = live.offer?.offerId;
+      if (liveId == null || liveId == _sourceOffer?.offerId) {
+        return;
+      }
+      unawaited(_load());
+    });
     final bool canLeave = _expired || _order == null || _error != null;
     return PopScope(
       canPop: canLeave,
