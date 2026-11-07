@@ -651,6 +651,7 @@ export class OrdersRepository {
       SELECT rider_profile_id
       FROM order_offers
       WHERE order_id = $1
+        AND status IN ('PENDING', 'REJECTED', 'ACCEPTED')
       `,
       [orderId],
     );
@@ -693,6 +694,35 @@ export class OrdersRepository {
       [input.orderId, input.riderProfileId],
     );
     return result.rows[0];
+  }
+
+  /**
+   * The pair `(order_id, rider_profile_id)` is unique, so an expired offer
+   * cannot be inserted again. Restart that same row with a fresh TTL.
+   * Rejected and accepted rows are left unchanged.
+   */
+  async reopenExpiredOffer(
+    input: { orderId: string; riderProfileId: string },
+    db: Queryable,
+  ): Promise<OrderOfferRow | null> {
+    const result = await db.query<OrderOfferRow>(
+      `
+      UPDATE order_offers
+      SET status = 'PENDING', created_at = now(), responded_at = NULL
+      WHERE order_id = $1
+        AND rider_profile_id = $2
+        AND status = 'EXPIRED'
+      RETURNING
+        order_offer_id,
+        order_id,
+        rider_profile_id,
+        status,
+        created_at,
+        responded_at
+      `,
+      [input.orderId, input.riderProfileId],
+    );
+    return result.rows[0] ?? null;
   }
 
   async findOffer(

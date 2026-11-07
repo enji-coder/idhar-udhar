@@ -884,14 +884,21 @@ export class OrdersService {
         input.tx,
       );
     } catch (err) {
-      if (isUniqueViolation(err, 'order_offers_pair_unique')) {
+      if (!isUniqueViolation(err, 'order_offers_pair_unique')) {
+        throw err;
+      }
+      const reopened = await this.orders.reopenExpiredOffer(
+        { orderId: order.order_id, riderProfileId: input.riderProfileId },
+        input.tx,
+      );
+      if (!reopened) {
         throw new ApiError(
           ErrorCodes.OFFER_ALREADY_EXISTS,
           'This rider already has an offer for this order',
           409,
         );
       }
-      throw err;
+      offer = reopened;
     }
     let updated = order;
     if (order.canonical_status === 'SEARCHING') {
@@ -902,7 +909,7 @@ export class OrdersService {
           actor: input.actor,
           actorProfileId: input.actorProfileId,
           reason: 'offer_created',
-          eventKey: `SEARCHING->OFFERED:${offer.order_offer_id}`,
+          eventKey: `SEARCHING->OFFERED:${offer.order_offer_id}:${offer.created_at.getTime()}`,
         },
         input.tx,
       );
